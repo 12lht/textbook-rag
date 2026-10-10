@@ -649,7 +649,7 @@
       const item = document.createElement('article');
       item.className = `message ${role}`;
       const trace = role === 'assistant'
-        ? '<details class="trace" hidden><summary>查看操作过程</summary><div class="trace-list"></div></details>'
+        ? '<details class="trace" hidden><summary>模型思考</summary><div class="trace-list"></div></details>'
         : '';
       const rewindRow = role === 'user' && turn !== null
         ? '<div class="message-actions"><button type="button" class="rewind" title="删除这条消息及其之后的全部对话">回退到发送这条之前</button></div>'
