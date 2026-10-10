@@ -24,6 +24,7 @@ service 决定，这里只提供「读状态」和「跑图」。位置则是**�
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from contextlib import AsyncExitStack
@@ -625,6 +626,89 @@ async def generate_title(context: str) -> str | None:
         return None
     title = str(response.content).strip().replace("\n", " ").strip("`\"'“”‘’")
     return title or None
+
+
+# --------------------------------------------------------------------------
+# 长期记忆：抽取
+# --------------------------------------------------------------------------
+#
+# 分工说清楚：**这里只负责「用模型把一段对话提炼成事实」和「把最近的消息渲染成文本」**。
+# 存到哪、什么时候存、怎么去重，是 `memories.py` 和 `service.py` 的事——
+# 所以本模块**不 import memories**，跨层组合只写在 service。
+
+MEMORY_WINDOW = 10  # 提炼时看最近多少条消息
+MAX_MEMORY_FACTS = 8  # 单次最多产出几条，防止模型一口气吐一屏
+
+MEMORY_PROMPT = (
+    "下面是一段用户和 AI 助手的对话记录。请提炼出**值得在以后的会话里还记得**的"
+    "关于这个用户的事实。\n"
+    "值得提炼：稳定的偏好（口味、习惯、常用工具）、身份信息（职业、所在地、专业）、"
+    "长期计划与目标、明确的约束（过敏、忌口、不能做某事）。\n"
+    "不要提炼：一次性的提问、寒暄、对助手的评价、以及从对话里推不出来的猜测。\n"
+    '只输出 JSON 数组，每项形如 {"text": "不吃香菜", "kind": "偏好"}，'
+    "kind 只能是 偏好 / 身份 / 计划 / 事实 之一。\n"
+    "没有值得记的就输出 []。不要解释、不要 Markdown 代码块。\n"
+    "\n对话记录：\n"
+)
+
+
+def _parse_facts(raw: str) -> list[dict]:
+    """从模型输出里抠出 JSON 数组。抠不出来就返回空列表，不抛异常。
+
+    只做**一层**容错：剥掉可能的 ``` 包装，再从第一个 `[` 取到最后一个 `]`。
+    模型偶尔会在前后多带一句话，这样能捞回来。更花哨的修复不做——
+    与其猜，不如这次不记。
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.strip("`").strip()
+        if text[:4].lower() == "json":
+            text = text[4:]
+    start, end = text.find("["), text.rfind("]")
+    if start == -1 or end <= start:
+        return []
+    try:
+        data = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+
+    facts: list[dict] = []
+    for item in data:
+        if isinstance(item, str):
+            facts.append({"text": item})
+        elif isinstance(item, dict) and isinstance(item.get("text"), str):
+            fact = {"text": item["text"]}
+            # 没给 kind 就不要凭空补一个 None 进去——形状干净一点，
+            # 存储层那边才不用为「有键但值是 None」再多写一个分支。
+            if item.get("kind"):
+                fact["kind"] = item["kind"]
+            facts.append(fact)
+    return facts[:MAX_MEMORY_FACTS]
+
+
+async def extract_memories(transcript: str) -> list[dict]:
+    """从一段对话里提炼长期事实；失败或无可提炼时返回空列表。
+
+    返回的是**原始形状**（`{"text", "kind"}`），清洗和去重交给 `memories.py`——
+    这里不判断「算不算重复」，那是存储层的职责。
+    """
+    if not transcript.strip():
+        return []
+    try:
+        response = await model.ainvoke(MEMORY_PROMPT + transcript)
+    except Exception:
+        return []
+    return _parse_facts(_plain_text(response.content))
+
+
+async def recent_conversation(thread_id: str, limit: int = MEMORY_WINDOW) -> str:
+    """取最近若干条消息，渲染成纯文本——给提炼长期记忆当原料。"""
+    graph = await _ensure_graph()
+    snapshot = await graph.aget_state(_config(thread_id))
+    messages = list(snapshot.values.get("messages", []))
+    return _render_for_summary(messages[-limit:])
 
 
 async def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:

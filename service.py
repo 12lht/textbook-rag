@@ -22,6 +22,7 @@ from typing import AsyncIterator
 import agent_core
 import conversations
 import geocode
+import memories
 
 # 只在会话前几轮自动起标题，之后固定下来，避免每轮都白调一次模型。
 AUTO_TITLE_TURNS = 10
@@ -29,6 +30,9 @@ AUTO_TITLE_TURNS = 10
 TITLE_CONTEXT_TURNS = 10
 # 用户手选的城市名长度上限，和 api 层的粗校验保持一致会有重复，所以只在这里管。
 MAX_CITY_LENGTH = 60
+
+# 后台任务必须留引用，否则可能被垃圾回收掉（asyncio 只持弱引用）。
+_background: set[asyncio.Task] = set()
 
 
 async def list_conversations() -> list[dict[str, object]]:
@@ -157,6 +161,34 @@ async def chat_events(
         user_id, thread_id, user_input, location=location
     ):
         yield event
+
+    # 记忆提炼放在**响应之后**，而且**不 await**：
+    #   - 不 await：它要多调一次模型，等它就等于让 SSE 连接晚 1~2 秒才关闭，
+    #     用户会白等。丢成后台任务，这轮对话该什么时候结束就什么时候结束。
+    #   - 放在 service 而不是图里：评测走的是 `agent_core.stream_agent`，
+    #     不经过这一层，所以记忆功能不会污染评测的 token 与时延指标。
+    _spawn(_remember(user_id, thread_id))
+
+
+async def _remember(user_id: str, thread_id: str) -> None:
+    """一轮对话结束后，从最近的对话里提炼长期记忆并存下来。
+
+    **失败必须静默**：记不住东西是遗憾，但不能因为它让对话出错。
+    这跟 `generate_title` 拿不到标题就退回用户原话是同一个态度——辅助功能不许反向影响主流程。
+    """
+    try:
+        transcript = await agent_core.recent_conversation(thread_id)
+        facts = await agent_core.extract_memories(transcript)
+        if facts:
+            memories.remember(user_id, facts, source_thread=thread_id)
+    except Exception:
+        return
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 async def shutdown() -> None:

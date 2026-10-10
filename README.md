@@ -20,9 +20,10 @@
 tools.py                   4 个「纯函数」工具的实现（零框架依赖，只有标准库 + tavily）
 mcp_server.py              MCP server：用 stdio 把 tools.py 暴露给 Agent
 geocode.py                 客户端坐标 → 可读位置（高德逆地理编码，带缓存）
-agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、进程内定位工具、消息状态读写
+agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、进程内定位工具、消息状态读写、记忆抽取
 conversations.py           会话元数据：id、标题、重命名标记（纯应用层，不依赖 Agent）
-service.py                 应用层：把上面两层拼成用例（列表/新建/重命名/删除/回退/对话流/位置收敛）
+memories.py                跨会话长期记忆：按 user_id 存事实、去重、清洗（纯应用层，不依赖 Agent）
+service.py                 应用层：把上面几层拼成用例（列表/新建/重命名/删除/回退/对话流/位置收敛/记忆提炼）
 api.py                     FastAPI 后端
 cli.py                     CLI 调试入口
 cassette.py                评测用的工具录制回放
@@ -300,9 +301,38 @@ q           退出程序
 data/agent_checkpoints.sqlite
 data/conversation_summaries.json
 data/conversation_renames.json
+data/memories.json
 ```
 
-SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。`conversation_renames.json` 记录哪些会话被手动改过名字，用来让自动起标题跳过它们。删除这些文件会清空本地会话记录。
+SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。`conversation_renames.json` 记录哪些会话被手动改过名字，用来让自动起标题跳过它们。`memories.json` 按 `user_id` 存跨会话的长期事实。删除这些文件会清空本地会话记录和长期记忆。
+
+## 长期记忆
+
+分两层，**现在只做了会话内那一层的一半**，别混为一谈：
+
+| 层次 | 范围 | 状态 |
+| --- | --- | --- |
+| 会话内 | 同一个 `thread_id`，几十轮 | 已做：超出窗口的部分压成摘要（`AgentState.summary`） |
+| 跨会话 | 换会话还认识你 | **只做了「写」**——会提炼并存下来，但**还没读** |
+
+三层各管一件事，跨层组合只写在 `service.py`：
+
+```text
+memories.py            按 user_id 存事实、去重、清洗（纯 JSON，零框架依赖）
+        ▲
+        │  service._remember()  ← 什么时候抽、抽完存哪
+        │
+agent_core.py          用模型把一段对话提炼成事实（不碰存储，也不 import memories）
+```
+
+几个刻意的选择：
+
+- **提炼放在响应之后，而且不 `await`**。它要多调一次模型（1~2 秒），等它就等于让 SSE 连接晚关，用户白等。所以丢成后台任务（`asyncio.create_task`，自己留引用，否则会被垃圾回收）。
+- **放在 `service` 而不是图里**。评测走的是 `agent_core.stream_agent`，不经过这一层——所以记忆功能**不会污染评测的 token 和时延指标**。
+- **失败静默**。记不住是遗憾，但不能让它把对话搞崩——和 `generate_title` 拿不到标题就退回用户原话是同一个态度。
+- **去重只做机械匹配**（去空白、去标点、转小写），同一条反复抽到只累加 `hits`。「不吃香菜」和「受不了香菜」算不算一条？**现在不算，代码里也没假装算**——那是上向量库时的事。
+
+**已知代价**：每轮对话多一次模型调用（约 500~800 token）。要省就把触发改稀疏，比如每 N 轮一次。
 
 ## 工具
 
