@@ -31,8 +31,17 @@ import geocode
 import memories
 import users
 
-# 只在会话前几轮自动起标题，之后固定下来，避免每轮都白调一次模型。
-AUTO_TITLE_TURNS = 10
+# 起标题的节奏：第 1 轮先起一次，之后每 10 轮重起一次，到第 50 轮为止。
+#
+# 触发点是 1 / 11 / 21 / 31 / 41 这五轮，第 51 轮起标题就固定下来不再改。
+#
+# 原来是一个上限（`AUTO_TITLE_TURNS = 10`），含义是「前 10 轮**每轮都重起一次**」
+# ——一个会话光起标题就要调 10 次模型。改成间隔之后同样的会话只调 5 次。
+#
+# 为什么不干脆只在第 1 轮起一次：第 1 轮只有一句话，信息量太少，容易起出
+# 「询问某问题」这种等于没说的标题；隔几轮重起一次，标题才能跟着话题走。
+TITLE_INTERVAL = 10
+TITLE_LAST_TURN = 50
 # 起标题时喂给模型的最近几条用户消息。
 TITLE_CONTEXT_TURNS = 10
 # 用户手选的城市名长度上限，和 api 层的粗校验保持一致会有重复，所以只在这里管。
@@ -267,6 +276,18 @@ async def resolve_client_location(location: dict | None) -> str | None:
     return await asyncio.to_thread(geocode.describe, latitude, longitude)
 
 
+def should_generate_title(turn_number: int) -> bool:
+    """这一轮要不要（重新）生成标题。轮号从 1 开始。
+
+    「第 1 轮起一次，之后每 10 轮重起一次，第 50 轮为止」这句话的**唯一**落点。
+    单独拎成函数是为了能被探针直接测——它只做纯计算，不读状态、不碰模型。
+
+    用 `(turn - 1) % INTERVAL` 而不是 `turn % INTERVAL`，是因为轮号从 1 开始：
+    第 1 轮要落在「起」这一侧，写成 `turn % 10 == 0` 会把第一轮漏掉。
+    """
+    return turn_number <= TITLE_LAST_TURN and (turn_number - 1) % TITLE_INTERVAL == 0
+
+
 async def _build_title(previous_messages: list[str], user_input: str) -> str:
     """标题策略：先问标题模型，拿不到就退回用户原话的前若干字。"""
     context = "\n".join((previous_messages + [user_input])[-TITLE_CONTEXT_TURNS:])
@@ -297,7 +318,7 @@ async def chat_events(
     location = await resolve_client_location(client_location)
     previous_messages = await agent_core.user_messages(thread_id)
     turn_number = len(previous_messages) + 1
-    if turn_number <= AUTO_TITLE_TURNS and not conversations.is_renamed(thread_id):
+    if should_generate_title(turn_number) and not conversations.is_renamed(thread_id):
         title = await _build_title(previous_messages, user_input)
         conversations.set_auto_summary(thread_id, title)
         yield {"type": "title", "title": title}
