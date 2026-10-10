@@ -337,20 +337,30 @@ class AgentState(dict):
 # 上下文窗口策略
 # --------------------------------------------------------------------------
 #
-# 原来的做法是「超过 100 条就丢 1 条」，丢掉的部分永久消失——长对话里前面说过的
-# 事实，到后面就查不到了。现在改成两件事：
+# 窗口按**轮**划分，不按消息条数。
 #
-#   1. **批量裁**：超限时一次裁到 `TRIM_TO`，而不是每轮丢 1 条。这是为了让下面的
-#      摘要调用天然变稀疏——如果每轮裁 1 条就摘要一次，模型调用的成本会摊成常态。
-#   2. **把裁掉的那批压成摘要**，和已有摘要累积合并，存进 `state["summary"]`。
+# **一轮** = 一条用户消息，以及它引发的全部回复（可能包含若干次工具调用）。
 #
-# 摘要失败时**照常裁剪**，只是退化成原来的行为。功能不能因为摘要挂掉而失效。
+# 为什么不用条数当阈值：工具调用会显著改变「一轮等于几条消息」。纯聊天一轮 2 条，
+# 调一次工具一轮 4 条，多调几次能到十条以上。于是「保留 100 条」在纯聊天会话里是
+# 50 轮，在工具密集的会话里只有十几轮——**同一个常量，实际窗口差三倍**，
+# 行为完全不可预期。改成数轮，窗口大小就和工具用得多不多脱钩了。
+#
+# 迟滞（`TRIM_TURNS`）是必须的：如果一超限就裁到 `KEEP_TURNS`，下一轮又超限，
+# 那就变成**每轮都触发一次摘要**，模型调用的成本从偶发变常态。攒够再裁一次。
+#
+# 为什么还要一个条数硬顶：只按轮算的话，工具密集的会话里「最近 20 轮」可能是
+# 两百多条消息，token 会爆。所以裁完还要检查条数，超了就继续往前丢整轮——
+# **宁可窗口短一点，也不能爆**。
+#
+# 摘要失败时**照常裁剪**，只是退化成「直接丢弃」。功能不能因为摘要挂掉而失效。
 #
 # 已知代价：摘要调用发生在 `truncate` 节点里，而它是图的入口，所以这一次调用会
-# 计进 TTFT——但频率很低（大约每十几轮一次）。真要消掉，得把摘要挪到响应之后
-# 的收尾步骤，那是另一件事。
-MAX_HISTORY = 100
-TRIM_TO = 60
+# 计进 TTFT——但频率很低（攒够 `TRIM_TURNS` 轮才一次）。真要消掉，得把摘要挪到
+# 响应之后的收尾步骤，那是另一件事。
+KEEP_TURNS = 20  # 目标：保留最近这么多轮
+TRIM_TURNS = 10  # 迟滞：超过 KEEP_TURNS + TRIM_TURNS 轮才裁
+MAX_KEPT_MESSAGES = 200  # 条数硬顶，防止工具密集的会话把窗口撑爆
 MAX_SUMMARY_CHARS = 800
 SUMMARY_SOURCE_CHARS = 300  # 单条消息丢给摘要模型前先截断到这里
 
@@ -469,6 +479,8 @@ async def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
 async def truncate_node(state: AgentState):
     """裁掉过长的历史，并把裁掉的部分压成摘要留下来。
 
+    按**轮**裁、不按条数——理由见上面「上下文窗口策略」那段注释。
+
     改成 `async` 是因为要 `await` 摘要模型——按「底层要不要 await」这条判据，
     会 await 的就必须是 async 函数。不需要裁的时候它一次都不让出执行权，
     开销和原来的同步版本没有区别。
@@ -477,16 +489,35 @@ async def truncate_node(state: AgentState):
     if len(messages) <= 1:
         return {}
     tail = messages[1:]  # 第 0 条是 SystemMessage，永远保留
-    if len(tail) <= MAX_HISTORY:
+
+    # 每一轮都从一条 HumanMessage 开始，先记下这些起始下标。
+    turn_starts = [
+        i for i, message in enumerate(tail) if isinstance(message, HumanMessage)
+    ]
+
+    # 迟滞：没攒够就不动。少了这一步，一超过 KEEP_TURNS 就裁、下一轮又超，
+    # 等于每轮都要花一次模型调用。
+    if len(turn_starts) <= KEEP_TURNS + TRIM_TURNS:
         return {}
 
-    start = len(tail) - TRIM_TO
-    while start < len(tail) and not isinstance(tail[start], HumanMessage):
-        start += 1  # 从人类消息切，避免留下没有前置 tool_calls 的 ToolMessage
-    if start <= 0:
+    # 保最后 KEEP_TURNS 轮 → 切点落在「倒数第 KEEP_TURNS 轮」的起始下标上。
+    # 切在 HumanMessage 上还有个好处：不会留下没有前置 tool_calls 的 ToolMessage。
+    cut = turn_starts[-KEEP_TURNS]
+
+    # 条数硬顶：整轮整轮地往前丢，直到窗口落回上限之内。
+    # 只按轮算的话，工具密集的会话里「最近 20 轮」可能是两百多条，token 会爆。
+    # 走到最后一轮也还是超限就停手——单轮本身不能从中间劈开。
+    for start in turn_starts:
+        if start <= cut:
+            continue
+        if len(tail) - cut <= MAX_KEPT_MESSAGES:
+            break
+        cut = start
+
+    if cut <= 0:
         return {}
 
-    dropped = list(tail[:start])
+    dropped = list(tail[:cut])
     update: dict[str, object] = {
         "messages": [RemoveMessage(id=message.id) for message in dropped]
     }
