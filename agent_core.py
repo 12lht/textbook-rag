@@ -69,19 +69,37 @@ class Context:
 MCP_SERVER_NAME = "agent-tools"
 MCP_SERVER_SCRIPT = Path(__file__).with_name("mcp_server.py")
 
-_mcp_client = MultiServerMCPClient({
-    MCP_SERVER_NAME: {
-        # 用当前解释器拉起子进程，保证子进程和主进程在同一个 conda 环境里
-        # （mcp / tavily 都装在那儿）。
-        "command": sys.executable,
-        "args": [str(MCP_SERVER_SCRIPT)],
-        # 必须显式把父进程的整个环境传过去。mcp SDK 在 env=None 时会退回到一份
-        # 精简的默认环境变量（只有 PATH 之类），AMAP_API_KEY / TAVILY_API_KEY
-        # 不会带过去，结果是所有工具都静默变成「服务未配置」。
-        "env": dict(os.environ),
-        "transport": "stdio",
-    }
-})
+_mcp_client: MultiServerMCPClient | None = None
+
+
+def _build_mcp_client() -> MultiServerMCPClient:
+    """构造 MCP 客户端。**延迟到第一次用到时才构造**，不是 import 时。
+
+    原因：`env` 是 `dict(os.environ)` 的一份**拷贝**。如果在 import 时构造，
+    评测进程之后再往 os.environ 里塞 `TOOL_CASSETTE_MODE` 就来不及了——
+    子进程拿到的还是旧环境，录制回放会静默失效。延迟构造让「先设环境变量、
+    再启动会话」这个顺序成立。
+    """
+    return MultiServerMCPClient({
+        MCP_SERVER_NAME: {
+            # 用当前解释器拉起子进程，保证子进程和主进程在同一个 conda 环境里
+            # （mcp / tavily 都装在那儿）。
+            "command": sys.executable,
+            "args": [str(MCP_SERVER_SCRIPT)],
+            # 必须显式把父进程的整个环境传过去。mcp SDK 在 env=None 时会退回到一份
+            # 精简的默认环境变量（只有 PATH 之类），AMAP_API_KEY / TAVILY_API_KEY
+            # 不会带过去，结果是所有工具都静默变成「服务未配置」。
+            "env": dict(os.environ),
+            "transport": "stdio",
+        }
+    })
+
+
+def get_mcp_client() -> MultiServerMCPClient:
+    global _mcp_client
+    if _mcp_client is None:
+        _mcp_client = _build_mcp_client()
+    return _mcp_client
 
 
 class _McpToolset:
@@ -115,7 +133,7 @@ class _McpToolset:
     async def _serve(self) -> None:
         """常驻任务：建立会话、把工具交给外面，然后一直等到被要求关闭。"""
         try:
-            async with _mcp_client.session(MCP_SERVER_NAME) as session:
+            async with get_mcp_client().session(MCP_SERVER_NAME) as session:
                 tools = await load_mcp_tools(session)
                 self._tools = tools
                 self._tool_node = ToolNode(tools)
@@ -334,11 +352,14 @@ async def get_graph():
 
 async def shutdown() -> None:
     """关掉 MCP 会话（及其子进程）和 checkpoint 连接。api.py 的 lifespan 会调用。"""
-    global _graph, _checkpointer, _graph_stack
+    global _graph, _checkpointer, _graph_stack, _mcp_client
     await _mcp.aclose()
     stack, _graph_stack = _graph_stack, None
     _graph = None
     _checkpointer = None
+    # 客户端也一并作废，下次要会话时会按当前环境变量重新构造
+    # （评测靠这个特性在同一次进程里换 cassette 模式）。
+    _mcp_client = None
     if stack is not None:
         await stack.aclose()
 

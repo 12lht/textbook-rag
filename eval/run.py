@@ -20,6 +20,21 @@
     负例抑制率          期望集合为空时，确实一个工具都没调的占比（专治「凡事都调工具」）
     工具调用成功率      tool_result 事件里 status == success 的占比（status 是 langchain 标准字段）
     端到端通过率        选择正确 + expect_contains 满足 + 有回答文本 + 没抛异常
+
+录制回放（让改动前后真正可比）：
+    外部 API 返回的内容每次都不一样，搜索正文长度实测波动 1.1~2.5 倍，比被测的代码
+    改动大得多。所以对比前先把工具输出冻结下来：
+
+    # 1. 录一轮（真实调用外部 API，把返回值存进 cassette）
+    python eval/run.py --cassette-mode record --cassette frozen-v1 --tag rec
+
+    # 2. 之后所有对比都走 replay，两次运行拿到的工具输出逐字一致
+    python eval/run.py --cassette-mode replay --cassette frozen-v1 --tag a
+    python eval/run.py --cassette-mode replay --cassette frozen-v1 --tag b --compare ...
+
+    replay 未命中时会照常真实调用并计入「外部调用未命中」。这个数不为 0 就说明
+    有些工具入参是新的，那些样本的前后对比仍然不干净——要么再跑一轮 record 把
+    覆盖面加宽（record 只增不改，可以反复跑），要么把未命中的样本挑出来单独看。
 """
 from __future__ import annotations
 
@@ -28,6 +43,7 @@ import importlib.metadata
 import json
 import math
 import asyncio
+import os
 import sys
 import time
 import uuid
@@ -39,10 +55,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import agent_core  # noqa: E402  （必须在 sys.path 调整之后导入）
+import cassette  # noqa: E402
 
 EVAL_DIR = ROOT / "eval"
 DEFAULT_CASES = EVAL_DIR / "cases.jsonl"
 DEFAULT_BASELINE_DIR = EVAL_DIR / "baselines"
+DEFAULT_CASSETTE_DIR = EVAL_DIR / "cassettes"
 
 # 只统计这些工具名，把流式分片可能产生的半截名字挡在指标之外。
 # 改造后工具是从 MCP server 动态加载的，所以这个集合要在跑之前异步取回来
@@ -283,7 +301,7 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
 
 # ---------------------------------------------------------------- 聚合
 
-def aggregate(records: list[dict], cases: list[dict], config: dict) -> dict:
+def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_stats: dict | None = None) -> dict:
     samples = len(records)
     positive = [r for r in records if r["expected_tools"]]
     negative = [r for r in records if not r["expected_tools"]]
@@ -323,6 +341,12 @@ def aggregate(records: list[dict], cases: list[dict], config: dict) -> dict:
         ),
         "重复的 tool_call 事件数": duplicate_events,
     }
+
+    if cassette_stats is not None:
+        # 这两个是「本次运行」的增量，不是样本级指标。未命中不为 0 说明有工具的
+        # 入参没被录过，那些样本的外部内容仍然不可控，对比时要把它们挑出来。
+        metrics["外部调用命中"] = cassette_stats["hits"]
+        metrics["外部调用未命中"] = cassette_stats["misses"]
 
     by_category: dict[str, dict] = {}
     # 累加先放在 _tools 里，最后才换算成「平均工具数」——避免同一个 key
@@ -475,10 +499,20 @@ async def main() -> int:
     parser.add_argument("--repeat", type=int, default=1, help="每个用例重复次数（默认 1）")
     parser.add_argument("--concurrency", type=int, default=1, help="并发样本数（默认 1，串行；>1 时只重叠「等模型返回」的时间）")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 个用例（冒烟）")
+    parser.add_argument("--category", default=None, help="只跑指定分类，逗号分隔（如 搜索,网页提取,天气）")
     parser.add_argument("--compare", type=Path, default=None, help="与指定基线对比")
     parser.add_argument("--dry-run", action="store_true", help="只校验用例，不调模型")
     parser.add_argument("--verbose", action="store_true", help="打印逐条明细")
     parser.add_argument("--no-save", action="store_true", help="不写基线文件")
+    parser.add_argument(
+        "--cassette-mode",
+        choices=["off", "record", "replay"],
+        default="off",
+        help="工具录制回放：off 直连外部 API；record 真实调用并把返回值存进 cassette；"
+             "replay 只读 cassette（未命中仍真实调用，并计入「外部调用未命中」）",
+    )
+    parser.add_argument("--cassette", default="default", help="cassette 名，对应 eval/cassettes/<名>.json")
+    parser.add_argument("--cassette-dir", type=Path, default=DEFAULT_CASSETTE_DIR, help="cassette 目录")
     args = parser.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -487,13 +521,39 @@ async def main() -> int:
         except Exception:  # noqa: BLE001 — 终端不支持就算了，不影响评测
             pass
 
+    # 必须在建立 MCP 会话之前设好：工具跑在子进程里，是靠继承父进程环境变量
+    # 才知道要不要录制回放的。agent_core 里 MCP 客户端是延迟构造的（见 _build_mcp_client），
+    # 就是为了让这个顺序成立。
+    cassette_path = (args.cassette_dir / f"{args.cassette}.json").resolve()
+    os.environ["TOOL_CASSETTE_MODE"] = args.cassette_mode
+    os.environ["TOOL_CASSETTE_PATH"] = str(cassette_path)
+    cassette_before = cassette.counters()
+    if args.cassette_mode == "off":
+        print("工具录制回放：off（直连外部 API，外部内容不可控，前后对比仅供参考）")
+    else:
+        print(
+            f"工具录制回放：{args.cassette_mode}  {cassette_path.name}"
+            f"（已有 {cassette.interaction_count()} 条记录）"
+        )
+        if args.cassette_mode == "replay" and not cassette_path.exists():
+            print(f"  警告：cassette 不存在，本次会全部真实调用并计入未命中。先跑 record 生成：{cassette_path}")
+
     if not args.cases.exists():
         raise SystemExit(f"找不到金标集：{args.cases}")
     cases = load_cases(args.cases)
     if args.limit:
         cases = cases[: args.limit]
+    if args.category:
+        # 录制回放只对外部内容敏感的用例有意义（搜索/提取/天气/定位）。
+        # 只跑这几个分类，A/B 的 token 成本能砍掉一大半。
+        wanted = {name.strip() for name in args.category.split(",") if name.strip()}
+        available = sorted({case.get("category", "未分类") for case in load_cases(args.cases)})
+        unknown = wanted - set(available)
+        if unknown:
+            raise SystemExit(f"未知分类 {sorted(unknown)}；可用分类：{available}")
+        cases = [case for case in cases if case.get("category") in wanted]
     if not cases:
-        raise SystemExit("金标集是空的。")
+        raise SystemExit("金标集是空的（或分类筛选后为空）。")
 
     # 工具名要从 MCP server 动态取回来，validate_cases 才能校验 expect_tools。
     # 改造前是 import 时静态算的，现在必须先建立 MCP 会话。
@@ -514,6 +574,14 @@ async def main() -> int:
     if env["title_model"]:
         print(f"  标题模型        {env['title_model']}（评测不走 service.py，不会调用它）")
     print(f"  工具来源        MCP server（stdio，独立子进程）")
+    print(
+        "  录制回放        "
+        + (
+            "off（外部内容不可控）"
+            if args.cassette_mode == "off"
+            else f"{args.cassette_mode} / {cassette_path.name}"
+        )
+    )
     print(f"  已配置的密钥    {[k for k, v in env['keys_present'].items() if v]}")
     missing = [k for k, v in env['keys_present'].items() if not v]
     if missing:
@@ -550,6 +618,9 @@ async def main() -> int:
         "repeat": args.repeat,
         "concurrency": args.concurrency,
         "cases_file": str(args.cases.relative_to(ROOT)) if args.cases.is_relative_to(ROOT) else str(args.cases),
+        "category_filter": args.category,
+        "cassette_mode": args.cassette_mode,
+        "cassette": str(cassette_path) if args.cassette_mode != "off" else None,
     }
 
     tasks = [(case, index) for index in range(args.repeat) for case in cases]
@@ -583,14 +654,37 @@ async def main() -> int:
 
     wall_ms = (time.perf_counter() - wall_started) * 1000
     records.sort(key=lambda r: (r["case_id"], r["repeat"]))
-    summary = aggregate(records, cases, config)
+
+    # 工具子进程每次调用都会即时把计数写回 cassette 文件，所以这里读到的是准确值。
+    cassette_after = cassette.counters()
+    cassette_stats = {
+        name: cassette_after[name] - cassette_before[name]
+        for name in ("records", "hits", "misses")
+    }
+
+    summary = aggregate(records, cases, config, cassette_stats)
     summary.update({
         "tag": tag,
         "created_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "environment": env,
         "wall_ms": _round(wall_ms, 1),
+        "cassette": {
+            "mode": args.cassette_mode,
+            "path": str(cassette_path) if args.cassette_mode != "off" else None,
+            "hits": cassette_stats["hits"],
+            "misses": cassette_stats["misses"],
+            "records": cassette_stats["records"],
+            "total_interactions": cassette.interaction_count(),
+        },
         "records": records,
     })
+    if args.cassette_mode == "replay" and cassette_stats["misses"]:
+        _line("录制回放未命中")
+        print(
+            f"  有 {cassette_stats['misses']} 次工具入参没被录过，这些样本的外部内容仍不可控。"
+        )
+        print(f"  再跑一轮 record 可以把覆盖面加宽（record 只增不改）：")
+        print(f"    --cassette-mode record --cassette {args.cassette}")
 
     print_report(summary, records, args.verbose)
 

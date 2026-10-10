@@ -9,6 +9,10 @@
 
 注意：每个函数的 docstring 就是模型看到的工具描述，改一个字都会影响工具选择，
 做 A/B 对比时不要动这些文字。
+
+每个工具还套了一层 `cassette.recorded`，用于评测录制回放。默认模式是 off，
+直接调用外部 API，行为和没套一样；只有评测时把 `TOOL_CASSETTE_MODE` 设成
+record / replay 才会生效。装饰器用 `functools.wraps`，不影响 docstring 和签名。
 """
 from __future__ import annotations
 
@@ -21,7 +25,10 @@ from urllib.request import urlopen
 
 from tavily import TavilyClient
 
+from cassette import recorded
 
+
+@recorded("get_weather_for_location")
 def get_weather_for_location(
     city: str,
     mode: Literal["current", "forecast"],
@@ -92,6 +99,7 @@ def get_weather_for_location(
 #
 # 这段说明刻意写在 docstring **外面**：docstring 会被 FastMCP 当作工具描述原样
 # 发给模型，写进去会让描述从 33 字符膨胀到 273 字符，A/B 对比就不干净了。
+@recorded("get_user_location")
 def get_user_location() -> str:
     """通过高德 IP 定位服务获取当前用户所在的省、市和 adcode。"""
     api_key = os.getenv("AMAP_API_KEY")
@@ -114,12 +122,14 @@ def get_user_location() -> str:
         return "高德定位数据格式异常。"
 
 
+@recorded("get_current_time")
 def get_current_time() -> str:
     """获取当前时间。"""
     from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+@recorded("web_search")
 def web_search(query: str, topic: Literal["general", "news"] = "general") -> str:
     """使用 Tavily 搜索互联网。general 用于普通搜索，news 用于新闻和近期事件。"""
     api_key = os.getenv("TAVILY_API_KEY")
@@ -149,6 +159,7 @@ def web_search(query: str, topic: Literal["general", "news"] = "general") -> str
         return "Tavily 搜索暂时失败。"
 
 
+@recorded("web_extract")
 def web_extract(url: str) -> str:
     """打开并读取一个网页 URL 的正文内容，适合深入阅读搜索结果。"""
     api_key = os.getenv("TAVILY_API_KEY")
