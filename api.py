@@ -26,10 +26,27 @@ app = FastAPI(title="Agent Workspace", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "frontend"), name="static")
 
 
+class ClientLocation(BaseModel):
+    """客户端位置。两种来源，二选一或都给：
+
+    - `latitude` / `longitude`：浏览器 geolocation 授权后拿到的坐标；
+    - `city`：用户手动选择/输入的城市，用于**拒绝授权或浏览器不支持**时的兜底。
+
+    优先级由 `service.resolve_client_location` 决定（手选 > 坐标），不在这里管。
+    这里只做「防荒唐请求」的粗校验：坐标范围、字段长度。
+    """
+
+    city: str | None = Field(default=None, max_length=60, description="用户手选的城市")
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=12000)
     thread_id: str | None = None
     user_id: str = "1"
+    # 不传就是「用户没有提供位置」——服务端不会拿 IP 去猜，见 service 里的说明。
+    location: ClientLocation | None = None
 
 
 class RewindRequest(BaseModel):
@@ -103,10 +120,27 @@ async def rewind_conversation(thread_id: str, request: RewindRequest) -> dict[st
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/location")
+async def resolve_location(location: ClientLocation) -> dict[str, str | None]:
+    """把客户端位置解析成可读的城市名，供前端立刻显示「定位到：北京市」。
+
+    单独开这个端点，是因为聊天接口是 SSE 流，坐标在那一轮里解析完只会进模型上下文，
+    前端拿不到结果去回显。解析规则和聊天链路共用同一个 service 函数，不会两边不一致。
+
+    解析不出来返回 `{"location": null}`，不是错误——用户没授权、或坐标落在海上，
+    都不是异常情况，前端据此提示用户手动选城市。
+    """
+    return {"location": await service.resolve_client_location(location.model_dump())}
+
+
 async def sse_events(request: ChatRequest, thread_id: str) -> AsyncIterator[str]:
     yield f"data: {json.dumps({'type': 'conversation', 'thread_id': thread_id}, ensure_ascii=False)}\n\n"
     try:
-        async for event in service.chat_events(request.user_id, thread_id, request.message):
+        # 传纯字典而不是 pydantic 模型：service 层不该依赖 HTTP 层的模型定义。
+        client_location = request.location.model_dump() if request.location else None
+        async for event in service.chat_events(
+            request.user_id, thread_id, request.message, client_location
+        ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     except Exception as exc:
         yield f"data: {json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"

@@ -101,6 +101,9 @@
     .composer { display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid #cfdacf; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
     textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.5; }
     textarea::placeholder { color: #9aa79f; }
+    .locate { flex: none; align-self: flex-end; max-width: 116px; height: 42px; padding: 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .locate:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .locate.set { color: var(--ink); border-color: #bcd9c8; background: var(--mint); font-weight: 600; }
     .send { display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 12px; color: white; background: var(--ink); font-size: 18px; }
     .send:disabled { opacity: .45; cursor: wait; }
     .hint { margin-top: 10px; color: var(--muted); text-align: center; font-size: 11px; }
@@ -154,6 +157,7 @@
       <div class="composer-wrap">
         <button class="scroll-bottom" id="scrollBottom" type="button" title="回到底部" aria-label="回到底部">↓</button>
         <form class="composer" id="composer">
+          <button class="locate" id="locate" type="button" title="设置位置">定位</button>
           <textarea id="input" rows="1" placeholder=""></textarea>
           <button class="send" id="send" title="发送" aria-label="发送">↑</button>
         </form>
@@ -168,7 +172,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
   <script>
-    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0 };
+    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '' };
     const $ = (selector) => document.querySelector(selector);
     const list = $('#conversationList');
     const messages = $('#messages');
@@ -180,7 +184,9 @@
     const hint = $('.hint');
     const scrollBottomButton = $('#scrollBottom');
     const conversationMenu = $('#conversationMenu');
+    const locateButton = $('#locate');
     const HINT_IDLE = 'Enter 发送 · Shift + Enter 换行';
+    const LOCATION_KEY = 'agent.location';
 
     function escapeHtml(value) {
       return value.replace(/[&<>'"]/g, (character) => ({
@@ -214,6 +220,120 @@
     function setStatus(text, busy = false) {
       setBusy(busy);
       setHint(text);
+    }
+
+    // ---------- 位置：浏览器授权优先，失败降级为用户手选 ----------
+    //
+    // 位置只由前端提供，服务端**不会**用 IP 去猜：IP 定位收的是请求来源地址，
+    // 多用户部署下会把所有人都定位到服务器所在地，模型会据此向用户断言错误的城市。
+    // 拿不到就如实说拿不到，不编一个。
+    //
+    // 「手选城市」优先于「授权坐标」——手选是用户明确确认过的，坐标可能来自 VPN
+    // 或粗粒度 Wi-Fi 定位，可靠性反而更低。这个优先级由后端 service 统一裁决。
+
+    function loadStoredLocation() {
+      try {
+        const raw = localStorage.getItem(LOCATION_KEY);
+        if (!raw) return null;
+        const saved = JSON.parse(raw);
+        return saved && typeof saved === 'object' && saved.location ? saved : null;
+      } catch (error) {
+        return null; // 存的东西坏了就当没存过，不影响使用
+      }
+    }
+
+    function renderLocateButton() {
+      locateButton.textContent = state.locationLabel || '定位';
+      locateButton.classList.toggle('set', Boolean(state.location));
+      locateButton.title = state.locationLabel
+        ? `当前位置：${state.locationLabel} · 点击重新设置`
+        : '点击设置位置（浏览器授权，或手动输入城市）';
+    }
+
+    function setLocation(location, label) {
+      state.location = location;
+      state.locationLabel = label || '';
+      try {
+        if (location) {
+          localStorage.setItem(LOCATION_KEY, JSON.stringify({ location, label: state.locationLabel }));
+        } else {
+          localStorage.removeItem(LOCATION_KEY);
+        }
+      } catch (error) {
+        // 隐私模式下 localStorage 会抛错。记不住不影响这次会话，忽略。
+      }
+      renderLocateButton();
+    }
+
+    // 坐标换城市名。走 /api/location 而不是等聊天接口返回，是因为聊天是 SSE 流，
+    // 坐标在那一轮里只会进模型上下文，前端拿不到解析结果去回显。
+    function locateByCoordinates() {
+      return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            try {
+              const response = await fetch('/api/location', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ latitude, longitude })
+              });
+              if (!response.ok) throw new Error(await readError(response, '定位解析失败'));
+              const data = await response.json();
+              if (!data.location) {
+                setHint('没能从坐标解析出城市。', true);
+                resolve(false);
+                return;
+              }
+              setLocation({ latitude, longitude }, data.location);
+              setHint('');
+              resolve(true);
+            } catch (error) {
+              setHint(`定位解析失败：${error.message}`, true);
+              resolve(false);
+            }
+          },
+          (error) => {
+            setHint(error && error.code === 1
+              ? '你拒绝了定位授权。'
+              : '无法获取定位。', true);
+            resolve(false);
+          },
+          { timeout: 8000, maximumAge: 600000 }
+        );
+      });
+    }
+
+    // 手选兜底。留空 = 清除已设置的位置。
+    function chooseCityByHand(reason) {
+      const entered = window.prompt(`${reason}\n\n留空则清除已设置的位置。`, state.locationLabel || '');
+      if (entered === null) return; // 用户取消，保持原状
+      const city = entered.trim();
+      if (!city) { setLocation(null, ''); setHint('已清除位置。'); return; }
+      setLocation({ city }, city);
+      setHint(`位置已设为 ${city}。`);
+    }
+
+    locateButton.onclick = async () => {
+      if (!navigator.geolocation) { chooseCityByHand('当前浏览器不支持自动定位。'); return; }
+      setHint('正在请求定位授权…');
+      if (!await locateByCoordinates()) {
+        chooseCityByHand('自动定位没有成功，请手动输入你所在的城市。');
+      }
+    };
+
+    // 页面加载时：记住过就直接用；否则只在「用户以前就已授权」时静默取一次，
+    // 不在页面刚打开就弹权限框出来。
+    async function restoreLocation() {
+      const saved = loadStoredLocation();
+      if (saved) { setLocation(saved.location, saved.label); return; }
+      if (!navigator.geolocation || !navigator.permissions?.query) return;
+      try {
+        const status = await navigator.permissions.query({ name: 'geolocation' });
+        if (status.state === 'granted') await locateByCoordinates();
+      } catch (error) {
+        // 部分浏览器不支持查询 geolocation 权限（含 file:// 与本机 http），静默跳过
+      }
     }
 
     // 把后端返回的 detail 取出来，附加到错误信息上。
@@ -564,7 +684,7 @@
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, thread_id: state.threadId, user_id: '1' })
+          body: JSON.stringify({ message: text, thread_id: state.threadId, user_id: '1', location: state.location })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));
         const reader = response.body.getReader();
@@ -630,6 +750,8 @@
     $('#newChat').onclick = newConversation;
     document.querySelectorAll('.suggestion').forEach((button) => { button.onclick = () => { input.value = button.dataset.prompt; input.focus(); }; });
     loadConversations();
+    renderLocateButton();
+    restoreLocation();
   </script>
 </body>
 </html>

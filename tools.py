@@ -1,11 +1,14 @@
-"""工具实现层：5 个工具的真实逻辑，与 Agent 框架完全解耦。
+"""工具实现层：MCP server 里那 4 个工具的真实逻辑，与 Agent 框架完全解耦。
 
 这一层不 import langchain、不 import langgraph，只有标准库和 tavily。
 它唯一的消费方是 `mcp_server.py`。
 
-改造前这 5 个函数是写在 `agent_core.py` 里、用 langchain 的 `@tool` 装饰器包装的，
+改造前这些函数是写在 `agent_core.py` 里、用 langchain 的 `@tool` 装饰器包装的，
 `import` 那一刻就绑死在 Agent 进程里；现在它们跑在独立的 MCP server 进程，
 `agent_core` 通过 MCP 协议调用（对比 `git show pre-mcp:agent_core.py`）。
+
+**这里的工具只能是「纯函数」——返回值只由参数决定。**
+`get_user_location` 曾经也在这里，后来被搬回了 `agent_core.py`，原因见下面它原来的位置。
 
 注意：每个函数的 docstring 就是模型看到的工具描述，改一个字都会影响工具选择，
 做 A/B 对比时不要动这些文字。
@@ -91,35 +94,18 @@ def get_weather_for_location(
         return "高德天气数据格式异常。"
 
 
-# 改造前这个函数还带一个 `runtime: ToolRuntime[Context]` 参数，由 LangGraph 注入
-# 当前会话的 user_id。MCP 协议的工具调用只传 JSON 参数，没有这种"运行时上下文"
-# 的概念，所以这个参数被去掉了。影响可控：原实现从未真正读过 runtime，
-# 而且该参数本来就不出现在暴露给模型的参数列表里（已核对 tool_call_schema），
-# 所以模型看到的工具接口前后一致。
+# ---------------------------------------------------------------------------
+# 这里原本是 `get_user_location`，现已搬回 `agent_core.py`。
 #
-# 这段说明刻意写在 docstring **外面**：docstring 会被 FastMCP 当作工具描述原样
-# 发给模型，写进去会让描述从 33 字符膨胀到 273 字符，A/B 对比就不干净了。
-@recorded("get_user_location")
-def get_user_location() -> str:
-    """通过高德 IP 定位服务获取当前用户所在的省、市和 adcode。"""
-    api_key = os.getenv("AMAP_API_KEY")
-    if not api_key:
-        return "定位服务未配置 AMAP_API_KEY。"
-    try:
-        params = urlencode({"key": api_key})
-        with urlopen(f"https://restapi.amap.com/v3/ip?{params}", timeout=10) as response:
-            data = json.load(response)
-        if data.get("status") != "1":
-            return f"高德定位失败：{data.get('info', '未知错误')}"
-        province = data.get("province", "")
-        city = data.get("city", "")
-        if not province and not city:
-            return "高德定位成功，但没有返回省市信息。"
-        return f"当前位置：{province}{city}，adcode：{data.get('adcode', '')}"
-    except (HTTPError, URLError, TimeoutError):
-        return "无法连接高德定位服务。"
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        return "高德定位数据格式异常。"
+# 原因不是「IP 定位不准」，而是**这类工具在这套 MCP 架构下根本无法正确实现**：
+# MCP 会话是**进程级共享的单个长连接**（所有请求复用同一个子进程），
+# 协议里只有「工具名 + JSON 参数」这一条通道，没有 per-request 的运行时上下文。
+# 而「用户在哪」是**客户端已知的事实**，必须随每次请求进来，不能由工具自己去探测。
+#
+# 所以它回到了进程内，用 `runtime: ToolRuntime[Context]` 读调用方传进来的位置。
+# 代价是架构上出现「4 个走 MCP + 1 个走进程内」的例外，换来的是位置从
+# 「服务端猜」变成「客户端授权提供」。完整说明见 `agent_core.get_user_location`。
+# ---------------------------------------------------------------------------
 
 
 @recorded("get_current_time")
@@ -183,9 +169,10 @@ def web_extract(url: str) -> str:
 
 # 注册顺序刻意与改造前 agent_core.tools 的顺序一致，
 # 保证发给模型的工具列表顺序不变（有些模型对工具顺序敏感）。
+# `get_user_location` 原本在天气之后，现已移到 agent_core；合并后的顺序
+# 由 agent_core._TOOL_ORDER 统一维护。
 ALL_TOOLS = [
     get_weather_for_location,
-    get_user_location,
     get_current_time,
     web_search,
     web_extract,

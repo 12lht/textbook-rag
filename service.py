@@ -9,18 +9,26 @@ LangGraph 的 checkpoint 和元数据 JSON；「会话列表」要同时读标�
 只要碰 agent_core（异步 checkpoint / MCP）就必须 async；只读写
 conversations.py 那两个小 JSON 文件的（建会话、重命名）保持同步，
 这样 FastAPI 会把它们丢进线程池，不会占着事件循环做文件 IO。
+
+「用户位置」的收敛规则也在这里，而且**只在这里**：客户端可能给手选城市、
+也可能给授权坐标，优先级和降级都由 `resolve_client_location` 一个函数决定，
+`/api/location` 端点和聊天链路共用它，不会出现两处规则打架。
 """
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncIterator
 
 import agent_core
 import conversations
+import geocode
 
 # 只在会话前几轮自动起标题，之后固定下来，避免每轮都白调一次模型。
 AUTO_TITLE_TURNS = 10
 # 起标题时喂给模型的最近几条用户消息。
 TITLE_CONTEXT_TURNS = 10
+# 用户手选的城市名长度上限，和 api 层的粗校验保持一致会有重复，所以只在这里管。
+MAX_CITY_LENGTH = 60
 
 
 async def list_conversations() -> list[dict[str, object]]:
@@ -88,6 +96,34 @@ async def rewind_conversation(thread_id: str, turn: int) -> dict[str, object]:
     }
 
 
+async def resolve_client_location(location: dict | None) -> str | None:
+    """把客户端传来的位置收敛成一个可读文本，例如 `广东省广州市`。
+
+    **优先级：用户手选的城市 > 浏览器授权的坐标。**
+    手选优先是因为它是用户明确确认过的；坐标可能来自 VPN、代理或粗粒度的
+    Wi-Fi 定位，可靠性反而更低。两条都没有、或坐标解析不出来，一律返回 None
+    ——**这里绝不兜底猜测**。以前用服务器 IP 定位兜底，多用户部署下会把所有人
+    都定位到服务器所在地，模型据此向用户断言错误的城市，比「不知道」糟糕得多。
+
+    拿不到位置时由模型的定位工具如实回答「用户没有提供位置」，而不是编一个。
+    """
+    if not location:
+        return None
+
+    city = str(location.get("city") or "").strip()[:MAX_CITY_LENGTH]
+    if city:
+        return city
+
+    latitude, longitude = location.get("latitude"), location.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+
+    # geocode.describe 走 urllib，是**阻塞** IO。这个函数在 async 链路里被调用，
+    # 直接在事件循环里跑会卡住所有并发请求（包括正在流式输出的那条 SSE），
+    # 所以必须丢进线程池。异步函数里做同步 IO 是最典型的性能陷阱。
+    return await asyncio.to_thread(geocode.describe, latitude, longitude)
+
+
 async def _build_title(previous_messages: list[str], user_input: str) -> str:
     """标题策略：先问标题模型，拿不到就退回用户原话的前若干字。"""
     context = "\n".join((previous_messages + [user_input])[-TITLE_CONTEXT_TURNS:])
@@ -97,8 +133,19 @@ async def _build_title(previous_messages: list[str], user_input: str) -> str:
     return title[:conversations.MAX_TITLE_LENGTH]
 
 
-async def chat_events(user_id: str, thread_id: str, user_input: str) -> AsyncIterator[dict[str, object]]:
-    """给网页和 CLI 共用的事件流：先按需推送标题，再转发 Agent 自己的事件。"""
+async def chat_events(
+    user_id: str,
+    thread_id: str,
+    user_input: str,
+    client_location: dict | None = None,
+) -> AsyncIterator[dict[str, object]]:
+    """给网页和 CLI 共用的事件流：先按需推送标题，再转发 Agent 自己的事件。
+
+    `client_location` 是客户端的原始位置（可能是手选城市，也可能是授权坐标），
+    由这里统一解析成可读文本再交给 Agent——解析规则见 `resolve_client_location`。
+    CLI 不传这个参数，行为就是「用户没有提供位置」，和以前一致。
+    """
+    location = await resolve_client_location(client_location)
     previous_messages = await agent_core.user_messages(thread_id)
     turn_number = len(previous_messages) + 1
     if turn_number <= AUTO_TITLE_TURNS and not conversations.is_renamed(thread_id):
@@ -106,7 +153,9 @@ async def chat_events(user_id: str, thread_id: str, user_input: str) -> AsyncIte
         conversations.set_auto_summary(thread_id, title)
         yield {"type": "title", "title": title}
 
-    async for event in agent_core.stream_agent(user_id, thread_id, user_input):
+    async for event in agent_core.stream_agent(
+        user_id, thread_id, user_input, location=location
+    ):
         yield event
 
 

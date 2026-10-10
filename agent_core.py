@@ -1,9 +1,10 @@
 """Agent 编排层：LangGraph 图、模型，以及读写会话「消息状态」的操作。
 
-**工具已经不在本进程里了。** 真实实现在 `tools.py`（那一层零 langchain 依赖），
-由 `mcp_server.py` 暴露成 stdio 传输的 MCP server；本模块作为 MCP client
-通过 JSON-RPC 调用它（见 `_McpToolset`）。所以本模块不再 import tavily，
-也不再持有任何工具函数。
+**工具分成两处。** 4 个「纯函数」工具（天气 / 时间 / 搜索 / 网页提取）的真实实现在
+`tools.py`（那一层零 langchain 依赖），由 `mcp_server.py` 暴露成 stdio 传输的
+MCP server；本模块作为 MCP client 通过 JSON-RPC 调用它们（见 `_McpToolset`）。
+第 5 个工具 `get_user_location` 留在本模块，因为它是唯一需要**每次请求的
+运行时上下文**的工具——原因见它自己的注释。
 
 因为 MCP 客户端是异步的，`stream_agent` 与 `generate_title` 都是异步的
 （`graph.astream`），调用方 `service.chat_events` / `eval/run.py` 也必须是异步的。
@@ -16,7 +17,9 @@
 
 会话元数据（id、标题、重命名标记）在 `conversations.py`，把两层拼成用例在
 `service.py`。所以本模块不 import conversations——标题策略这类业务判断由
-service 决定，这里只提供「读状态」和「跑图」。
+service 决定，这里只提供「读状态」和「跑图」。位置则是**输入**：客户端给什么
+就用什么，本模块不猜、不查、不去问外部服务（解析坐标在 `geocode.py`，
+由 service 调用后把成品文本传进来）。
 """
 from __future__ import annotations
 
@@ -31,7 +34,7 @@ from typing import Annotated, Sequence
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
-from langchain.tools import ToolRuntime
+from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -59,15 +62,79 @@ SYSTEM_PROMPT = """你是一个 AI 助手。"""
 
 @dataclass
 class Context:
+    """随每次请求注入图的运行时上下文。它不是会话状态，不进 checkpoint。"""
+
     user_id: str
+    # 用户授权提供的当前位置（已解析成可读文本，如「广东省广州市」）。
+    # 为 None 表示这次请求没有位置可用——**不要退回任何猜测**（比如 IP 定位），
+    # 如实告诉模型没有就是没有。
+    location: str | None = None
 
 
 # --------------------------------------------------------------------------
-# MCP：工具现在跑在独立进程里
+# 唯一留在进程内的工具：定位
+# --------------------------------------------------------------------------
+#
+# **为什么不放在 MCP server 里**：MCP 会话是**进程级共享的单个长连接**
+# （所有请求复用同一个子进程），协议里只有「工具名 + 那些 JSON 参数」这一条通道，
+# 没有 per-request 的运行时上下文概念。而「用户在哪」是**客户端已知的事实**，
+# 必须逐请求传进来，不能由工具自己去探测。
+#
+# 早先的实现在 MCP server 里用高德 **IP 定位**（`/v3/ip`）猜位置，有两个问题：
+#   1. 它定位的是**请求来源 IP**。服务一旦多用户部署，所有人都会被猜成
+#      服务器所在地，模型会对每个用户断言「你当前在北京」——这是在编造用户事实。
+#   2. 即使单机自用「碰巧对」，多花的也是一次模型往返 + 一次计费的高德调用，
+#      去问一个本可以被告知的答案。
+#
+# 所以它回到了进程内，通过 `ToolRuntime` 读调用方传进来的位置。代价是架构上
+# 出现「4 个走 MCP + 1 个走进程内」的例外；换来的是位置从「服务端猜」变成
+# 「客户端授权提供」。判据可以记成一句话：
+# **返回值只由参数决定的工具放 MCP，需要本次请求上下文的工具留在进程内。**
+#
+# 注意 docstring 就是模型看到的工具描述。这里的措辞和改造前不同，是**有意的**：
+# 工具的语义真的变了（从「自己去定位」变成「读用户授权的位置」），
+# 描述必须跟着改，否则模型会以为它还能探测位置。
+@tool
+def get_user_location(runtime: ToolRuntime[Context]) -> str:
+    """获取用户当前所在的城市。位置由用户在客户端授权提供。"""
+    context = getattr(runtime, "context", None)
+    location = getattr(context, "location", None)
+    if not location:
+        # 把「怎么办」也告诉模型，否则它可能编一个城市出来。
+        return "用户没有提供位置信息。如果回答依赖位置，请先询问用户所在的城市。"
+    return f"用户授权提供的当前位置：{location}。"
+
+
+# --------------------------------------------------------------------------
+# MCP：另外 4 个工具跑在独立进程里
 # --------------------------------------------------------------------------
 
 MCP_SERVER_NAME = "agent-tools"
 MCP_SERVER_SCRIPT = Path(__file__).with_name("mcp_server.py")
+
+# 发给模型的**工具顺序**，必须与改造前 `agent_core.tools` 的顺序逐位一致——
+# 有些模型对工具顺序敏感，顺序变了 A/B 就不干净。
+# 定位工具排在天气之后、时间之前，所以它不能简单追加到 MCP 工具列表末尾，
+# 得靠这张表重新排序。它是**合并两处工具后的唯一顺序来源**。
+_TOOL_ORDER = [
+    "get_weather_for_location",
+    "get_user_location",
+    "get_current_time",
+    "web_search",
+    "web_extract",
+]
+
+
+def _order_tools(tools: list) -> list:
+    """按 `_TOOL_ORDER` 重排合并后的工具。
+
+    不在名单里的工具排到最后（`sorted` 是稳定排序，它们之间保持原有相对顺序），
+    这样以后新增工具忘了登记也不会把它们弄丢，只是排在末尾。
+    """
+    rank = {name: index for index, name in enumerate(_TOOL_ORDER)}
+    fallback = len(rank)
+    return sorted(tools, key=lambda item: rank.get(getattr(item, "name", ""), fallback))
+
 
 _mcp_client: MultiServerMCPClient | None = None
 
@@ -134,7 +201,10 @@ class _McpToolset:
         """常驻任务：建立会话、把工具交给外面，然后一直等到被要求关闭。"""
         try:
             async with get_mcp_client().session(MCP_SERVER_NAME) as session:
-                tools = await load_mcp_tools(session)
+                # 合并两处工具：MCP 子进程里的 4 个纯函数工具 + 进程内的定位工具。
+                # 合并后必须重排，否则定位工具会被追加到末尾，
+                # 发给模型的工具列表顺序就和改造前不一致了。
+                tools = _order_tools([*await load_mcp_tools(session), get_user_location])
                 self._tools = tools
                 self._tool_node = ToolNode(tools)
                 self._bound_model = model.bind_tools(tools)
@@ -484,11 +554,21 @@ async def get_history(thread_id: str) -> list[dict[str, object]]:
     return history
 
 
-async def stream_agent(user_id: str, thread_id: str, user_input: str):
+async def stream_agent(
+    user_id: str,
+    thread_id: str,
+    user_input: str,
+    location: str | None = None,
+):
     """跑一遍图，产出 Agent 自己的事件流（异步生成器）。
 
     只做「跑图 + 转发事件」：不碰会话元数据，也不发 title 事件。
     按需生成并推送标题是 service.chat_events() 的职责。
+
+    `location` 是**已经解析好的**可读位置文本（如「广东省广州市」），
+    由调用方负责准备。这里既不解析坐标也不兜底猜测——传 None 就是没有位置，
+    定位工具会如实告诉模型「用户没有提供位置」。位置通过 `Context` 每次请求
+    注入，不写进 checkpoint（它不是会话状态，用户换个地方下一轮就该变）。
     """
     config = _config(thread_id)
     graph = await _ensure_graph()
@@ -511,7 +591,7 @@ async def stream_agent(user_id: str, thread_id: str, user_input: str):
     async for mode, chunk in graph.astream(
         {"messages": messages},
         config=config,
-        context=Context(user_id=user_id),
+        context=Context(user_id=user_id, location=location),
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":

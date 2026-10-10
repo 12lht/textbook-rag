@@ -6,8 +6,8 @@
 
 - FastAPI + 网页前端
 - CLI 调试入口
-- 工具通过 MCP 协议跑在独立进程（可独立部署、可复用）
-- 天气查询和 IP 定位
+- 工具通过 MCP 协议跑在独立进程（可独立部署、可复用），需要请求上下文的工具留在进程内
+- 天气查询，以及由用户授权提供的客户端定位
 - Tavily 网页搜索与正文提取
 - 多轮工具调用
 - SQLite 会话持久化
@@ -17,11 +17,12 @@
 ## 项目结构
 
 ```text
-tools.py                   5 个工具的真正实现（零框架依赖，只有标准库 + tavily）
+tools.py                   4 个「纯函数」工具的实现（零框架依赖，只有标准库 + tavily）
 mcp_server.py              MCP server：用 stdio 把 tools.py 暴露给 Agent
-agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、消息状态读写
+geocode.py                 客户端坐标 → 可读位置（高德逆地理编码，带缓存）
+agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、进程内定位工具、消息状态读写
 conversations.py           会话元数据：id、标题、重命名标记（纯应用层，不依赖 Agent）
-service.py                 应用层：把上面两层拼成用例（列表/新建/重命名/删除/回退/对话流）
+service.py                 应用层：把上面两层拼成用例（列表/新建/重命名/删除/回退/对话流/位置收敛）
 api.py                     FastAPI 后端
 cli.py                     CLI 调试入口
 cassette.py                评测用的工具录制回放
@@ -64,6 +65,44 @@ tools.py  ──被加载──▶  mcp_server.py
 - **每个函数的 docstring 就是模型看到的工具描述**，而且是**整个 docstring**。要写补充说明就写在 docstring 外面，否则描述会膨胀，改前改后的对比就不公平了。
 - **给 MCP 子进程传环境变量必须显式 `env=dict(os.environ)`。** mcp SDK 在 `env=None` 时只传一份精简环境，`.env` 里的 API Key 全部丢失，所有工具会静默变成「服务未配置」。
 - MCP 会话由 `agent_core` 在一个**专属常驻 asyncio 任务**里持有。不能挂在 `AsyncExitStack` 上跨请求复用——stdio 会话内部是 anyio 的 cancel scope，要求进入和退出在同一个任务里，否则第二次请求就会抛 `Attempted to exit cancel scope in a different task`。
+
+### 什么工具不能放进 MCP
+
+**MCP 会话是进程级共享的单个长连接**：所有请求复用同一个子进程，协议里只有「工具名 + 那些 JSON 参数」这一条通道。所以**没有 per-request 的运行时上下文**。
+
+判据就一句话：**返回值只由参数决定的工具放 MCP；需要「本次请求」上下文的工具必须留在进程内。**
+
+`get_user_location` 就是后者，它留在 `agent_core.py`，用 `runtime: ToolRuntime[Context]` 读调用方传进来的位置。它原先在 MCP server 里，靠高德 **IP 定位**（`/v3/ip`）去猜用户在哪，有两个问题：
+
+1. 它定位的是**请求来源 IP**。服务一旦多用户部署，所有用户都会被猜成服务器所在地，模型会对每个人断言「你当前在北京」——这是在编造用户事实。单机自用「碰巧对」，掩盖了这个缺陷。
+2. 即使猜对了，也多花一次模型往返 + 一次计费的高德调用，去问一个本可以被告知的答案。
+
+代价是架构上出现「4 个走 MCP + 1 个走进程内」的例外。这个例外是**有理由的**，不是妥协——位置必须逐请求进来，而 MCP 没有这条通道。
+
+位置怎么进来这条链路：
+
+```text
+浏览器 geolocation（用户授权）        用户手动选城市（拒绝授权时的兜底）
+        │ 坐标                        │ 城市名
+        └──────────┬───────────────────┘
+                   ▼
+        service.resolve_client_location   ← 优先级规则只写在这一处
+                   │  可读文本，如「广东省广州市」
+                   ▼
+        agent_core.Context.location
+                   │  ToolRuntime 注入
+                   ▼
+        get_user_location  ──▶  返回给模型
+```
+
+两个容易踩的点：
+
+- **高德 `location` 参数是「经度,纬度」**，和浏览器 `{latitude, longitude}` 顺序**正好相反**。传反了不报错，只会安静地定位到地球另一边。
+- **直辖市的 `city` 字段是空列表 `[]` 而不是空字符串**（北京 / 上海 / 天津 / 重庆），广州 / 成都这类才给 `'广州市'`。取字段前必须判类型，否则会拼出「北京市[]」。
+
+客户端位置**不写进 checkpoint**：它是每次请求的输入，不是会话状态。用户换个地方，下一轮就该变。
+
+坐标解析走 `geocode.py`，坐标取两位小数（约 1 公里）做缓存键。解析发生在 `service` 层，用 `asyncio.to_thread` 丢进线程池——它是阻塞的 `urllib` 调用，直接在事件循环里跑会卡住所有并发请求，包括正在流式输出的那条 SSE。
 
 改造前后可以用 git 标签对照，两版的工具接口（名称、参数、必填项、描述文本）是逐字一致的，只有 `title` 后缀差一个 langchain 加上的 `Arguments`：
 
@@ -169,6 +208,7 @@ q           退出程序
 | `GET` | `/api/conversations/{thread_id}/messages` | 获取历史消息 |
 | `POST` | `/api/conversations/{thread_id}/rewind` | 回退到某条用户消息之前 |
 | `POST` | `/api/chat/stream` | SSE 流式聊天 |
+| `POST` | `/api/location` | 把客户端位置解析成可读城市名 |
 
 重命名请求示例：
 
@@ -198,11 +238,33 @@ q           退出程序
 {
   "message": "我这里未来几天的天气怎么样？",
   "thread_id": null,
-  "user_id": "1"
+  "user_id": "1",
+  "location": { "latitude": 39.90923, "longitude": 116.397428 }
 }
 ```
 
 `thread_id` 为空时，后端会自动创建新会话。后续请求使用返回的 `thread_id` 即可继续对话。
+
+### 位置怎么传
+
+`location` 是可选的，两种来源二选一或都给：
+
+| 字段 | 来源 | 说明 |
+| --- | --- | --- |
+| `latitude` / `longitude` | 浏览器 geolocation（需用户授权） | 后端用高德逆地理编码解析成城市名 |
+| `city` | 用户手动选择 / 输入 | 拒绝授权或浏览器不支持时的兜底 |
+
+**优先级：`city` > 坐标。** 手选是用户明确确认过的，坐标可能来自 VPN 或粗粒度 Wi-Fi 定位，可靠性反而更低。规则只写在 `service.resolve_client_location` 一处，`/api/location` 和聊天链路共用。
+
+不传 `location` 就是「用户没有提供位置」，**后端不会拿 IP 去猜**——详见上面「什么工具不能放进 MCP」。
+
+坐标解析单独开 `/api/location` 端点，是因为聊天走 SSE 流、坐标在那一轮里只会进模型上下文，前端拿不到结果去回显「定位到：北京市」。解析不出来返回 `{"location": null}`，不是错误。
+
+```json
+{ "latitude": 39.90923, "longitude": 116.397428 }
+```
+
+网页上输入框左侧有个定位按钮：点击请求浏览器授权，被拒绝或失败会弹出手动输入城市，选择记在 `localStorage` 里。只有用户**以前就已授权**时才在页面加载时静默取一次位置，不会一打开就弹权限框。
 
 ## 数据持久化
 
@@ -218,19 +280,21 @@ SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘
 
 ## 工具
 
-实现全部在 `tools.py`，注册在 `mcp_server.py`，Agent 侧通过 MCP 加载：
+5 个工具，**分两处**：
 
-| 工具 | 作用 |
-| --- | --- |
-| `get_weather_for_location` | 通过高德查询实时天气或未来预报（`mode=current` / `forecast`） |
-| `get_user_location` | 通过高德 IP 定位获取省市和 adcode |
-| `get_current_time` | 获取当前时间 |
-| `web_search` | 通过 Tavily 搜索网页（`topic=general` / `news`） |
-| `web_extract` | 通过 Tavily 提取网页正文 |
+| 工具 | 作用 | 跑在哪 |
+| --- | --- | --- |
+| `get_weather_for_location` | 通过高德查询实时天气或未来预报（`mode=current` / `forecast`） | MCP 子进程 |
+| `get_user_location` | 读用户授权提供的当前位置 | **Agent 进程内**（要请求上下文） |
+| `get_current_time` | 获取当前时间 | MCP 子进程 |
+| `web_search` | 通过 Tavily 搜索网页（`topic=general` / `news`） | MCP 子进程 |
+| `web_extract` | 通过 Tavily 提取网页正文 | MCP 子进程 |
 
-注册顺序刻意与改造前保持一致（有些模型对工具顺序敏感）。不要在 `api.py` 或 `cli.py` 里复制工具实现。
+前 4 个的实现在 `tools.py`、注册在 `mcp_server.py`，Agent 侧通过 MCP 加载；`get_user_location` 在 `agent_core.py`。分界依据见上面「什么工具不能放进 MCP」。
 
-每个工具还套了一层 `cassette.recorded` 用于评测录制回放，默认模式 `off` 时行为和没套一样。
+注册顺序刻意与改造前保持一致（有些模型对工具顺序敏感）。合并两处工具后由 `agent_core._TOOL_ORDER` 统一排序——**它是工具顺序的唯一来源**，新增工具要登记进去。不要在 `api.py` 或 `cli.py` 里复制工具实现。
+
+MCP 那 4 个还套了一层 `cassette.recorded` 用于评测录制回放，默认模式 `off` 时行为和没套一样。定位工具不套：它不发外部请求，读了位置就返回。
 
 ## 评测
 
@@ -249,7 +313,12 @@ C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --category 搜索,
 
 # 和旧基线逐项对比
 C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --compare .\eval\baselines\baseline-v1.json
+
+# 指定评测时模拟的客户端位置（默认 北京市；传空字符串表示不提供位置）
+C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --location 广东省广州市
 ```
+
+`--location` 走的是 `Context` 而**不是工具参数**，所以完全不碰 cassette、也不计入工具输出指纹。给固定值是为了让定位类用例可复现——原来靠服务器 IP 定位，每次跑可能都不一样。
 
 指标口径：**工具选择合规率**（主指标）、严格集合相等率、工具召回率 / 精确率、负例抑制率、**配额违规调用数**、**冗余调用数**、工具调用成功率、端到端通过率、TTFT P50/P95、端到端 P50/P95、总 token 消耗、重复的 tool_call 事件数。token 数从 checkpoint 里的 `usage_metadata` 读，不额外发请求。
 
@@ -267,7 +336,11 @@ C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --compare .\eval\b
 | 额外允许 `allow_tools` | 调了也合理，且不烧外部配额 | 计入「冗余调用数」，当成本报，不当错误 |
 | 其余 | 越界 | → **违规**，其中走高德 / Tavily 的计入「配额违规调用数」 |
 
-判定额外调用是否白送，只看一条：**它烧不烧外部配额**。`get_current_time` 免费所以默认放行；`get_user_location` / `web_search` / `web_extract` 分别走高德和 Tavily，有配额，不能白送。个别用例可以逐条放宽（比如 `edge-01` 查一个不存在的城市，去搜一下解释「阿斯加德」是什么属于合理兜底），但不搞全局开口子。
+判定额外调用是否白送，只看一条：**它烧不烧外部配额**。`get_current_time` 免费所以默认放行；`get_weather_for_location` / `web_search` / `web_extract` 分别走高德和 Tavily，有配额，不能白送。个别用例可以逐条放宽（比如 `edge-01` 查一个不存在的城市，去搜一下解释「阿斯加德」是什么属于合理兜底），但不搞全局开口子。
+
+> **口径的后续变化：**`get_user_location` 原先在收费那一档，改成读客户端位置之后它不再发任何外部请求（坐标解析在 `service` 层做一次、还带缓存），所以已移出 `METERED_TOOLS`，和 `get_current_time` 同类。
+>
+> 这让 `weather-forecast-02` 那条的定性变了：模型多调一次定位不再烧配额。但它**仍然不在该用例的 `allow_tools` 里**，所以按现在的口径**依然算违规**——性质是「越界」而不是「浪费配额」。要不要放行属于金标集口径的决定，没有擅自改。
 
 改口径后用已有基线重算（零 token，`aggregate` 会自动按新规则补算旧记录）：
 
@@ -315,9 +388,14 @@ C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --cassette-mode re
 
 加工具或改工具的注意事项：
 
-- 改 `tools.py` 的函数签名或 docstring 会直接改变模型看到的接口，动手前先想清楚是不是必要。
-- 加工具只要在 `tools.py` 里写函数并加进 `ALL_TOOLS`，`mcp_server.py` 会自动注册；不要在 `agent_core.py` 里硬编码工具。
-- 工具跑在子进程里，它拿到的环境变量是**会话建立时**从父进程继承的快照。改环境变量后要让会话重开（`agent_core.shutdown()` 会把 MCP 客户端作废）才会生效。
+- 改工具的函数签名或 docstring 会直接改变模型看到的接口，动手前先想清楚是不是必要。
+- **加工具分两种，先判断它需不需要本次请求的上下文**：
+  - 返回值只由参数决定的「纯函数」→ 写进 `tools.py` 并加进 `ALL_TOOLS`，`mcp_server.py` 会自动注册；
+  - 需要请求上下文的（比如当前位置）→ 留在 `agent_core.py`，写 `@tool` + `runtime: ToolRuntime[Context]`。
+- **两种情况都要登记进 `agent_core._TOOL_ORDER`**，否则合并后工具会被排到末尾，发给模型的顺序就变了。
+- 参数里的 `runtime` / `ToolRuntime` 不会出现在模型看到的 schema 里（被框架剥离），但工具描述（docstring）**会**原样发出去。
+- MCP 工具跑在子进程里，它拿到的环境变量是**会话建立时**从父进程继承的快照。改环境变量后要让会话重开（`agent_core.shutdown()` 会把 MCP 客户端作废）才会生效。
+- 在 async 链路里做阻塞 IO（`urllib`、`requests`）必须用 `asyncio.to_thread` 包起来，否则会卡住整个事件循环——包括正在流式输出的 SSE。`geocode.describe` 就是这样的调用。
 
 启动网页应用时会在后台拉起一个 MCP server 子进程，这是正常现象；`Ctrl+C` 时 FastAPI 的 lifespan 会把它一起收掉。如果命令行看起来「卡住不退出」，通常是子进程没被回收。
 

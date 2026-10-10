@@ -87,17 +87,23 @@ DEFAULT_CASSETTE_DIR = EVAL_DIR / "cassettes"
 # 改造后工具是从 MCP server 动态加载的，所以这个集合要在跑之前异步取回来
 # （由 _load_known_tools() 填），不能像改造前那样在 import 时静态算出来。
 KNOWN_TOOLS: set[str] = set()
-# 会消耗外部配额的工具体。高德的天气/定位和 Tavily 的搜索/提取都是计量的。
+# 会消耗外部配额的工具体。高德的天气和 Tavily 的搜索/提取都是计量的。
 # 这份分类放在评测侧而不是 tools.py：它回答的是「多调一次算不算浪费」，
-# 是评测口径问题。get_current_time 是纯本地函数，不进这个集合。
+# 是评测口径问题。
+#
+# 注意 `get_user_location` **不在**这里了：它改成读客户端传来的位置之后，
+# 工具本身不再发任何外部请求（坐标解析在 service 层做一次，还带缓存），
+# 所以它现在是零配额工具，和 `get_current_time` 同类。
 METERED_TOOLS = {
     "get_weather_for_location",
-    "get_user_location",
     "web_search",
     "web_extract",
 }
 # cases.jsonl 没写 allow_tools 时的兜底：只放行零配额的本地工具。
 DEFAULT_ALLOW_TOOLS = ["get_current_time"]
+# 评测里模拟「客户端授权提供的位置」。走 Context 不进工具参数，所以不碰 cassette；
+# 给一个固定值是为了让定位类用例可复现（原来靠服务器 IP 定位，每次跑可能都不同）。
+DEFAULT_EVAL_LOCATION = "北京市"
 # 这些 key 名里只出现名字、不出现值，用来确认评测环境装没装齐。
 KEY_NAMES = ["DEEPSEEK_API_KEY", "AMAP_API_KEY", "TAVILY_API_KEY", "GLM_API_KEY"]
 
@@ -314,12 +320,16 @@ def _content_text(content: object) -> str:
     return str(content)
 
 
-async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
+async def run_case(case: dict, repeat_index: int, run_slug: str, location: str | None = None) -> dict:
     """在一个全新会话里跑一条用例，返回该样本的记录。
 
     每条用例都用独立的 thread_id，跑完立刻删掉 checkpoint——
     评测不能污染 data/agent_checkpoints.sqlite，也不能让上一条用例的历史
     影响下一条（否则「多工具」用例会因为前文而白拿分）。
+
+    `location` 是模拟「客户端授权提供的位置」。它走的是 `Context` 而不是工具参数，
+    所以**完全不碰 cassette**——也不计入工具输出指纹。固定一个值就能让定位类用例
+    可复现，比原来靠服务器 IP 定位（每次跑都可能不同）反而更干净。
     """
     thread_id = f"eval-{run_slug}-{case['id']}-{repeat_index}-{uuid.uuid4().hex[:6]}"
     started = time.perf_counter()
@@ -332,7 +342,9 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
     tool_output_digest: str | None = None
 
     try:
-        async for event in agent_core.stream_agent("eval-user", thread_id, case["query"]):
+        async for event in agent_core.stream_agent(
+            "eval-user", thread_id, case["query"], location=location
+        ):
             kind = event.get("type")
             if kind == "assistant_delta":
                 if ttft_ms is None:
@@ -389,6 +401,8 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
         "repeat": repeat_index,
         "query": case["query"],
         "thread_id": thread_id,
+        # 记下这一轮模拟的客户端位置，否则「定位类用例跑的是什么位置」事后无从考证
+        "client_location": location,
         "expected_tools": expected,
         "called_tools": called,
         "unrecognized_tool_names": unrecognized,
@@ -739,6 +753,11 @@ async def main() -> int:
     )
     parser.add_argument("--cassette", default="default", help="cassette 名，对应 eval/cassettes/<名>.json")
     parser.add_argument("--cassette-dir", type=Path, default=DEFAULT_CASSETTE_DIR, help="cassette 目录")
+    parser.add_argument(
+        "--location",
+        default=DEFAULT_EVAL_LOCATION,
+        help=f"模拟客户端授权提供的位置，用于定位类用例（默认 {DEFAULT_EVAL_LOCATION}；传空字符串表示不提供）",
+    )
     args = parser.parse_args()
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -799,7 +818,7 @@ async def main() -> int:
     print(f"  模型            {env['provider']} / {env['model']} (temperature={env['temperature']})")
     if env["title_model"]:
         print(f"  标题模型        {env['title_model']}（评测不走 service.py，不会调用它）")
-    print(f"  工具来源        MCP server（stdio，独立子进程）")
+    print("  工具来源        MCP server ×4（stdio 子进程）+ 进程内 ×1（get_user_location）")
     print(
         "  录制回放        "
         + (
@@ -847,6 +866,7 @@ async def main() -> int:
         "category_filter": args.category,
         "cassette_mode": args.cassette_mode,
         "cassette": str(cassette_path) if args.cassette_mode != "off" else None,
+        "client_location": args.location or None,
     }
 
     tasks = [(case, index) for index in range(args.repeat) for case in cases]
@@ -863,7 +883,7 @@ async def main() -> int:
 
         async def limited(case: dict, index: int) -> dict:
             async with semaphore:
-                return await run_case(case, index, run_slug)
+                return await run_case(case, index, run_slug, args.location)
 
         pending = [asyncio.create_task(limited(case, index)) for case, index in tasks]
         for done, task in enumerate(asyncio.as_completed(pending), start=1):
@@ -873,7 +893,7 @@ async def main() -> int:
             print(f"  [{done:>3}/{len(tasks)}] {status} {record['case_id']}")
     else:
         for done, (case, index) in enumerate(tasks, start=1):
-            record = await run_case(case, index, run_slug)
+            record = await run_case(case, index, run_slug, args.location)
             records.append(record)
             status = "OK " if record["e2e_ok"] else "FAIL"
             print(f"  [{done:>3}/{len(tasks)}] {status} {record['case_id']}")
