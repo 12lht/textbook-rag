@@ -6,6 +6,7 @@
 
 - FastAPI + 网页前端
 - CLI 调试入口
+- 账号注册 / 登录，会话按用户隔离（游客也能用，只是没有长期记忆）
 - 工具通过 MCP 协议跑在独立进程（可独立部署、可复用），需要请求上下文的工具留在进程内
 - 天气查询，以及由用户授权提供的客户端定位
 - Tavily 网页搜索与正文提取
@@ -21,9 +22,10 @@ tools.py                   4 个「纯函数」工具的实现（零框架依赖
 mcp_server.py              MCP server：用 stdio 把 tools.py 暴露给 Agent
 geocode.py                 客户端坐标 → 可读位置（高德逆地理编码，带缓存）
 agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、3 个进程内工具（定位 + 记忆读写）、消息状态读写
-conversations.py           会话元数据：id、标题、重命名标记（纯应用层，不依赖 Agent）
+users.py                   账号与登录：账号表、密码哈希、登录令牌（纯应用层，不依赖 Agent）
+conversations.py           会话元数据：id、标题、重命名标记、会话归属（纯应用层，不依赖 Agent）
 memories.py                跨会话长期记忆：一条事实一行存进 SQLite，去重、清洗、上限（纯应用层，不依赖 Agent）
-service.py                 应用层：把上面几层拼成用例（列表/新建/重命名/删除/回退/对话流/位置收敛/注入记忆后端）
+service.py                 应用层：把上面几层拼成用例（身份收敛/会话用例/回退/对话流/位置收敛/注入记忆后端）
 api.py                     FastAPI 后端
 cli.py                     CLI 调试入口
 cassette.py                评测用的工具录制回放
@@ -32,7 +34,7 @@ eval/run.py                评测 runner
 eval/baselines/            历史基线 JSON
 eval/cassettes/            录制下来的工具返回值
 frontend/index.html        网页前端
-data/                      SQLite（checkpoint / 长期记忆）和会话元数据 JSON
+data/                      SQLite（checkpoint / 长期记忆 / 账号）和会话元数据 JSON
 raw/                       开发历史归档
 learning-notes.md          学习笔记
 requirements.txt           固定版本依赖
@@ -40,13 +42,13 @@ requirements.txt           固定版本依赖
 
 ### 三层怎么分
 
-依赖方向是单向的：`api.py` / `cli.py` → `service.py` → `conversations.py` + `agent_core.py`。
+依赖方向是单向的：`api.py` / `cli.py` → `service.py` → `conversations.py` + `users.py` + `agent_core.py`。
 
-- **`conversations.py`（会话元数据）**：只读写 `data/` 下的 JSON，**不 import 任何 Agent 相关的东西**。换成任何应用都是这一套。
+- **`conversations.py` / `users.py` / `memories.py`（业务数据）**：只读写 `data/` 下的文件，**不 import 任何 Agent 相关的东西**。换成任何应用都是这一套。
 - **`agent_core.py`（Agent 编排）**：图、工具、模型，以及读写会话「消息状态」的操作（`get_history` / `rewind_thread` / `stream_agent`）。它**不 import `conversations`**，所以标题策略、第几轮起标题这类业务判断不在这里。
-- **`service.py`（应用层）**：跨层组合集中在这里，不散落到路由和命令行里。典型例子：「删除会话」要同时删 LangGraph 的 checkpoint 和元数据 JSON；「会话列表」要同时读标题和消息条数；「回退后会话被清空」要把标题还原成默认值。
+- **`service.py`（应用层）**：跨层组合集中在这里，不散落到路由和命令行里。典型例子：「删除会话」要同时删 LangGraph 的 checkpoint 和元数据 JSON；「会话列表」要同时读标题和消息条数；「回退后会话被清空」要把标题还原成默认值；「你是谁」要从令牌解析出来再决定这次能不能用长期记忆。
 
-判断一个新功能该放哪：**碰不碰 LangGraph 的状态？** 碰 → `agent_core.py`；只碰业务数据 → `conversations.py`；需要两边一起动 → `service.py`。
+判断一个新功能该放哪：**碰不碰 LangGraph 的状态？** 碰 → `agent_core.py`；只碰业务数据 → `conversations.py` / `users.py`；需要两边一起动 → `service.py`。
 
 ## 工具为什么跑在另一个进程里（MCP）
 
@@ -223,12 +225,143 @@ q           退出程序
 
 直接输入普通消息时，如果当前没有活动会话，程序会自动创建新会话。
 
+CLI **不走登录**：它是本机单人使用，直接用 `service.CLI_IDENTITY`（默认账号 + **开着**记忆）。网页侧的游客用的是同一个默认账号但记忆是关的——关记忆的理由是「几个陌生游客共用一个账号会互看偏好」，本机单人没有这个问题，所以两个场景下同一个 `user_id` 的 `memory_enabled` 不同。这也是为什么这个开关是逐请求的、而不是绑在身份上。
+
+## 账号与登录
+
+**不登录也能用**——没带令牌就是「游客」，仍然能聊天、能建会话。登录之后多两件事：会话按用户隔离，以及开启跨会话的长期记忆。
+
+```text
+Authorization: Bearer <token>
+        │
+        ▼
+api.bearer_token          只负责从头上把令牌抠出来
+        │
+        ▼
+service.resolve_identity  ← 「你是谁」的唯一入口（这一层才判有效性）
+        │  Identity(user_id, account, memory_enabled)
+        ▼
+会话用例（按 user_id 过滤）/ 聊天（带上 memory_enabled）
+```
+
+### 账号
+
+`account` 一个字段同时接住用户名 / 手机号 / 邮箱（字母数字下划线点 @ + -），不让用户先选「用哪种方式登录」。
+
+- `account` 存**原文**（界面显示用），`account_key` 存归一化后的值（`strip().lower()`，UNIQUE）。用户叫 `TaoGe` 就该显示 `TaoGe`，但注册 `taoge` 必须被挡住。
+- `user_id` 是**与账号无关的不透明 id**（`u-xxxxxxxxxx`）。不拿账号当主键——账号以后可能允许修改，而「这个人的历史数据」不该跟着变。
+- 判重靠 `INSERT` 撞唯一约束，**不靠「先查再插」**：先查再插中间有一个窗口，两个并发注册会同时通过检查。
+
+### 密码怎么存
+
+用标准库 `hashlib.pbkdf2_hmac`（OpenSSL 实现，纯 C），存成带版本前缀的字符串：
+
+```text
+pbkdf2_sha256$600000$<salt_b64>$<hash_b64>
+```
+
+- **不存明文、不做可逆加密**。加密意味着有密钥，而密钥就在同一个仓库里，等于没加密。
+- **每个用户一个随机 salt**。否则两个人密码相同就是同一个哈希值，一眼能看出来，彩虹表也直接通用。
+- **迭代次数写进字符串**。以后调高（机器变快、或嫌慢），老记录仍按它自己记的次数验证通过，不需要强制所有人改密码——校验时**从存储值里读参数**，不用当前的全局常量，这是版本前缀的全部意义。
+- 实测一次哈希 113ms（600000 次迭代）。
+
+两个细节：
+
+- **账号不存在时也跑一次哈希**（拿一个 `_DUMMY_HASH` 陪跑）。否则「账号不存在」立刻返回、「密码错」要花 113ms，这个时间差就是一个「该账号已注册」的探测器。实测两条路都是 118~119ms。
+- 比较摘要用 `hmac.compare_digest`：普通的 `==` 在第一个不同的字节处提前返回，理论上可以被一个字节一个字节地试探。
+
+### 令牌
+
+登录成功后签发 `secrets.token_urlsafe(32)`（约 256 位随机），**原文只在这一次响应里返回**，库里只存它的 sha256 摘要。
+
+不需要 salt 和迭代：令牌本身就是高熵随机值，猜不出来，也就不怕彩虹表——哈希只是为了「库被人看到」不等于「拿到一批能用的令牌」。
+
+- **过期用绝对时间**（登录时定死 30 天），不做滑动续期。
+- **`resolve_token` 是纯读**。想顺手刷新 `last_seen` 的话，每个请求都会多一次写事务，而实测一次提交在这个环境要 ~30ms（成本全在回滚 journal 的建删文件上）。要滑动续期得改成「距上次刷新超过 N 分钟才写」。
+- 过期令牌行由 `service.startup()` 在进程启动时顺手清一次（没有定时任务）。
+
+### 令牌不认时报 401，不降级成游客
+
+这两件事必须分开：
+
+| 情况 | 处理 | 为什么 |
+| --- | --- | --- |
+| 没带 `Authorization` 头 | 游客身份，正常使用 | 未登录是正常状态，不是错误分支 |
+| 带了令牌但不认（过期 / 撤销 / 伪造） | **401** | 静默降级成游客会让用户看到**游客名下的会话**，还以为那是自己的 |
+
+前端收到 401 就清掉本地令牌、退回游客态并提示重新登录。`Authorization` 头存在但格式不对（缺 `Bearer` 前缀）同样报 401——客户端明明想带凭证却被当成游客，会让「头部拼错了」表现成「登录态时有时无」，极难排查。
+
+### 越权返回 404，不返回 403
+
+**别人的会话一律报「不存在」。** 403 等于告诉对方「这个 thread_id 是真的，只是不属于你」，可以拿它枚举别人的会话 id；404 什么都不泄露，而且从用户视角看，别人的会话本来就等于不存在。
+
+所有越权判断只走 `service._require_owned` 一个入口，存在性和归属**一起判**——写成「先查存在、再查归属」两段式，中间一有别的分支就很容易只判了前一半。
+
+### 客户端不能再自报 `user_id`
+
+以前 `ChatRequest` 里有个 `user_id` 字段（默认 `"1"`），已经**删掉**。身份的唯一可信来源是服务端签发的令牌，请求体里的 `user_id` 会被直接忽略。同理，聊天的归属检查放在开流**之前**做（`service.begin_chat`）——SSE 一旦开始，响应头就已经发出去了，之后只能往流里塞 error 事件，前端拿到的是 200，没法用状态码统一处理。
+
+### 游客共用默认账号，所以不隔离
+
+`GUEST_USER_ID = "1"`，所有未登录请求都挂在它名下。因此：
+
+- **游客之间不隔离**——他们共用会话列表。这是加登录之前就有的行为（那时所有请求都硬编码 `user_id = "1"`），不是本次疏忽；要隔离只能给游客发匿名令牌。
+- **游客的长期记忆是关的**。否则几个陌生人会互相读到对方记下的偏好——那就不只是「看到会话」，而是「看到别人的偏好」。
+- 改造之前建的会话在归属文件里没有记录，一律按默认账号处理——它们当时本来就属于 `"1"`，这是把旧事实补上，不是猜。兜底只写在 `conversations._owner_from` 一处。
+
+### 关掉记忆必须**明说**，不能只是「不提」
+
+这是实测踩出来的。工具列表是**进程级冻结**的（建 MCP 会话时算好，一进程一份），所以游客这一侧照样看得见 `save_memory` 的说明书（工具描述就是 docstring）。只把系统提示退回 `SYSTEM_PROMPT` 的那版上线后：
+
+> 问：用一句话说明你是什么。
+> 答：我是一个……**能记住你长期偏好**以备后续对话使用的 AI 助手。
+
+模型读的是工具说明书。等用户真说了值得记的事、工具回一句「没开启」，模型才反应过来，可承诺已经出口了。所以逐请求关掉记忆时会拼上 `MEMORY_OFF_GUIDE` 明确告诉模型「这次记不住」，并让它如实告诉用户「需要先登录」。加上之后同一句话的回答变成：
+
+> 我是本次对话中为你提供帮助的 AI 助手……但当前**没有开启长期记忆**，所以这次聊完就忘了。
+
+工具的**描述文本**目前仍然是进程级冻结的（按请求换工具表要改 `bound_model` 的缓存结构，代价大），所以这道防线有两层：提示词劝住模型别调，工具里那道检查兜底——真调了会返回「本次对话没有开启长期记忆」，不会写进库。
+
 ## API 接口
+
+除了 `/api/health`、`/`、`/api/location` 和四个 `/api/auth/*` 之外，其余端点都会按 `Authorization` 头里的令牌决定「看得见哪些会话」，无令牌即游客。
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
+| `POST` | `/api/auth/register` | 注册（成功即自动登录，返回用户 + 令牌） |
+| `POST` | `/api/auth/login` | 登录，返回用户 + 令牌 |
+| `POST` | `/api/auth/logout` | 撤销当前令牌（**不要求令牌仍有效**，过期时也能登出） |
+| `GET` | `/api/auth/me` | 当前身份（游客返回 `guest: true`，不是错误） |
 | `GET` | `/api/conversations` | 获取会话列表 |
+| `POST` | `/api/conversations` | 创建新会话 |
+| `DELETE` | `/api/conversations/{thread_id}` | 删除会话 |
+| `PATCH` | `/api/conversations/{thread_id}` | 重命名会话 |
+| `GET` | `/api/conversations/{thread_id}/messages` | 获取历史消息 |
+| `POST` | `/api/conversations/{thread_id}/rewind` | 回退到某条用户消息之前 |
+| `POST` | `/api/chat/stream` | SSE 流式聊天 |
+| `POST` | `/api/location` | 把客户端位置解析成可读城市名 |
+
+注册 / 登录请求：
+
+```json
+{
+  "account": "taoge@example.com",
+  "password": "至少 8 位"
+}
+```
+
+`account` 一个字段接住用户名 / 手机号 / 邮箱。成功返回：
+
+```json
+{
+  "user": { "user_id": "u-xxxxxxxxxx", "account": "taoge@example.com", "created_at": "..." },
+  "token": "……",
+  "expires_at": "..."
+}
+```
+
+注册重名或格式不合规 → 400；登录失败 → 401。**「账号不存在」和「密码错误」返回同一句话**，不给攻击者做「这个账号注册了没有」的探测。
 | `POST` | `/api/conversations` | 创建新会话 |
 | `DELETE` | `/api/conversations/{thread_id}` | 删除会话 |
 | `PATCH` | `/api/conversations/{thread_id}` | 重命名会话 |
@@ -265,12 +398,13 @@ q           退出程序
 {
   "message": "我这里未来几天的天气怎么样？",
   "thread_id": null,
-  "user_id": "1",
   "location": { "latitude": 39.90923, "longitude": 116.397428 }
 }
 ```
 
 `thread_id` 为空时，后端会自动创建新会话。后续请求使用返回的 `thread_id` 即可继续对话。
+
+请求体里**没有 `user_id`**：身份只认 `Authorization` 头里的令牌，客户端自报的 `user_id` 会被忽略（字段已从 `ChatRequest` 中删除）。拿别人的 `thread_id` 来聊会直接 404，且在 SSE 开流之前就返回。
 
 ### 位置怎么传
 
@@ -301,10 +435,16 @@ q           退出程序
 data/agent_checkpoints.sqlite
 data/conversation_summaries.json
 data/conversation_renames.json
+data/conversation_owners.json
+data/users.sqlite3
 data/memories.sqlite3
 ```
 
-SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。`conversation_renames.json` 记录哪些会话被手动改过名字，用来让自动起标题跳过它们。`memories.sqlite3` 一条事实一行地存跨会话的长期事实（老版本的 `data/memories.json` 会在第一次启动时自动导入，然后改名成 `memories.json.migrated`）。删除这些文件会清空本地会话记录和长期记忆。
+SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。三个 JSON 各管一件事：`conversation_summaries.json` 是扁平 dict（`thread_id -> 标题`），被 `/api/conversations` 和前端直接消费，所以「重命名标记」和「会话归属」各自单独一个文件，格式一样都是 `{thread_id: 值}`——往里加字段会牵动太多地方。
+
+`users.sqlite3` 存账号和登录令牌（两张表；令牌只存 sha256 摘要）。`memories.sqlite3` 一条事实一行地存跨会话的长期事实（老版本的 `data/memories.json` 会在第一次启动时自动导入，然后改名成 `memories.json.migrated`）。删除这些文件会清空本地会话记录、账号和长期记忆。
+
+`conversation_owners.json` 里**没有记录**的会话按默认账号（游客）处理，不做迁移写入——那是改造前会话的真实归属。这个文件也不需要清理残留：`ids_of_user` 以会话表为准遍历，会话删了记录留着也不会「复活」。
 
 ## 长期记忆
 
@@ -335,6 +475,8 @@ agent_core.py          两个进程内工具：模型自己判断该不该记，
 - **「读」是按需的，不做自动带入**。模型要用了才调 `recall_memory`，代码不会在请求开始时把记忆塞进系统提示。**同一会话的窗口内不需要重读**：那条事实至少在上下文里有两份（用户自己的原话、模型 `save_memory` 时填的参数），实测连着三轮需要它的对话一次都没重新读。真正需要重读的只有两种情况——超出窗口被裁掉（>20 轮），以及**换了一个新会话**。后一种现在完全依赖「模型想起来去读」，这是已知的缺口（见「待学习」里的自动带入 / top-k 检索）。
 - **存储层不需要写锁，初始化需要**。去重和累加都在一个事务里，原子性由 SQLite 保证。但库文件不存在时多个线程同时 `connect` 会互相抢着建文件（报 `attempt to write a readonly database`，很像权限问题其实不是），所以 `_connect` 里对「冷启动」做了双重检查加锁。
 - **工具的 docstring 就是提示词**。它会被原样当 description 发给模型，所以改 docstring 等于改提示词——**改完必须跑一次真实对话回归**（`probe-memory-live.py`），不能只看代码。
+- **开关分两种粒度，不能混成一个**。存储后端是**进程级**注入的（`set_memory_backend`，进程活多久就多久变）；「这个人能不能用记忆」是**逐请求**的（`Context.memory_enabled`），因为同一个进程里登录用户要能记、共用一个默认账号的游客不能记。混成一个就会出现「为了挡游客，把登录用户的记忆也关了」。
+- **逐请求关掉记忆时，提示词必须主动说明**，否则模型会照着工具说明书对用户说「我记住了」。详见上面「账号与登录」最后一节。
 
 ## 工具
 
@@ -353,6 +495,8 @@ agent_core.py          两个进程内工具：模型自己判断该不该记，
 前 4 个的实现在 `tools.py`、注册在 `mcp_server.py`，Agent 侧通过 MCP 加载；后 3 个都在 `agent_core.py`。分界依据见上面「什么工具不能放进 MCP」——判据是**返回值只由参数决定就放 MCP，需要本次请求上下文的就留在进程内**。
 
 两个记忆工具**只在注入了存储后端时才注册**（`agent_core.set_memory_backend`，由 `service.py` 调用），系统提示里的记忆说明也只在此时拼上。所以评测环境拿到的工具集与提示词和基线逐字一致。
+
+> 注意这是**进程级**的注册开关，和「这次请求允不允许用记忆」（`Context.memory_enabled`）是两件事。后端注入之后就一直在，游客那次请求里工具**仍然挂在工具表上**，只是提示词改成了明确说明「这次记不住」，调用也会被拒。要按请求换工具表得改 `bound_model` 的缓存结构，代价不划算。
 
 注册顺序刻意与改造前保持一致（有些模型对工具顺序敏感）。合并两处工具后由 `agent_core._TOOL_ORDER` 统一排序——**它是工具顺序的唯一来源**，新增工具要登记进去。不要在 `api.py` 或 `cli.py` 里复制工具实现。
 

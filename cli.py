@@ -12,8 +12,8 @@ async def _prompt(text: str) -> str:
     return await asyncio.to_thread(input, text)
 
 
-async def print_history(thread_id: str) -> None:
-    history = await service.conversation_messages(thread_id)
+async def print_history(thread_id: str, user_id: str) -> None:
+    history = await service.conversation_messages(thread_id, user_id)
     if not history:
         print("该会话暂无可显示的对话内容。")
         return
@@ -23,16 +23,20 @@ async def print_history(thread_id: str) -> None:
         print(f"{role}：{message['content']}")
 
 
-async def load_summaries() -> dict[str, str]:
+async def load_summaries(user_id: str) -> dict[str, str]:
     return {
         item["thread_id"]: item["summary"]
-        for item in await service.list_conversations()
+        for item in await service.list_conversations(user_id)
     }
 
 
-async def run_cli(user_id: str = "1") -> None:
+async def run_cli(identity: service.Identity | None = None) -> None:
+    # 命令行不走登录：本机单人使用，直接用 service 里备好的那个身份
+    # （默认账号 + **开着**记忆，理由见 service.CLI_IDENTITY）。
+    who = identity or service.CLI_IDENTITY
+    user_id = who.user_id
     active_thread_id = None
-    summaries = await load_summaries()
+    summaries = await load_summaries(user_id)
 
     print("请选择会话，或直接输入问题开始新会话。")
     print("输入 /switch 选择历史会话，输入 /restart 新建会话。")
@@ -50,8 +54,8 @@ async def run_cli(user_id: str = "1") -> None:
             print("会话结束。")
             return
         if command == "/restart":
-            active_thread_id = service.create_conversation()["thread_id"]
-            summaries = await load_summaries()
+            active_thread_id = service.create_conversation(user_id)["thread_id"]
+            summaries = await load_summaries(user_id)
             print("已开启新对话。")
             continue
         if command == "/switch":
@@ -70,14 +74,14 @@ async def run_cli(user_id: str = "1") -> None:
                 continue
             active_thread_id = conversations[int(choice) - 1][0]
             print(f"已切换到：{summaries[active_thread_id]}")
-            await print_history(active_thread_id)
+            await print_history(active_thread_id, user_id)
             continue
         if not user_input:
             continue
 
         if active_thread_id is None:
-            active_thread_id = service.create_conversation()["thread_id"]
-            summaries = await load_summaries()
+            active_thread_id = service.create_conversation(user_id)["thread_id"]
+            summaries = await load_summaries(user_id)
             print("已自动开启新会话。")
 
         # 回答是流式来的：先打一次「助手：」，之后逐段拼接输出。
@@ -85,7 +89,9 @@ async def run_cli(user_id: str = "1") -> None:
         # "assistant"，而 service/agent_core 从来不发这个事件，所以那段分支
         # 一次都没执行过，CLI 实际上不会打印任何回答。这次重写顺手改正。
         assistant_started = False
-        async for event in service.chat_events(user_id, active_thread_id, user_input):
+        async for event in service.chat_events(
+            user_id, active_thread_id, user_input, memory_enabled=who.memory_enabled
+        ):
             if event["type"] == "tool_call":
                 print(f"\n[工具] {event['tool']}")
             elif event["type"] == "tool_result":

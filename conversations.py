@@ -1,11 +1,29 @@
-"""会话元数据存储：会话 id、可读标题、以及「标题被手动改过」的标记。
+"""会话元数据存储：会话 id、可读标题、「标题被手动改过」的标记、以及会话归属。
 
-这一层是纯应用层：只读写 `data/` 下的两个 JSON 文件，**不 import 任何 agent 相关的东西**。
+这一层是纯应用层：只读写 `data/` 下的三个 JSON 文件，**不 import 任何 agent 相关的东西**
+（只从 `users.py` 取一个默认账号常量，那是身份层，同样和 agent 无关）。
 Agent 编排（LangGraph 图、工具、模型、消息状态）都在 `agent_core.py`；
 把两边拼成用例的是 `service.py`。
 
-顺带说明为什么「重命名标记」单独放一个文件：`conversation_summaries.json` 的格式
-（扁平 dict）被 `/api/conversations` 和前端直接消费，加字段会牵动太多地方。
+三个文件是拆开的，不是「多此一举」：`conversation_summaries.json` 是扁平 dict
+（`thread_id -> 标题`），被 `/api/conversations` 和前端直接消费；往里加字段会牵动
+太多地方。所以「重命名标记」和「归属」各自单独一个文件，格式都一样：
+
+```text
+conversation_summaries.json  {thread_id: 标题}
+conversation_renames.json    {thread_id: true}
+conversation_owners.json     {thread_id: user_id}
+```
+
+## 归属为什么要有兜底
+
+本次改造之前建的会话，在归属文件里**没有记录**。它们当时全部属于硬编码的
+`user_id = "1"`，所以查不到就按默认账号算——这是**把旧事实补上，不是猜**。
+兜底只写在 `_owner_from` 一处，凡是判断「这个会话是不是你的」都经过它，
+免得某个入口忘了兜底、把老会话判成别人的（那是让用户丢数据）。
+
+归属文件里**不删残留**：会话被删掉后若归属记录还在，`ids_of_user` 也不受影响，
+因为它以**会话表**为准去遍历（见那里的注释）。
 """
 from __future__ import annotations
 
@@ -13,10 +31,13 @@ import json
 import uuid
 from pathlib import Path
 
+from users import GUEST_USER_ID
+
 DATA_DIR = Path(__file__).with_name("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SUMMARY_PATH = DATA_DIR / "conversation_summaries.json"
 RENAME_PATH = DATA_DIR / "conversation_renames.json"
+OWNER_PATH = DATA_DIR / "conversation_owners.json"
 
 MAX_TITLE_LENGTH = 30
 DEFAULT_SUMMARY = "新会话（暂无消息）"
@@ -52,6 +73,14 @@ def save_renamed_flags(flags: dict[str, bool]) -> None:
     _save(RENAME_PATH, flags)
 
 
+def load_conversation_owners() -> dict[str, str]:
+    return _load(OWNER_PATH)
+
+
+def save_conversation_owners(owners: dict[str, str]) -> None:
+    _save(OWNER_PATH, owners)
+
+
 def is_renamed(thread_id: str) -> bool:
     return bool(load_renamed_flags().get(thread_id))
 
@@ -66,16 +95,59 @@ def conversation_exists(thread_id: str) -> bool:
     return thread_id in load_conversation_summaries()
 
 
+def _owner_from(owners: dict[str, str], thread_id: str) -> str:
+    """归属规则**只在这一处**：没记录的算默认账号（理由见模块开头）。"""
+    return owners.get(thread_id) or GUEST_USER_ID
+
+
+def owner_of(thread_id: str) -> str:
+    """这个会话属于谁。**任何越权判断都必须经过它。**
+
+    注意它对**不存在**的会话也会返回默认账号——它只回答「归属」，
+    不回答「存不存在」。要连存在性一起判，用 `belongs_to`。
+    """
+    return _owner_from(load_conversation_owners(), thread_id)
+
+
+def ids_of_user(user_id: str) -> set[str]:
+    """这个用户名下的全部 thread_id。
+
+    以**会话表**为准去遍历（不是以归属表为准），好处是「会话已删、归属记录
+    还留在文件里」的残渣自动被滤掉，不用专门去清理那个文件。
+
+    归属判断走 `_owner_from`，所以老会话（没有记录的）会正确落到默认账号名下。
+    """
+    owners = load_conversation_owners()
+    return {
+        thread_id
+        for thread_id in load_conversation_summaries()
+        if _owner_from(owners, thread_id) == user_id
+    }
+
+
+def belongs_to(thread_id: str, user_id: str) -> bool:
+    """会话存在、且属于这个用户。**越权判断只走这一个入口。**"""
+    return conversation_exists(thread_id) and owner_of(thread_id) == user_id
+
+
 def new_thread_id() -> str:
     return f"t-{uuid.uuid4().hex[:8]}"
 
 
-def create_conversation() -> str:
-    """登记一个新会话，返回 thread_id。只写元数据，不碰 Agent。"""
+def create_conversation(user_id: str) -> str:
+    """登记一个新会话、记下归属，返回 thread_id。只写元数据，不碰 Agent。
+
+    `user_id` **不给默认值**：让每个调用方都必须先想清楚「这是谁的会话」。
+    给个默认值的话，新写的入口很容易忘传，会话就静悄悄挂到默认账号名下了。
+    """
     thread_id = new_thread_id()
     summaries = load_conversation_summaries()
     summaries[thread_id] = DEFAULT_SUMMARY
     save_conversation_summaries(summaries)
+
+    owners = load_conversation_owners()
+    owners[thread_id] = str(user_id)
+    save_conversation_owners(owners)
     return thread_id
 
 
@@ -121,11 +193,19 @@ def reset_summary(thread_id: str) -> None:
 
 
 def drop_conversation(thread_id: str) -> bool:
-    """删掉会话的元数据（标题 + 重命名标记）。返回它此前是否存在。"""
+    """删掉会话的元数据（标题 + 重命名标记 + 归属）。返回它此前是否存在。
+
+    三份都要删：留着归属记录不会让会话「复活」（`ids_of_user` 以会话表为准），
+    但会一直堆在文件里，而且万一 thread_id 被复用就会串号。
+    """
     summaries = load_conversation_summaries()
     if thread_id not in summaries:
         return False
     del summaries[thread_id]
     save_conversation_summaries(summaries)
     clear_renamed_flag(thread_id)
+
+    owners = load_conversation_owners()
+    if owners.pop(thread_id, None) is not None:
+        save_conversation_owners(owners)
     return True

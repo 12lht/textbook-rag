@@ -108,6 +108,34 @@
     .send:disabled { opacity: .45; cursor: wait; }
     .hint { margin-top: 10px; color: var(--muted); text-align: center; font-size: 11px; }
     .hint.error { color: var(--accent-dark); font-weight: 600; }
+    /* 账号区。游客和登录态的差别要一眼看得出来：不只是名字不同，
+       还要说清「这次对话记不记长期记忆」——不然用户会以为退出登录后
+       模型还记得他，或者反过来以为登录了但没记住。 */
+    .account { flex: none; margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.66); }
+    .account-line { display: flex; align-items: center; gap: 10px; }
+    .account-who { flex: 1; min-width: 0; }
+    .account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+    .account-note { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+    .account-action { flex: none; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fff; font-size: 12px; font-weight: 600; }
+    .account-action:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .account-action.danger { color: var(--accent-dark); }
+    .account-action.danger:hover { border-color: var(--accent); background: #fff4f1; }
+    .modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(24,32,30,.42); }
+    .modal[hidden] { display: none; }
+    .modal-card { position: relative; width: min(360px, 100%); padding: 24px; border-radius: 18px; background: #fffdf9; box-shadow: 0 26px 70px rgba(20,32,25,.32); }
+    .modal-close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 18px; line-height: 1; }
+    .modal-close:hover { color: var(--ink); background: #f2efe8; }
+    .modal-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+    .modal-tab { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: #fff; font-size: 13px; font-weight: 600; }
+    .modal-tab.active { border-color: var(--ink); color: #fff; background: var(--ink); }
+    .field { display: block; margin-bottom: 12px; }
+    .field span { display: block; margin-bottom: 6px; color: var(--muted); font: 11px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+    .field input { width: 100%; padding: 11px 12px; border: 1px solid #cfdacf; border-radius: 10px; color: var(--ink); background: #fff; outline: none; }
+    .field input:focus { border-color: var(--accent); }
+    .modal-error { min-height: 18px; margin-bottom: 6px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+    .modal-submit { width: 100%; padding: 12px; border: 0; border-radius: 11px; color: #fff; background: var(--accent); font-weight: 600; }
+    .modal-submit:hover { background: var(--accent-dark); }
+    .modal-submit:disabled { opacity: .6; cursor: wait; }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
     @media (max-width: 760px) {
       .shell { display: flex; flex-direction: column; }
@@ -132,6 +160,15 @@
       <div class="brand">
         <div class="brand-mark">A</div>
         <div><div class="brand-name">Agent Workspace</div><div class="brand-sub">weather · web · memory</div></div>
+      </div>
+      <div class="account">
+        <div class="account-line">
+          <div class="account-who">
+            <div class="account-name" id="accountName">未登录</div>
+            <div class="account-note" id="accountNote">游客模式 · 不记录长期记忆</div>
+          </div>
+          <button class="account-action" id="accountAction" type="button">登录 / 注册</button>
+        </div>
       </div>
       <button class="new-chat" id="newChat">＋ 新建会话</button>
       <div class="section-label">Conversations · 右键管理</div>
@@ -165,6 +202,21 @@
       </div>
     </main>
   </div>
+  <div class="modal" id="authModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="authSubmit">
+      <button class="modal-close" id="authClose" type="button" aria-label="关闭">×</button>
+      <div class="modal-tabs">
+        <button class="modal-tab active" type="button" data-mode="login">登录</button>
+        <button class="modal-tab" type="button" data-mode="register">注册</button>
+      </div>
+      <form id="authForm">
+        <label class="field"><span>账号</span><input id="authAccount" type="text" autocomplete="username" placeholder="用户名 / 手机号 / 邮箱" /></label>
+        <label class="field"><span>密码</span><input id="authPassword" type="password" autocomplete="current-password" placeholder="你的密码" /></label>
+        <div class="modal-error" id="authError" role="alert"></div>
+        <button class="modal-submit" id="authSubmit" type="submit">登录</button>
+      </form>
+    </div>
+  </div>
   <div class="context-menu" id="conversationMenu" role="menu" hidden>
     <button type="button" class="context-menu-item" role="menuitem" data-action="rename">重命名</button>
     <button type="button" class="context-menu-item danger" role="menuitem" data-action="delete">删除会话</button>
@@ -185,8 +237,213 @@
     const scrollBottomButton = $('#scrollBottom');
     const conversationMenu = $('#conversationMenu');
     const locateButton = $('#locate');
+    const accountName = $('#accountName');
+    const accountNote = $('#accountNote');
+    const accountAction = $('#accountAction');
+    const authModal = $('#authModal');
+    const authForm = $('#authForm');
+    const authAccount = $('#authAccount');
+    const authPassword = $('#authPassword');
+    const authError = $('#authError');
+    const authSubmit = $('#authSubmit');
     const HINT_IDLE = 'Enter 发送 · Shift + Enter 换行';
     const LOCATION_KEY = 'agent.location';
+    const TOKEN_KEY = 'agent.token';
+
+    // ---------- 身份 ----------
+    //
+    // 令牌是服务端签发的、放在 localStorage 里的唯一凭证。**前端不再自己声称
+    // 「我是谁」**：以前聊天请求里带一个写死的 user_id，任何人都能改成别人的。
+    // 现在服务端只认令牌，请求体里的 user_id 会被忽略。
+    //
+    // `identity` 是 /api/auth/me 的返回，用来决定界面怎么显示；它只是**展示用**，
+    // 真正的权限判断在服务端。别拿它当安全边界。
+    let token = readToken();
+    let identity = null;
+    let authMode = 'login';
+    // 401 只处理一次：一次页面操作可能并发打好几个请求，全都 401 的话
+    // 会重复清状态、重复弹提示。处理期间把它挡住。
+    let handlingUnauthorized = false;
+
+    function readToken() {
+      try { return localStorage.getItem(TOKEN_KEY) || null; } catch (error) { return null; }
+    }
+
+    function writeToken(value) {
+      token = value;
+      try {
+        if (value) localStorage.setItem(TOKEN_KEY, value);
+        else localStorage.removeItem(TOKEN_KEY);
+      } catch (error) {
+        // 无痕模式下 localStorage 会抛错。记不住令牌的后果是「刷新后退出登录」，
+        // 本次会话仍然可用，不值得打断用户。
+      }
+    }
+
+    function applyIdentity(me) {
+      identity = me && !me.guest
+        ? { account: me.account, guest: false, memory_enabled: Boolean(me.memory_enabled) }
+        : { account: null, guest: true, memory_enabled: false };
+      accountName.textContent = identity.guest ? '未登录' : identity.account;
+      accountNote.textContent = identity.guest
+        ? '游客模式 · 不记录长期记忆'
+        : '已登录 · 长期记忆已开启';
+      accountAction.textContent = identity.guest ? '登录 / 注册' : '退出';
+      accountAction.classList.toggle('danger', !identity.guest);
+      input.placeholder = identity.guest
+        ? '以游客身份提问（这次对话不会被记住）'
+        : '问点什么…';
+    }
+
+    // 回到「未选择会话」的空白页。切换身份时必须调用：上一个身份的会话不属于
+    // 新身份，留着旧消息会让人以为那是自己的。
+    function resetConversationView() {
+      state.threadId = null;
+      state.autoFollow = true;
+      conversationTitle.textContent = '未选择会话';
+      messages.innerHTML = '';
+      welcome.style.display = 'block';
+      updateScrollBottomButton();
+    }
+
+    // 所有接口都走这里：统一带令牌、统一处理 401。
+    //
+    // 401 的含义是「这个令牌不认了」（过期或被撤销）。这时候必须清掉本地令牌、
+    // 退回游客态——不然界面一直显示已登录，而每个请求都失败，用户完全不知道
+    // 发生了什么。后端**不会**在令牌失效时静默降级成游客，就是为了让这里能
+    // 明确地分辨出「该重新登录了」。
+    async function apiFetch(url, options = {}) {
+      const headers = Object.assign({}, options.headers || {});
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      if (response.status === 401 && token) await handleUnauthorized();
+      return response;
+    }
+
+    async function handleUnauthorized() {
+      if (handlingUnauthorized) return;
+      handlingUnauthorized = true;
+      writeToken(null);
+      applyIdentity(null);
+      resetConversationView();
+      setHint('登录已过期，请重新登录。', true);
+      try { await loadConversations(); } finally { handlingUnauthorized = false; }
+    }
+
+    // 用原生 fetch 而不是 apiFetch：这个函数本身就是用来判断令牌好坏的，
+    // 再走一层 401 处理会绕回来。
+    async function refreshIdentity() {
+      let me = null;
+      try {
+        const response = await fetch('/api/auth/me', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (response.ok) me = await response.json();
+        else if (response.status === 401) writeToken(null);
+      } catch (error) {
+        // 后端没起来：先按游客显示，真正聊天时会在 .hint 上给出连接错误
+      }
+      applyIdentity(me);
+    }
+
+    function openAuth(mode) {
+      authMode = mode === 'register' ? 'register' : 'login';
+      syncAuthMode();
+      authError.textContent = '';
+      authPassword.value = '';
+      authModal.hidden = false;
+      authAccount.focus({ preventScroll: true });
+    }
+
+    function closeAuth() {
+      authModal.hidden = true;
+      authPassword.value = '';
+      authError.textContent = '';
+    }
+
+    function syncAuthMode() {
+      document.querySelectorAll('.modal-tab').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.mode === authMode);
+      });
+      const registering = authMode === 'register';
+      authSubmit.textContent = registering ? '注册' : '登录';
+      authPassword.placeholder = registering ? '至少 8 位' : '你的密码';
+      authPassword.setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
+    }
+
+    // 登录成功后的收尾：换身份必然换会话列表，所以整页重置再重新拉。
+    async function adoptSession(data, message) {
+      writeToken(data.token);
+      applyIdentity({ account: data.user.account, guest: false, memory_enabled: true });
+      closeAuth();
+      resetConversationView();
+      await loadConversations();
+      setHint(message);
+    }
+
+    async function doLogout() {
+      try {
+        // 登出接口刻意不要求登录态有效：令牌过期时也得能登出，否则用户会卡在一个
+        // 点了没反应的按钮上。所以这里失败也不拦着下面清本地状态。
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+      } catch (error) {
+        // 忽略：本地状态清掉就够了
+      }
+      writeToken(null);
+      applyIdentity(null);
+      resetConversationView();
+      await loadConversations();
+      setHint('已退出登录，之后的对话不会被记住。');
+    }
+
+    authForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const account = authAccount.value.trim();
+      const password = authPassword.value;
+      authError.textContent = '';
+      if (!account || !password) {
+        authError.textContent = '账号和密码都要填。';
+        return;
+      }
+      authSubmit.disabled = true;
+      try {
+        // 走原生 fetch：这里失败了只该显示在弹窗里，不该顺手把外面的界面
+        // 也切回游客态（用户只是输错一次密码）。
+        const response = await fetch(`/api/auth/${authMode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account, password })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          authError.textContent = data.detail || `HTTP ${response.status}`;
+          return;
+        }
+        await adoptSession(data, authMode === 'login' ? '已登录。' : '注册成功，已自动登录。');
+      } catch (error) {
+        authError.textContent = `无法连接后端：${error.message}`;
+      } finally {
+        authSubmit.disabled = false;
+      }
+    });
+
+    document.querySelectorAll('.modal-tab').forEach((tab) => {
+      tab.onclick = () => { authMode = tab.dataset.mode; syncAuthMode(); authError.textContent = ''; };
+    });
+    $('#authClose').onclick = closeAuth;
+    accountAction.onclick = () => {
+      if (identity && !identity.guest) doLogout(); else openAuth('login');
+    };
+    // 点遮罩关闭（点卡片内部不关）
+    authModal.addEventListener('mousedown', (event) => {
+      if (event.target === authModal) closeAuth();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !authModal.hidden) closeAuth();
+    });
 
     function escapeHtml(value) {
       return value.replace(/[&<>'"]/g, (character) => ({
@@ -273,7 +530,7 @@
           async (position) => {
             const { latitude, longitude } = position.coords;
             try {
-              const response = await fetch('/api/location', {
+              const response = await apiFetch('/api/location', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ latitude, longitude })
@@ -440,7 +697,7 @@
       closeConversationMenu();
       let data;
       try {
-        const response = await fetch('/api/conversations');
+        const response = await apiFetch('/api/conversations');
         if (!response.ok) {
           setHint(`会话列表加载失败：${await readError(response, '会话列表加载失败')}`, true);
           return;
@@ -473,7 +730,7 @@
 
     async function deleteConversation(threadId, summary) {
       if (!window.confirm(`确定删除“${summary}”吗？此操作不可恢复。`)) return;
-      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
       if (!response.ok) {
         setHint(`删除失败：${await readError(response, '删除失败')}`, true);
         return;
@@ -511,7 +768,7 @@
 
     async function renameConversation(threadId, title) {
       try {
-        const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`, {
+        const response = await apiFetch(`/api/conversations/${encodeURIComponent(threadId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title })
@@ -601,7 +858,7 @@
     async function selectConversation(threadId) {
       setStatus('正在加载历史…', true);
       state.autoFollow = true;
-      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}/messages`);
+      const response = await apiFetch(`/api/conversations/${encodeURIComponent(threadId)}/messages`);
       if (!response.ok) {
         setHint(`加载历史失败：${await readError(response, '加载历史失败')}`, true);
         setBusy(false);
@@ -624,7 +881,7 @@
       if (!window.confirm('回退到这条消息之前？这条消息以及它之后的对话都会被删除，原文会放回输入框。')) return;
       setStatus('正在回退…', true);
       try {
-        const response = await fetch(`/api/conversations/${encodeURIComponent(state.threadId)}/rewind`, {
+        const response = await apiFetch(`/api/conversations/${encodeURIComponent(state.threadId)}/rewind`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ turn })
@@ -653,7 +910,7 @@
 
     async function newConversation() {
       try {
-        const response = await fetch('/api/conversations', { method: 'POST' });
+        const response = await apiFetch('/api/conversations', { method: 'POST' });
         if (!response.ok) throw new Error(await readError(response, '新建会话失败'));
         const data = await response.json();
         state.threadId = data.thread_id;
@@ -681,10 +938,12 @@
       let assistantText = '';
       let streamFailed = false;
       try {
-        const response = await fetch('/api/chat/stream', {
+        const response = await apiFetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, thread_id: state.threadId, user_id: '1', location: state.location })
+          // 请求体里**没有** user_id：身份只认 Authorization 头里的令牌。
+          // 以前这里带一个写死的 user_id，改成可编辑就等于谁都能读别人的会话。
+          body: JSON.stringify({ message: text, thread_id: state.threadId, location: state.location })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));
         const reader = response.body.getReader();
@@ -749,9 +1008,14 @@
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 180)}px`; });
     $('#newChat').onclick = newConversation;
     document.querySelectorAll('.suggestion').forEach((button) => { button.onclick = () => { input.value = button.dataset.prompt; input.focus(); }; });
-    loadConversations();
     renderLocateButton();
     restoreLocation();
+    // **先问服务端「我是谁」，再按身份拉列表**。顺序反了会先按游客拉一次
+    // （本地有令牌时那次请求还是会带上令牌，但界面上会先闪一下游客态）。
+    (async () => {
+      await refreshIdentity();
+      await loadConversations();
+    })();
   </script>
 </body>
 </html>

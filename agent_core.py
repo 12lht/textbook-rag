@@ -78,6 +78,17 @@ class Context:
     location: str | None = None
     # 本次请求属于哪个会话。记忆工具用它记下来源，方便以后查「这条是哪儿记的」。
     thread_id: str | None = None
+    # 本次请求**允不允许**读写长期记忆。
+    #
+    # 为什么不是一个进程级的全局开关：记忆后端是进程级注入的（`set_memory_backend`，
+    # 进程活多久就多久变），但「这个人能不能用记忆」是**逐请求**的——同一个进程里，
+    # 登录用户要能记，共用一个默认账号的游客不能记（否则几个陌生人会互相读到
+    # 对方的偏好）。两种粒度的开关必须分开，混成一个就会出现「为了挡游客，
+    # 把登录用户的记忆也关了」。
+    #
+    # 默认 True：`agent_core` 的任何直接使用者（评测脚本、探针）拿到的都是
+    # 老行为，不需要知道这个字段存在。
+    memory_enabled: bool = True
 
 
 # --------------------------------------------------------------------------
@@ -185,6 +196,24 @@ def _thread_id_of(runtime: ToolRuntime[Context]) -> str | None:
     return getattr(context, "thread_id", None)
 
 
+def _memory_enabled_of(runtime: ToolRuntime[Context]) -> bool:
+    """本次请求开没开记忆。**只有明确关掉才算关。**
+
+    用 `getattr(..., True)` 而不是直接取字段：字段缺失时语义应当等同「照老行为走」，
+    不能静默变成「关掉记忆」——那样一个手写的 Context 会莫名其妙失去记忆功能，
+    而且不报错，排查起来很费劲。
+    """
+    context = getattr(runtime, "context", None)
+    return bool(getattr(context, "memory_enabled", True))
+
+
+# 逐请求关闭记忆时回给模型的话。和「后端没注入」分开，是因为两者要对模型说的
+# 话不一样：前者是这次不给用，后者是这个功能压根不存在。
+MEMORY_OFF_FOR_REQUEST = (
+    "本次对话没有开启长期记忆，请不要记录也不要查询，按普通对话回答即可。"
+)
+
+
 @tool
 def recall_memory(runtime: ToolRuntime[Context]) -> str:
     """读出这个用户在以前会话里留下的长期记忆。
@@ -195,6 +224,8 @@ def recall_memory(runtime: ToolRuntime[Context]) -> str:
     user_id = _user_id_of(runtime)
     if not user_id or _memory_read is None:
         return "长期记忆功能未启用。"
+    if not _memory_enabled_of(runtime):
+        return MEMORY_OFF_FOR_REQUEST
     try:
         entries = _memory_read(user_id)
     except Exception:
@@ -233,6 +264,8 @@ def save_memory(
     user_id = _user_id_of(runtime)
     if not user_id or _memory_write is None:
         return "长期记忆功能未启用。"
+    if not _memory_enabled_of(runtime):
+        return MEMORY_OFF_FOR_REQUEST
 
     text = " ".join(str(text).split())
     if not text:
@@ -280,17 +313,39 @@ MEMORY_GUIDE = (
     "记完不用告诉用户，照常回答即可。"
 )
 
+# 逐请求**关掉**记忆时的提示。关记忆为什么要主动说明，而不是「不提就行」——
+# 这是实测出来的：
+#
+# 工具列表是**进程级冻结**的（建 MCP 会话时算好，一进程一份），所以游客这一侧
+# 照样看得见 `save_memory` 的说明书（docstring 就是工具描述）。只把系统提示退回
+# `SYSTEM_PROMPT` 的版本上线后，游客问「用一句话说明你是什么」，模型回答的是
+# 「我是一个……能记住你长期偏好以备后续对话使用的 AI 助手」——它读的是工具说明书。
+# 等用户真说了值得记的事、工具回一句「没开启」，模型才反应过来，可承诺已经出口了。
+#
+# 所以关掉记忆必须**明说**。这段话和 `MEMORY_OFF_FOR_REQUEST`（回给工具调用的那句）
+# 是一对：一句劝住模型别调，一句告诉模型这是怎么回事。
+MEMORY_OFF_GUIDE = (
+    "\n\n关于长期记忆：本次对话**没有**开启长期记忆功能。"
+    "即便你在工具列表里看得到 `save_memory` / `recall_memory`，调用也只会返回"
+    "「没有开启」。所以不要向用户承诺「我会记住」，也不要声称记得他以前说过的偏好，"
+    "不要主动调用这两个工具。用户若希望你长期记住某件事，就如实告诉他需要先登录。"
+)
 
-def _system_prompt() -> str:
+
+def _system_prompt(*, memory_enabled: bool = True) -> str:
     """本次请求真正发给模型的系统提示。
 
     没有注入记忆后端时**逐字等于 `SYSTEM_PROMPT`**。这样评测环境（只 import
     `agent_core`）拿到的提示词与基线完全一致——新功能不进评测，A/B 才干净。
     和工具列表要不要挂上记忆工具，是同一条规则的两半。
+
+    `memory_enabled=False`（游客）时**不是**简单退回 `SYSTEM_PROMPT`，而是加上
+    `MEMORY_OFF_GUIDE` 明确说「这次记不住」。理由见那段常量的注释：工具列表里
+    还挂着记忆工具，光不提它会得到一句「我能记住你的偏好」的假承诺。
     """
     if _memory_write is None:
         return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + MEMORY_GUIDE
+    return SYSTEM_PROMPT + (MEMORY_GUIDE if memory_enabled else MEMORY_OFF_GUIDE)
 
 
 # --------------------------------------------------------------------------
@@ -626,11 +681,14 @@ async def summarize_history(
     return summary[:MAX_SUMMARY_CHARS] or None
 
 
-def _messages_for_model(state: AgentState) -> list[BaseMessage]:
+def _messages_for_model(state: AgentState, *, memory_enabled: bool = True) -> list[BaseMessage]:
     """发送前把摘要并进系统消息。
 
     **只改发出去的内容，不写回 state**：`state["messages"]` 保持原样，
     历史展示、回退、标题生成都不受摘要影响。
+
+    `memory_enabled` 一路透传给 `_system_prompt`：这条路径也会重建系统消息，
+    忘了透传就会出现「第一轮游客没有记忆引导，第二轮摘要生效后记忆引导又冒出来」。
     """
     messages = list(state["messages"])
     summary = (state.get("summary") or "").strip()
@@ -641,7 +699,7 @@ def _messages_for_model(state: AgentState) -> list[BaseMessage]:
     # 所以要显式说明这是背景资料、不要复述、也不要提摘要本身的存在。
     system = SystemMessage(
         content=(
-            f"{_system_prompt()}\n\n"
+            f"{_system_prompt(memory_enabled=memory_enabled)}\n\n"
             "以下是本次会话更早内容的摘要，作为背景资料供你参考。"
             "把它当成你已经知道的事实即可，不要原样复述它，"
             "也不要向用户提及「摘要」这件事；"
@@ -656,9 +714,18 @@ def _messages_for_model(state: AgentState) -> list[BaseMessage]:
     return messages
 
 
-async def model_node(state: AgentState):
+async def model_node(state: AgentState, runtime: ToolRuntime[Context]):
+    """模型节点。
+
+    这里要 `runtime` 只为一件事：拿到本次请求的 `memory_enabled` 再重建系统提示。
+    节点函数声明 `ToolRuntime[Context]` 参数和工具是同一套注入机制，不会出现在
+    模型看到的 schema 里。
+    """
     bound = await _mcp.bound_model()
-    return {"messages": [await bound.ainvoke(_messages_for_model(state))]}
+    reply = await bound.ainvoke(
+        _messages_for_model(state, memory_enabled=_memory_enabled_of(runtime))
+    )
+    return {"messages": [reply]}
 
 
 async def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
@@ -928,6 +995,8 @@ async def stream_agent(
     thread_id: str,
     user_input: str,
     location: str | None = None,
+    *,
+    memory_enabled: bool = True,
 ):
     """跑一遍图，产出 Agent 自己的事件流（异步生成器）。
 
@@ -938,13 +1007,18 @@ async def stream_agent(
     由调用方负责准备。这里既不解析坐标也不兜底猜测——传 None 就是没有位置，
     定位工具会如实告诉模型「用户没有提供位置」。位置通过 `Context` 每次请求
     注入，不写进 checkpoint（它不是会话状态，用户换个地方下一轮就该变）。
+
+    `memory_enabled=False` 表示这次请求不许读写长期记忆（游客）。它同样走
+    `Context`，同样**不进 checkpoint**——「这次是谁在说话」是逐请求的事实，
+    不是会话的状态。注意系统提示只在会话第一轮写进 state，所以中途登出/登录
+    不会改掉已经写下的提示；真正拦人的是两个记忆工具里的那道检查。
     """
     config = _config(thread_id)
     graph = await _ensure_graph()
     has_history = bool((await graph.aget_state(config)).values.get("messages", []))
     messages = [HumanMessage(content=user_input)]
     if not has_history:
-        messages.insert(0, SystemMessage(content=_system_prompt()))
+        messages.insert(0, SystemMessage(content=_system_prompt(memory_enabled=memory_enabled)))
 
     # 先把 MCP 会话准备好再开跑。否则第一个节点会现等子进程启动 + 工具加载，
     # 那段时间会被算进 TTFT，把时延指标污染掉。
@@ -960,7 +1034,12 @@ async def stream_agent(
     async for mode, chunk in graph.astream(
         {"messages": messages},
         config=config,
-        context=Context(user_id=user_id, location=location, thread_id=thread_id),
+        context=Context(
+            user_id=user_id,
+            location=location,
+            thread_id=thread_id,
+            memory_enabled=memory_enabled,
+        ),
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":
