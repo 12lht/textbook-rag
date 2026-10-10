@@ -14,12 +14,32 @@
     python eval/run.py --compare eval/baselines/baseline.json    # 和旧基线对比
 
 指标口径（都是「样本」级别，repeat>1 时样本数 = 用例数 × repeat）：
-    工具选择完全匹配率  实际调用的工具集合 == 期望集合
-    工具召回率          仅在有期望工具的样本上算，|交集| / |期望|
-    工具精确率          仅在实际调用了工具的样本上算，|交集| / |实际|
-    负例抑制率          期望集合为空时，确实一个工具都没调的占比（专治「凡事都调工具」）
-    工具调用成功率      tool_result 事件里 status == success 的占比（status 是 langchain 标准字段）
-    端到端通过率        选择正确 + expect_contains 满足 + 有回答文本 + 没抛异常
+
+    工具选择合规率      必备工具全部调到，且没有任何「不被允许」的额外调用。
+                        这是主指标 —— 判据是语义合规，不是集合相等。
+    严格集合相等率      实际集合 == 必备集合。保留作参考，但它会把合法的多工具组合
+                        判成错误（原因见下面「为什么不用严格集合相等」）。
+    工具召回率          仅在有必备工具的样本上算，|必备∩实际| / |必备|
+    工具精确率          仅在实际调用了工具的样本上算，|必备∩实际| / |实际|
+    负例抑制率          必备集合为空时，确实一个工具都没调的占比（专治「凡事都调工具」）
+    配额违规调用数      多调了「会消耗外部配额」的工具的次数。这是真正的浪费，也是
+                        「工具选择合规率」判负的唯一原因。
+    冗余调用数          多调了「被允许且零配额」的工具的次数。这是成本不是错误，
+                        单独报出来（实测每次约 +100 token，不增加模型往返）。
+    工具调用成功率      tool_result 事件里 status == success 的占比（langchain 标准字段）
+    端到端通过率        选择合规 + expect_contains 满足 + 有回答文本 + 没抛异常
+
+为什么不用严格集合相等（2026-10-10 修正）：
+    最初用「实际调用集合 == 期望集合」。跑下来天气类只有 0.5，看着像模型在乱调工具。
+    但把 6 次运行的记录逐条摊开才发现，额外调用是**按措辞触发的稳定策略**：问
+    「上海现在的气温」时 6/6 都不调 get_current_time，问「明天适合去广州出差吗」时
+    6/6 都调。相对时间（今天 / 明天 / 未来三天）本来就需要一个锚点，这不是错误。
+    再实测代价：get_current_time 是纯本地函数、零外部配额，而且和天气工具同批并行
+    下发，模型往返 +0.00 次、token +19~165。所以它既不错也不贵。
+    于是改成三档：必备 / 允许（逐例在 cases.jsonl 的 allow_tools 里声明）/ 违规。
+    判负只看「必备没调全」和「调了不被允许的东西」；而额外调用算不算浪费，按它烧
+    不烧外部配额来定 —— get_current_time 免费所以放行，get_user_location / web_search /
+    web_extract 走的是高德或 Tavily，有配额，不能白送。
 
 录制回放（让改动前后真正可比）：
     外部 API 返回的内容每次都不一样，搜索正文长度实测波动 1.1~2.5 倍，比被测的代码
@@ -67,6 +87,17 @@ DEFAULT_CASSETTE_DIR = EVAL_DIR / "cassettes"
 # 改造后工具是从 MCP server 动态加载的，所以这个集合要在跑之前异步取回来
 # （由 _load_known_tools() 填），不能像改造前那样在 import 时静态算出来。
 KNOWN_TOOLS: set[str] = set()
+# 会消耗外部配额的工具体。高德的天气/定位和 Tavily 的搜索/提取都是计量的。
+# 这份分类放在评测侧而不是 tools.py：它回答的是「多调一次算不算浪费」，
+# 是评测口径问题。get_current_time 是纯本地函数，不进这个集合。
+METERED_TOOLS = {
+    "get_weather_for_location",
+    "get_user_location",
+    "web_search",
+    "web_extract",
+}
+# cases.jsonl 没写 allow_tools 时的兜底：只放行零配额的本地工具。
+DEFAULT_ALLOW_TOOLS = ["get_current_time"]
 # 这些 key 名里只出现名字、不出现值，用来确认评测环境装没装齐。
 KEY_NAMES = ["DEEPSEEK_API_KEY", "AMAP_API_KEY", "TAVILY_API_KEY", "GLM_API_KEY"]
 
@@ -160,12 +191,61 @@ def validate_cases(cases: list[dict]) -> list[str]:
             unknown = [name for name in expected if name not in KNOWN_TOOLS]
             if unknown:
                 problems.append(f"{case_id}: 期望了不存在的工具 {unknown}")
+
+        allowed = case.get("allow_tools", DEFAULT_ALLOW_TOOLS)
+        if not isinstance(allowed, list):
+            problems.append(f"{case_id}: allow_tools 必须是列表")
+        elif not expected:
+            # 负例：一个工具都不该调，写任何 allow 都是自相矛盾。
+            if allowed:
+                problems.append(f"{case_id}: 负例的 allow_tools 必须为空（任何调用都算违规）")
+        else:
+            unknown = [name for name in allowed if name not in KNOWN_TOOLS]
+            if unknown:
+                problems.append(f"{case_id}: allow_tools 里有不存在的工具 {unknown}")
+            # allow_tools 的语义是「**额外**允许」，必备工具已经在 expect_tools 里，
+            # 再写一遍说明写的人对语义理解错了，值得直接拦下来。
+            duplicated = sorted(set(allowed) & set(expected))
+            if duplicated:
+                problems.append(
+                    f"{case_id}: allow_tools 只写额外允许的工具，{duplicated} 已经在 expect_tools 里"
+                )
         contains = case.get("expect_contains")
         if contains is not None and (
             not isinstance(contains, list) or not all(isinstance(x, str) for x in contains)
         ):
             problems.append(f"{case_id}: expect_contains 必须是字符串列表")
     return problems
+
+
+# ---------------------------------------------------------------- 三档判定
+
+def judge_selection(expected: list[str], allowed: list[str], called: list[str]) -> dict:
+    """按「必备 / 额外允许 / 违规」三档判定一次工具选择。
+
+    抽成纯函数是为了能对历史基线重算：旧的基线记录里只有 expected_tools 和
+    called_tools（那时还没有 allow_tools 字段），拿这里的规则 + cases.jsonl 里
+    现补的 allow_tools 就能复现新口径，不必重跑模型花钱。
+
+    注意 allowed 的语义是「**额外**允许」，不含必备 —— 必备已经在 expected 里了，
+    所以判合规时要把两者并起来才是一次完整的「允许集合」。
+    """
+    expected_set, called_set = set(expected), set(called)
+
+    missing = sorted(expected_set - called_set)        # 必备没调全 —— 真错
+    extra = sorted(called_set - expected_set)          # 必备之外多调的
+    violations = sorted(set(extra) - set(allowed))     # 多调了没被允许的 —— 真错
+    redundant = sorted(set(extra) & set(allowed))      # 允许的额外调用 —— 成本不是错
+
+    return {
+        "allow_tools": list(allowed),
+        "missing_tools": missing,
+        "violation_tools": violations,
+        "redundant_tools": redundant,
+        "metered_violations": [n for n in violations if n in METERED_TOOLS],
+        "selection_ok": not missing and not violations,
+        "exact_match": expected_set == called_set,
+    }
 
 
 # ---------------------------------------------------------------- 单例跑一次
@@ -285,12 +365,14 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
     called = sorted({n for n in raw_selected + executed if n in KNOWN_TOOLS})
 
     expected = [name for name in case.get("expect_tools", [])]
-    expected_set, called_set = set(expected), set(called)
-    intersection = expected_set & called_set
+    allowed = [name for name in case.get("allow_tools", DEFAULT_ALLOW_TOOLS if expected else [])]
+    verdict = judge_selection(expected, allowed, called)
 
-    exact_match = expected_set == called_set
-    recall = len(intersection) / len(expected_set) if expected_set else None
-    precision = len(intersection) / len(called_set) if called_set else None
+    expected_set, called_set = set(expected), set(called)
+    recall = len(expected_set & called_set) / len(expected_set) if expected_set else None
+    precision = (
+        len(expected_set & called_set) / len(called_set) if called_set else None
+    )
 
     contains = case.get("expect_contains")
     if contains:
@@ -310,12 +392,12 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
         "expected_tools": expected,
         "called_tools": called,
         "unrecognized_tool_names": unrecognized,
-        "exact_match": exact_match,
+        **verdict,
         "recall": _round(recall),
         "precision": _round(precision),
         "contains_ok": contains_ok,
         "e2e_ok": bool(
-            exact_match
+            verdict["selection_ok"]
             and contains_ok is not False
             and answer.strip()
             and error is None
@@ -337,6 +419,32 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
 # ---------------------------------------------------------------- 聚合
 
 def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_stats: dict | None = None) -> dict:
+    # 兼容 2026-10-10 之前跑的基线：那些记录里没有三档字段。按 cases.jsonl 里现补的
+    # allow_tools 重算一遍，历史基线就能直接用新口径汇总，不必重跑模型花钱。
+    allow_by_case = {
+        case["id"]: case.get(
+            "allow_tools", DEFAULT_ALLOW_TOOLS if case.get("expect_tools") else []
+        )
+        for case in cases
+    }
+    for record in records:
+        if "selection_ok" in record:
+            continue
+        verdict = judge_selection(
+            record.get("expected_tools", []),
+            allow_by_case.get(record["case_id"], []),
+            record.get("called_tools", []),
+        )
+        record.update(verdict)
+        # e2e_ok 必须一起重算。旧记录里它是用严格口径算出来的，只补 selection_ok
+        # 会让「端到端通过率 / 未通过样本」和新的「合规率」自相矛盾。
+        record["e2e_ok"] = bool(
+            verdict["selection_ok"]
+            and record.get("contains_ok") is not False
+            and str(record.get("answer", "")).strip()
+            and record.get("error") is None
+        )
+
     samples = len(records)
     positive = [r for r in records if r["expected_tools"]]
     negative = [r for r in records if not r["expected_tools"]]
@@ -355,10 +463,16 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     metrics = {
         "样本数": samples,
         "用例数": len(cases),
-        "工具选择完全匹配率": _round(_rate([r["exact_match"] for r in records])),
+        "工具选择合规率": _round(_rate([r["selection_ok"] for r in records])),
+        "严格集合相等率": _round(_rate([r["exact_match"] for r in records])),
         "工具召回率": _round(_mean([r["recall"] for r in positive if r["recall"] is not None])),
         "工具精确率": _round(_mean([r["precision"] for r in with_tools if r["precision"] is not None])),
         "负例抑制率": _round(_rate([not r["called_tools"] for r in negative])),
+        "配额违规调用数": sum(len(r["metered_violations"]) for r in records),
+        "冗余调用数": sum(len(r["redundant_tools"]) for r in records),
+        "平均冗余调用数": _round(
+            _mean([len(r["redundant_tools"]) for r in records])
+        ),
         "工具调用成功率": _round(_rate(statuses)),
         "端到端通过率": _round(_rate([r["e2e_ok"] for r in records])),
         "平均调用工具数": _round(_mean([len(r["called_tools"]) for r in records])),
@@ -389,14 +503,17 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     # 一会儿是 list、一会儿是数字，读的时候要回头看类型。
     for record in records:
         bucket = by_category.setdefault(
-            record["category"], {"样本数": 0, "通过数": 0, "完全匹配数": 0, "_tools": []}
+            record["category"],
+            {"样本数": 0, "通过数": 0, "合规数": 0, "完全匹配数": 0, "_tools": []},
         )
         bucket["样本数"] += 1
         bucket["通过数"] += 1 if record["e2e_ok"] else 0
+        bucket["合规数"] += 1 if record["selection_ok"] else 0
         bucket["完全匹配数"] += 1 if record["exact_match"] else 0
         bucket["_tools"].append(len(record["called_tools"]))
     for bucket in by_category.values():
         bucket["完全匹配率"] = _round(bucket["完全匹配数"] / bucket["样本数"])
+        bucket["合规率"] = _round(bucket["合规数"] / bucket["样本数"])
         bucket["端到端通过率"] = _round(bucket["通过数"] / bucket["样本数"])
         bucket["平均工具数"] = _round(_mean(bucket.pop("_tools")))
 
@@ -405,6 +522,9 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
         "by_category": by_category,
         "config": config,
         "failed_case_ids": sorted({r["case_id"] for r in records if not r["e2e_ok"]}),
+        # 严格口径下不通过的用例。和上面的差集就是「被三档口径救回来」的那批，
+        # 出对照表时用得上。
+        "strict_failed_case_ids": sorted({r["case_id"] for r in records if not r["exact_match"]}),
         "unrecognized_tool_names": sorted({n for r in records for n in r["unrecognized_tool_names"]}),
         "errored_case_ids": sorted({r["case_id"] for r in records if r["error"]}),
     }
@@ -453,12 +573,15 @@ def print_report(summary: dict, records: list[dict], verbose: bool) -> None:
         print(f"  {name:<18} {_fmt(value)}")
 
     _line("分类表现")
-    print(f"  {'分类':<18} {'样本':>4} {'完全匹配率':>10} {'端到端通过率':>12} {'平均工具数':>10}")
+    print(
+        f"  {'分类':<18} {'样本':>4} {'合规率':>8} {'严格相等':>8} "
+        f"{'端到端通过率':>12} {'平均工具数':>10}"
+    )
     for category, bucket in summary["by_category"].items():
         print(
             f"  {category:<18} {bucket['样本数']:>4} "
-            f"{_fmt(bucket['完全匹配率']):>10} {_fmt(bucket['端到端通过率']):>12} "
-            f"{_fmt(bucket['平均工具数']):>10}"
+            f"{_fmt(bucket['合规率']):>8} {_fmt(bucket['完全匹配率']):>8} "
+            f"{_fmt(bucket['端到端通过率']):>12} {_fmt(bucket['平均工具数']):>10}"
         )
 
     failures = [r for r in records if not r["e2e_ok"]]
@@ -469,14 +592,24 @@ def print_report(summary: dict, records: list[dict], verbose: bool) -> None:
         detail = []
         if record["error"]:
             detail.append(f"异常={record['error']}")
-        if record["expected_tools"] != record["called_tools"]:
-            detail.append(f"期望={record['expected_tools']} 实际={record['called_tools']}")
+        if record["missing_tools"]:
+            detail.append(f"缺少必备工具 {record['missing_tools']}")
+        if record["violation_tools"]:
+            detail.append(f"调了没被允许的工具 {record['violation_tools']}")
         if record["contains_ok"] is False:
             detail.append("缺少期望关键词")
         if not record["answer"].strip():
             detail.append("回答为空")
         print(f"  [{record['case_id']}] {record['query']}")
         print(f"      {'；'.join(detail) or '未分类原因'}")
+
+    # 「允许但非必备」的额外调用单独摊开。这不是错误，是成本：要么多一次模型往返，
+    # 要么多烧一次外部配额（配额那部分已经计进「配额违规调用数」，这里只看被放行的）。
+    redundant = [r for r in records if r["redundant_tools"]]
+    if redundant:
+        _line(f"被允许的冗余调用（{sum(len(r['redundant_tools']) for r in redundant)} 次，成本不是错误）")
+        for record in redundant:
+            print(f"  [{record['case_id']}] 多调 {record['redundant_tools']}")
 
     if summary["unrecognized_tool_names"]:
         _line("识别不了的工具名（可能是流式半截名）")
@@ -509,20 +642,37 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
         marker = "+" if delta > 0 else ""
         print(f"  {name:<18} {_fmt(old_value):>12} {_fmt(new_value):>12} {marker + _fmt(delta):>12}")
 
+    if "工具选择合规率" not in old_metrics:
+        print("\n  提示：对比基线是 2026-10-10 之前的旧口径（没有「工具选择合规率」这类指标），")
+        print("        所以上面只有两边都有的指标能对比。旧记录可以按新规则重算，不用重跑模型：")
+        print("        aggregate(旧基线的 records, cases, config) 会用 cases.jsonl 里的")
+        print("        allow_tools 现算三档判定，并同步修正 e2e_ok。")
+
     old_categories = previous.get("by_category", {})
     if old_categories:
-        _line("分类完全匹配率变化")
+        _line("分类通过率变化（左：合规率  右：严格集合相等率）")
+        print(f"  {'分类':<18} {'旧合规':>8} {'新合规':>8} {'旧严格':>8} {'新严格':>8}")
         for category, bucket in current["by_category"].items():
             old_bucket = old_categories.get(category)
             if not old_bucket:
                 continue
-            old_rate = old_bucket.get("完全匹配率")
-            new_rate = bucket.get("完全匹配率")
-            if old_rate is None or new_rate is None:
-                continue
-            delta = new_rate - old_rate
-            marker = "+" if delta > 0 else ""
-            print(f"  {category:<18} {_fmt(old_rate):>12} {_fmt(new_rate):>12} {marker + _fmt(delta):>12}")
+            print(
+                f"  {category:<18} {_fmt(old_bucket.get('合规率')):>8} "
+                f"{_fmt(bucket.get('合规率')):>8} "
+                f"{_fmt(old_bucket.get('完全匹配率')):>8} "
+                f"{_fmt(bucket.get('完全匹配率')):>8}"
+            )
+
+    # 「严格口径不通过、三档口径通过」的样本：这些就是被口径修正救回来的。
+    # 如果新基线是旧基线用严格口径跑出来的，这里能直接看出差异来自哪几条。
+    old_strict_failed = set(previous.get("strict_failed_case_ids", []))
+    new_failed = set(current.get("failed_case_ids", []))
+    if old_strict_failed:
+        rescued = sorted(old_strict_failed - new_failed)
+        if rescued:
+            _line("被三档口径救回来（严格口径判错、按配额口径其实合规）")
+            for case_id in rescued:
+                print(f"  {case_id}")
 
     # 工具输出指纹：录制回放模式下，同一个入参应该拿到逐字一致的返回值。这里要把
     # 两种「不一致」分开，否则会把模型行为差异误判成冻结失败：
