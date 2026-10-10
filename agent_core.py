@@ -327,11 +327,137 @@ title_model = build_glm_model(temperature=0.2, max_tokens=40) if os.getenv("GLM_
 
 class AgentState(dict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    # 更早对话的压缩摘要。**不走消息通道**，所以不参与 add_messages、不进历史展示；
+    # 只在发送给模型前并进系统消息（见 `_messages_for_model`）。
+    summary: str
+
+
+# --------------------------------------------------------------------------
+# 上下文窗口策略
+# --------------------------------------------------------------------------
+#
+# 原来的做法是「超过 100 条就丢 1 条」，丢掉的部分永久消失——长对话里前面说过的
+# 事实，到后面就查不到了。现在改成两件事：
+#
+#   1. **批量裁**：超限时一次裁到 `TRIM_TO`，而不是每轮丢 1 条。这是为了让下面的
+#      摘要调用天然变稀疏——如果每轮裁 1 条就摘要一次，模型调用的成本会摊成常态。
+#   2. **把裁掉的那批压成摘要**，和已有摘要累积合并，存进 `state["summary"]`。
+#
+# 摘要失败时**照常裁剪**，只是退化成原来的行为。功能不能因为摘要挂掉而失效。
+#
+# 已知代价：摘要调用发生在 `truncate` 节点里，而它是图的入口，所以这一次调用会
+# 计进 TTFT——但频率很低（大约每十几轮一次）。真要消掉，得把摘要挪到响应之后
+# 的收尾步骤，那是另一件事。
+MAX_HISTORY = 100
+TRIM_TO = 60
+MAX_SUMMARY_CHARS = 800
+SUMMARY_SOURCE_CHARS = 300  # 单条消息丢给摘要模型前先截断到这里
+
+SUMMARY_PROMPT = (
+    "你在维护一段长对话的长期记忆。下面是【已有摘要】和【一批即将被遗忘的对话记录】。\n"
+    "请把它们合并成一段新的摘要，规则：\n"
+    "1. 只保留以后可能还用得上的事实：用户的身份与偏好、已经确认过的结论、"
+    "正在处理的事情、明确的数字与日期。\n"
+    "2. 不要保留寒暄、工具调用的过程细节、以及明显已经过时的临时信息。\n"
+    "3. 用陈述事实的写法，**不要用「用户」「助手」这类称呼做主语**"
+    "（写「猫叫豆豆，3 岁」，不要写「用户的猫叫豆豆」）——这段摘要会直接进"
+    "模型的上下文，第三人称的文风会传染到它给用户的回复里。\n"
+    "4. 直接输出摘要正文，不要标题、不要 Markdown、不要解释你做了什么，"
+    "更不要说明你丢弃了哪些内容。\n"
+    f"5. 长度控制在 {MAX_SUMMARY_CHARS} 字以内。\n"
+)
+
+_ROLE_LABELS = {"human": "用户", "ai": "助手", "tool": "工具结果", "system": "系统"}
+
+
+def _plain_text(content: object) -> str:
+    """把消息内容压成纯文本。
+
+    内容可能是字符串，也可能是 content-block 列表——MCP 工具返回的就是后者，
+    不摊平的话摘要里会混进一堆 JSON 包装。
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return "".join(parts)
+    return str(content)
+
+
+def _render_for_summary(messages: Sequence[BaseMessage]) -> str:
+    lines = []
+    for message in messages:
+        label = _ROLE_LABELS.get(getattr(message, "type", ""), "消息")
+        text = _plain_text(message.content).strip().replace("\n", " ")
+        if not text:
+            continue
+        if len(text) > SUMMARY_SOURCE_CHARS:
+            text = text[:SUMMARY_SOURCE_CHARS] + "…"
+        lines.append(f"[{label}] {text}")
+    return "\n".join(lines)
+
+
+async def summarize_history(
+    previous: str | None, dropped: Sequence[BaseMessage]
+) -> str | None:
+    """把「被裁掉的一批消息」并进已有摘要，返回新摘要；失败返回 None。
+
+    这里只负责「产出摘要」这一件事——裁剪决策在 `truncate_node`，不在这里。
+    """
+    transcript = _render_for_summary(dropped)
+    if not transcript:
+        return None
+    prompt = (
+        f"{SUMMARY_PROMPT}\n"
+        f"【已有摘要】\n{previous.strip() if previous else '（还没有摘要，这是第一次）'}\n\n"
+        f"【一批即将被遗忘的对话记录】\n{transcript}"
+    )
+    try:
+        response = await model.ainvoke(prompt)
+    except Exception:
+        return None
+    summary = _plain_text(response.content).strip()
+    return summary[:MAX_SUMMARY_CHARS] or None
+
+
+def _messages_for_model(state: AgentState) -> list[BaseMessage]:
+    """发送前把摘要并进系统消息。
+
+    **只改发出去的内容，不写回 state**：`state["messages"]` 保持原样，
+    历史展示、回退、标题生成都不受摘要影响。
+    """
+    messages = list(state["messages"])
+    summary = (state.get("summary") or "").strip()
+    if not summary:
+        return messages
+    # 措辞有讲究：光把一段事实陈述挂在系统提示后面，模型（尤其是小模型）会把它
+    # 当成「该接着说的话」原样吐给用户。实测 deepseek-flash 就会这样。
+    # 所以要显式说明这是背景资料、不要复述、也不要提摘要本身的存在。
+    system = SystemMessage(
+        content=(
+            f"{SYSTEM_PROMPT}\n\n"
+            "以下是本次会话更早内容的摘要，作为背景资料供你参考。"
+            "把它当成你已经知道的事实即可，不要原样复述它，"
+            "也不要向用户提及「摘要」这件事；"
+            "回答时用你自己的口吻直接对用户说话，不要照抄摘要的措辞。\n"
+            f"<摘要>\n{summary}\n</摘要>"
+        )
+    )
+    if messages and isinstance(messages[0], SystemMessage):
+        messages[0] = system
+    else:
+        messages.insert(0, system)
+    return messages
 
 
 async def model_node(state: AgentState):
     bound = await _mcp.bound_model()
-    return {"messages": [await bound.ainvoke(state["messages"])]}
+    return {"messages": [await bound.ainvoke(_messages_for_model(state))]}
 
 
 async def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
@@ -339,20 +465,34 @@ async def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
     return await node.ainvoke(state, runtime=runtime)
 
 
-def truncate_node(state: AgentState):
-    max_len = 100
+async def truncate_node(state: AgentState):
+    """裁掉过长的历史，并把裁掉的部分压成摘要留下来。
+
+    改成 `async` 是因为要 `await` 摘要模型——按「底层要不要 await」这条判据，
+    会 await 的就必须是 async 函数。不需要裁的时候它一次都不让出执行权，
+    开销和原来的同步版本没有区别。
+    """
     messages = state["messages"]
     if len(messages) <= 1:
         return {}
-    tail = messages[1:]
-    if len(tail) <= max_len:
+    tail = messages[1:]  # 第 0 条是 SystemMessage，永远保留
+    if len(tail) <= MAX_HISTORY:
         return {}
-    start = len(tail) - max_len
+
+    start = len(tail) - TRIM_TO
     while start < len(tail) and not isinstance(tail[start], HumanMessage):
-        start += 1
-    if start >= len(tail):
+        start += 1  # 从人类消息切，避免留下没有前置 tool_calls 的 ToolMessage
+    if start <= 0:
         return {}
-    return {"messages": [RemoveMessage(id=message.id) for message in tail[:start]]}
+
+    dropped = list(tail[:start])
+    update: dict[str, object] = {
+        "messages": [RemoveMessage(id=message.id) for message in dropped]
+    }
+    summary = await summarize_history(state.get("summary"), dropped)
+    if summary:
+        update["summary"] = summary
+    return update
 
 
 def should_continue(state: AgentState):
