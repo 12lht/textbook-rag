@@ -449,45 +449,19 @@ IP 定位拿到的城市来自**请求的出口 IP**。单机自用「碰巧对�
 
 ### 问题二：它没有合适的通道——但原因和我们想的不一样
 
-先说通道这一层的对比：
+**先说结论：不是 MCP 协议做不到，是这一层的框架没接。**
 
-```text
-LangGraph 的运行时上下文通道是通的：
-  graph.astream(..., context=Context(user_id=..., location=...))
-        → tool_node(state, runtime: ToolRuntime[Context])
-        → 工具函数里直接读 runtime.context
+MCP 协议本身留了逐次调用的旁路字段——`CallToolRequest.params._meta`，SDK 里就是 `session.call_tool(name, args, meta={...})`。挡住它的是本项目用的 `langchain-mcp-adapters`：它的 `execute_tool` 调 `call_tool` 时不传 `meta`，interceptor 能覆盖的字段也只有 `name` / `args` / `headers`，不含 `meta`。
 
-到 MCP 工具这里，中间还隔着框架：
-  MCP 协议本身**有**逐次调用的旁路字段 _meta
-      CallToolRequest.params._meta
-      SDK 里就是 session.call_tool(name, args, meta={...})
-  但 langchain-mcp-adapters 的 execute_tool 调它时不传 meta
-  而 interceptor 能覆盖的字段只有 name / args / headers —— 不含 meta
-```
+这个区别很重要：**「协议不允许」只能改架构，「框架没实现」只是工作量问题。**
 
-**这里要小心一个容易犯的错**：我第一次的结论是「MCP 协议里只有工具名和参数，没有 per-request 通道」。**这是错的。** 去翻 SDK 的签名才看到：
+**我在这里写错过一次结论。** 最初这节写的是「MCP 协议里只有工具名和参数，没有 per-request 通道」——去翻 SDK 的 `call_tool` 签名才发现 `meta` 参数一直都在。教训：**下「做不到」这种判断之前，要看那一层的源码，不要从上一层的行为反推。** 把「框架没实现」说成「协议不允许」，面试里一句「`_meta` 是干嘛的」就问穿了。
 
-```python
-async def call_tool(
-    self, name: str, arguments: dict | None = None,
-    read_timeout_seconds=None, progress_callback=None,
-    meta: dict[str, Any] | None = None,   # ← 逐次调用的旁路通道，一直都在
-)
-```
+### 那到底能不能绕？
 
-`_meta` 就是 MCP 为「不属于这个工具业务逻辑的附加数据」准备的位置。所以**协议是够的，挡住它的是这一层的框架**。
+绕开适配器、自己写一层包装也能走通（`session.call_tool(name, args, meta={...})` 是现成的接口），代价是从此要自己维护 MCP 工具的 schema 转换、结果解包和错误处理。
 
-这个区别很重要，因为它决定了「是协议的限制」还是「可以绕过去的实现细节」——前者只能改架构，后者只是工作量问题。
-
-### 那到底能不能绕？三条路，都能走通
-
-| 路径 | 怎么做 | 代价 |
-| --- | --- | --- |
-| 绕开适配器 | 自己写一层 langchain 工具包装，直接 `session.call_tool(name, args, meta={...})` | 放弃 `langchain-mcp-adapters`：MCP 工具的 schema 转换、结果解包、错误处理全得自己维护 |
-| 用 interceptor 塞进 `args` | interceptor 能改 `args`，把位置注进参数 | 服务端工具签名必须有那个参数才能过校验 → 它会出现在 `inputSchema` → **模型会看到一个它填不了的幻影参数** |
-| 让位置走"进程环境" | 每个请求/会话起一个 MCP 子进程，位置走 `env` | 子进程冷启动实测 1.8 秒；而且常驻会话复用没了（那个 2.83ms 的测量就是靠复用） |
-
-所以准确的表述是：**不是做不到，是"为一个工具维护一套私有 MCP 适配器"不划算。**
+所以准确的表述是：**不是做不到，是这么做不值得。**
 
 ### 更根本的：就算通道打通，也不该这么做
 
@@ -596,6 +570,77 @@ return await asyncio.to_thread(geocode.describe, latitude, longitude)
 定位工具不再发外部请求之后，评测里那份「哪些工具烧外部配额」的清单必须同步更新（`METERED_TOOLS`）。
 
 连带效应很有意思：某个用例里「多调一次定位」原本被判定为**浪费配额**，现在配额不烧了，它仍然**算违规**——因为性质是**越界**（用户没问，模型自己扩了需求），而不是浪费。也就是说，**同一条记录在不同口径下会得到不同的归因**。改口径时要把受影响的旧结论一起过一遍，否则会留下自相矛盾的记录。
+
+## 21. 工具的参数从哪来：三个来源，和模型看到的那张「名片」
+
+上一节说「位置该由框架给」。但真去看模型手里的工具列表会发现一个奇怪的地方：
+
+```text
+get_current_time       参数：{}（空）
+get_user_location      参数：{}（空）
+```
+
+两个都是 0 个参数，看起来一样。**其实完全不是一回事**——一个是真的不需要输入，另一个是框架替它填好了。
+
+### 三个来源
+
+工具的参数只有三个来源：
+
+| 来源 | 谁决定 | 例子 | 工具放哪 |
+| --- | --- | --- | --- |
+| 模型填 | 模型从用户的话里读出来 | `city`、`mode` | MCP |
+| 框架塞 | 框架从本次请求的 `Context` 注入，模型看不见这个参数 | `runtime` → `location` | 进程内 |
+| 工具自算 | 函数体内部算出来 | `datetime.now()` | MCP |
+
+**关键：判断「要不要留在进程内」看的是值从哪来，不是参数有几个。**
+
+`get_current_time` 也是 0 个参数，但它谁调都一样（返回值只由参数决定，只是参数恰好为空），所以它老老实实待在 MCP 里是对的。反过来，`get_user_location` 虽然是 0 个参数，但它要的是**本次请求**的位置，所以必须留在进程内。
+
+### 模型看到的那张「名片」叫 schema
+
+模型决定调哪个工具、填什么参数，靠的是一份**自描述**：工具名、说明、参数表。这份描述就是 schema，它由函数签名**生成**，不是手写的。
+
+同一份签名会生成好几个名字不同的 schema，第一次见容易晕：
+
+| 名字 | 是什么 | 谁看它 |
+| --- | --- | --- |
+| 函数签名 | 源码里那个 `def` | 人 |
+| `args_schema` | 框架内部的原始形态 | 框架 |
+| `tool_call_schema` | 剥掉注入参数之后的版本 | **模型** |
+| `inputSchema` | MCP server 对外公布的 | MCP 客户端 |
+| `convert_to_openai_tool()` 的输出 | 转成 OpenAI 函数调用格式 | **模型** |
+
+写探针取 schema 时要用 **`tool_call_schema`** 或 `convert_to_openai_tool(tool)`，**别用 `args_schema`**：
+
+- 进程内 `@tool` 给的 `args_schema` 是 pydantic 模型，MCP 适配器给的已经是 dict，两种来源形态不同，直接对比是拿苹果比橘子；
+- 带 `ToolRuntime` 参数的工具，`args_schema.model_json_schema()` 会直接抛 `PydanticInvalidForJsonSchema` —— `ToolRuntime` 里有 Callable 字段，生不出 JSON Schema。
+
+### `runtime` 是什么
+
+`runtime: ToolRuntime[Context]` 是**本次请求的运行环境**，框架在调用工具的那一刻塞进去。它带了 `state` / `context` / `config` 等字段，本项目只用 `context` —— 就是那个装着 `user_id` 和 `location` 的 `Context`。
+
+它**不会出现在模型看到的名片里**：框架生成 schema 时会把它剥掉（用 `convert_to_openai_tool` 验证过，`get_user_location` 发给模型的参数确实是空的），但函数的 docstring 照旧原样发出去。
+
+所以这里没有黑魔法，就一句话：**参数分两类，一类模型填，一类框架填。**
+
+### 改完之后，一次真实调用长什么样
+
+问题「我这里今天的天气怎么样？」，客户端授权的位置是广州，实测调用序列：
+
+```text
+① 模型调 get_user_location            参数 = {}
+② 工具返回「用户授权提供的当前位置：广东省广州市」
+③ 模型调 get_weather_for_location     city = 广东省广州市, mode = current
+④ 模型调 get_weather_for_location     city = 广东省广州市, mode = forecast
+```
+
+有两个地方特别容易看错：
+
+**一、被注入的是定位工具，不是天气工具。** 框架塞的是 `get_user_location` 的 `runtime`；天气工具的 `city` 仍然是**模型自己填**的——它只是把上一步的结果抄了过去，省掉了「问用户」这一步，并不是不用填。
+
+**二、天气工具的 `city` 必须留成模型填。** 如果把它也改成框架注入当前位置，这个工具就只会回答「这里的天气」，问「明天适合去广州出差吗」「北京和上海哪个热」就全废了。位置的含义是「**我默认关心哪里**」，不是「这个工具只能查哪里」。
+
+顺带一个实测观察：模型填的是 `广东省广州市` 这个完整串，而不是 `广州市`。能通过是因为 `get_weather_for_location` 内部会把城市名转成 adcode，高德容忍这种带前缀的写法。
 
 ## 待学习
 

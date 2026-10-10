@@ -107,12 +107,21 @@ await session.call_tool(name, arguments, meta={...})
                    │  可读文本，如「广东省广州市」
                    ▼
         agent_core.Context.location
-                   │  ToolRuntime 注入
+                   │  ToolRuntime 注入（模型看不到这个参数）
                    ▼
-        get_user_location  ──▶  返回给模型
+  ①  模型调 get_user_location（参数为空）
+                   │  工具返回「用户授权提供的当前位置：广东省广州市」
+                   ▼
+  ②  模型调 get_weather_for_location(city="广东省广州市", mode=...)
+                   │  注意 city 仍然是模型自己填的，位置只是帮它省掉了「问用户」
+                   │  （实测模型连调了两次：mode=current 和 mode=forecast）
+                   ▼
+  ③  工具返回天气，模型组织成回答
 ```
 
-两个容易踩的点：
+**第 ① 步的参数是空的**：`get_user_location` 在模型看到的名片上是 0 个参数，`runtime` 由框架在调用那一刻注入。但第 ② 步天气工具的 `city` 仍然是**模型自己填**的——位置只是省掉了它去问用户，不是省掉了它填参数。这一条不能改：如果把 `city` 也换成框架注入的当前位置，这个工具就只会回答「这里的天气」，问「明天适合去广州出差吗」就答不了了。展开见 `learning-notes.md` §21。
+
+两个高德 API 的坑：
 
 - **高德 `location` 参数是「经度,纬度」**，和浏览器 `{latitude, longitude}` 顺序**正好相反**。传反了不报错，只会安静地定位到地球另一边。
 - **直辖市的 `city` 字段是空列表 `[]` 而不是空字符串**（北京 / 上海 / 天津 / 重庆），广州 / 成都这类才给 `'广州市'`。取字段前必须判类型，否则会拼出「北京市[]」。
