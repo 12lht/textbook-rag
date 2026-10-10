@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'7'%20fill%3D'%2318201e'%2F%3E%3Cpath%20d%3D'M16%207%208.5%2025M16%207%2023.5%2025M11.2%2018.5H20.8'%20stroke%3D'%23fff'%20stroke-width%3D'3'%20stroke-linecap%3D'round'%20fill%3D'none'%2F%3E%3C%2Fsvg%3E" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+    :root {
+      --ink: #18201e;
+      --muted: #73807a;
+      --line: #dbe4dc;
+      --paper: #f5f7f1;
+      --panel: #ffffff;
+      --accent: #e76f51;
+      --accent-dark: #bd4f39;
+      --mint: #dcefe5;
+      --shadow: 0 22px 60px rgba(44, 65, 51, .12);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      background: radial-gradient(circle at 12% 0%, #e3f1e2 0, transparent 32rem), var(--paper);
+      font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+    }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .shell { display: grid; grid-template-columns: 292px minmax(0, 1fr); height: 100vh; height: 100dvh; overflow: hidden; }
+    .sidebar { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 18px; border-right: 1px solid #e6dfd3; background: #f7f4ed; }
+    .brand { flex: none; display: flex; align-items: center; gap: 12px; margin: 0 10px 28px; }
+    .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; color: white; background: var(--ink); border-radius: 12px; font-weight: 700; }
+    .brand-name { font-weight: 700; letter-spacing: -.03em; }
+    .brand-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .new-chat { flex: none; width: 100%; border: 0; border-radius: 12px; padding: 13px 15px; color: white; background: var(--accent); font-weight: 600; box-shadow: 0 8px 18px rgba(231,111,81,.2); }
+    .new-chat:hover { background: var(--accent-dark); }
+    .section-label { flex: none; margin: 28px 10px 10px; color: var(--muted); font: 500 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 5px; align-content: start; }
+    .conversation-item { display: flex; gap: 4px; align-items: stretch; }
+    .conversation { flex: 1; min-width: 0; padding: 11px 12px; text-align: left; border: 1px solid transparent; border-radius: 10px; color: var(--ink); background: transparent; }
+    .conversation:hover, .conversation.active { border-color: var(--line); background: var(--panel); box-shadow: 0 5px 18px rgba(45, 69, 51, .05); }
+    .conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .conversation-count { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .conversation-rename { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; color: var(--ink); background: #fff; font-size: 13px; outline: none; box-shadow: 0 5px 18px rgba(45, 69, 51, .08); }
+    .context-menu { position: fixed; z-index: 60; min-width: 150px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(45, 69, 51, .18); }
+    .context-menu[hidden] { display: none; }
+    .context-menu-item { display: block; width: 100%; padding: 8px 10px; text-align: left; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font-size: 13px; }
+    .context-menu-item:hover { background: #f2efe8; }
+    .context-menu-item.danger { color: var(--accent-dark); }
+    .context-menu-item.danger:hover { background: #fff4f1; }
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fffdf9; }
+    .topbar { flex: none; padding: 22px 34px; border-bottom: 1px solid var(--line); }
+    .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+    .chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: min(900px, 100%); margin: 0 auto; padding: 46px 34px 28px; }
+    .welcome { max-width: 650px; margin: 9vh auto 70px; }
+    .eyebrow { color: var(--accent-dark); font: 500 12px "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { max-width: 680px; margin: 14px 0 18px; font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.065em; }
+    .welcome p { max-width: 520px; color: var(--muted); font-size: 16px; line-height: 1.7; }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .suggestion { padding: 9px 12px; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.65); font-size: 12px; }
+    .suggestion:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .messages { display: grid; gap: 22px; }
+    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 13px; animation: rise .28s ease both; }
+    .message.user { grid-template-columns: minmax(0, 1fr) 32px; }
+    .message.user .avatar { grid-column: 2; grid-row: 1; }
+    .message.user > div:nth-child(2) { grid-column: 1; grid-row: 1; text-align: right; }
+    .message.user .message-content { display: inline-block; padding: 9px 13px; border-radius: 12px 4px 12px 12px; text-align: left; background: var(--mint); }
+    .avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: white; background: var(--ink); font-size: 12px; font-weight: 700; }
+    .message.user .avatar { color: var(--ink); background: var(--mint); }
+    .message-role { margin: 2px 0 7px; color: var(--muted); font: 11px "DM Mono", monospace; text-transform: uppercase; }
+    .trace { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .trace summary { display: inline-block; cursor: pointer; color: var(--accent-dark); font: 11px "DM Mono", monospace; }
+    .trace summary:hover { color: var(--ink); }
+    .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--mint); background: #f7faf5; }
+    .trace-event { line-height: 1.5; }
+    .message-content { line-height: 1.75; font-size: 15px; overflow-wrap: anywhere; }
+    .message-content p { margin: 0 0 12px; }
+    .message-content p:last-child { margin-bottom: 0; }
+    .message-content strong { font-weight: 700; }
+    .message-content ul, .message-content ol { margin: 8px 0; padding-left: 24px; }
+    .message-content blockquote { margin: 12px 0; padding: 8px 14px; border-left: 3px solid var(--accent); color: var(--muted); background: #f7faf5; }
+    .message-content code { padding: 2px 5px; border-radius: 5px; color: #a44a38; background: #fff0eb; font: 13px "DM Mono", monospace; }
+    .message-content pre { margin: 12px 0; padding: 14px; overflow-x: auto; border-radius: 10px; color: #edf5ed; background: #1e2925; }
+    .message-content pre code { padding: 0; color: inherit; background: transparent; }
+    .message-content table { width: 100%; margin: 12px 0; border-collapse: collapse; font-size: 13px; }
+    .message-content th, .message-content td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; }
+    .message-content th { background: var(--mint); font-weight: 600; }
+    .message-content a { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
+    .activity { color: var(--muted); font-size: 13px; font-style: italic; }
+    .message-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .rewind { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 11px; line-height: 1.7; }
+    .rewind:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .rewind:disabled { opacity: .4; cursor: not-allowed; }
+    .composer-wrap { position: relative; flex: none; width: min(900px, 100%); margin: 0 auto; padding: 0 34px 30px; }
+    .scroll-bottom { position: absolute; right: 34px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(255,255,255,.95); box-shadow: 0 6px 18px rgba(45,69,51,.16); font-size: 16px; line-height: 1; }
+    .scroll-bottom.visible { display: grid; }
+    .scroll-bottom:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .composer { display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid #cfdacf; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
+    textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.5; }
+    textarea::placeholder { color: #9aa79f; }
+    .send { display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 12px; color: white; background: var(--ink); font-size: 18px; }
+    .send:disabled { opacity: .45; cursor: wait; }
+    .hint { margin-top: 10px; color: var(--muted); text-align: center; font-size: 11px; }
+    .hint.error { color: var(--accent-dark); font-weight: 600; }
+    @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 760px) {
+      .shell { display: flex; flex-direction: column; }
+      .sidebar { flex: none; max-height: 44vh; padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { margin-bottom: 15px; }
+      .section-label { margin-top: 16px; }
+      .conversation-list { display: flex; overflow-x: auto; overflow-y: hidden; }
+      .conversation { min-width: 180px; }
+      .main { flex: 1 1 auto; min-height: 0; }
+      .topbar { padding: 16px 18px; }
+      .chat { padding: 30px 18px 24px; }
+      .composer-wrap { padding: 0 18px 18px; }
+      .scroll-bottom { right: 18px; }
+      .welcome { margin: 5vh auto 48px; }
+      h1 { font-size: 42px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div><div class="brand-name">Agent Workspace</div><div class="brand-sub">weather · web · memory</div></div>
+      </div>
+      <button class="new-chat" id="newChat">＋ 新建会话</button>
+      <div class="section-label">Conversations · 右键管理</div>
+      <div class="conversation-list" id="conversationList"></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <div class="conversation-heading" id="conversationTitle">未选择会话</div>
+      </header>
+      <section class="chat" id="chat">
+        <div class="welcome" id="welcome">
+          <div class="eyebrow">A quiet interface for curious questions</div>
+          <h1>把问题交给一组会思考的工具。</h1>
+          <p>天气、实时搜索和网页阅读都在同一段对话里。选择一个已有会话，或直接开始新的探索。</p>
+          <div class="suggestions">
+            <button class="suggestion" data-prompt="我这里今天的天气怎么样？">查一下今天的天气</button>
+            <button class="suggestion" data-prompt="搜索今天值得关注的科技新闻">搜索科技新闻</button>
+            <button class="suggestion" data-prompt="介绍一下你能做什么">介绍一下你自己</button>
+          </div>
+        </div>
+        <div class="messages" id="messages"></div>
+      </section>
+      <div class="composer-wrap">
+        <button class="scroll-bottom" id="scrollBottom" type="button" title="回到底部" aria-label="回到底部">↓</button>
+        <form class="composer" id="composer">
+          <textarea id="input" rows="1" placeholder=""></textarea>
+          <button class="send" id="send" title="发送" aria-label="发送">↑</button>
+        </form>
+        <div class="hint">Enter 发送 · Shift + Enter 换行</div>
+      </div>
+    </main>
+  </div>
+  <div class="context-menu" id="conversationMenu" role="menu" hidden>
+    <button type="button" class="context-menu-item" role="menuitem" data-action="rename">重命名</button>
+    <button type="button" class="context-menu-item danger" role="menuitem" data-action="delete">删除会话</button>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <script>
+    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0 };
+    const $ = (selector) => document.querySelector(selector);
+    const list = $('#conversationList');
+    const messages = $('#messages');
+    const chat = $('#chat');
+    const welcome = $('#welcome');
+    const input = $('#input');
+    const send = $('#send');
+    const conversationTitle = $('#conversationTitle');
+    const hint = $('.hint');
+    const scrollBottomButton = $('#scrollBottom');
+    const conversationMenu = $('#conversationMenu');
+    const HINT_IDLE = 'Enter 发送 · Shift + Enter 换行';
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>'"]/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      })[character]);
+    }
+
+    function renderMarkdown(content) {
+      const text = String(content ?? '');
+      if (!window.marked || !window.DOMPurify) {
+        return escapeHtml(text).replace(/\n/g, '<br>');
+      }
+      return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+    }
+
+    // 状态和错误都显示在输入框下面那行小字上，出错时必须让用户看见，
+    // 否则接口失败会表现为「点了没反应」。
+    function setHint(text, isError = false) {
+      hint.textContent = text || HINT_IDLE;
+      hint.classList.toggle('error', Boolean(text) && isError);
+    }
+
+    // 忙碌状态和提示文案必须分开：出错时只解除忙碌，不能顺手把错误文案清掉。
+    function setBusy(busy) {
+      send.disabled = busy;
+      input.disabled = busy;
+      state.busy = busy;
+      document.querySelectorAll('.rewind').forEach((button) => { button.disabled = busy; });
+    }
+
+    function setStatus(text, busy = false) {
+      setBusy(busy);
+      setHint(text);
+    }
+
+    // 把后端返回的 detail 取出来，附加到错误信息上。
+    async function readError(response, fallback) {
+      try {
+        const problem = await response.json();
+        const detail = problem && problem.detail;
+        if (typeof detail === 'string' && detail) {
+          return `HTTP ${response.status}：${detail}`;
+        }
+      } catch (error) {
+        // 后端没有返回 JSON，用兜底文案
+      }
+      return fallback || `HTTP ${response.status}`;
+    }
+
+    // 滚动只发生在 .chat 内部：页面本身不滚动，所以侧边栏、顶栏和输入框始终固定。
+    function isNearBottom(threshold = 120) {
+      return chat.scrollHeight - chat.scrollTop - chat.clientHeight <= threshold;
+    }
+
+    function scrollToBottom() {
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    // 只要不在底部就显示「回到底部」按钮
+    function updateScrollBottomButton() {
+      scrollBottomButton.classList.toggle('visible', !isNearBottom());
+    }
+
+    scrollBottomButton.onclick = () => {
+      state.autoFollow = true;
+      scrollToBottom();
+      updateScrollBottomButton();
+    };
+
+    // 是否跟随由真实滚动行为决定：向上滚离底部就停止，重新接近底部就恢复。
+    // 不能在每个流式分片里现算 isNearBottom()——跟随滚动本身就会把跟随关掉。
+    chat.addEventListener('scroll', () => {
+      const currentScrollTop = chat.scrollTop;
+      if (currentScrollTop < state.lastScrollTop - 2 && !isNearBottom()) {
+        state.autoFollow = false;
+      } else if (isNearBottom()) {
+        state.autoFollow = true;
+      }
+      state.lastScrollTop = currentScrollTop;
+      updateScrollBottomButton();
+    }, { passive: true });
+
+    function addMessage(role, content, activity = false, operations = [], turn = null) {
+      const shouldFollow = state.autoFollow;
+      const item = document.createElement('article');
+      item.className = `message ${role}`;
+      const trace = role === 'assistant'
+        ? '<details class="trace" hidden><summary>查看操作过程</summary><div class="trace-list"></div></details>'
+        : '';
+      const rewindRow = role === 'user' && turn !== null
+        ? '<div class="message-actions"><button type="button" class="rewind" title="删除这条消息及其之后的全部对话">回退到发送这条之前</button></div>'
+        : '';
+      item.innerHTML = `<div class="avatar">${role === 'user' ? '我' : 'A'}</div><div><div class="message-role">${role === 'user' ? 'You' : 'Agent'}</div>${trace}<div class="message-content${activity ? ' activity' : ''}"></div>${rewindRow}</div>`;
+      const contentNode = item.querySelector('.message-content');
+      contentNode.innerHTML = renderMarkdown(content);
+      contentNode.trace = item.querySelector('.trace');
+      contentNode.traceList = item.querySelector('.trace-list');
+      operations.forEach((operation) => {
+        const details = operation.kind === 'call' && operation.args && Object.keys(operation.args).length
+          ? JSON.stringify(operation.args)
+          : '';
+        addTrace(contentNode, operation.kind === 'call' ? `调用工具：${operation.tool}` : `工具完成：${operation.tool}`, details);
+      });
+      const rewindButton = item.querySelector('.rewind');
+      if (rewindButton) rewindButton.onclick = () => rewindTo(turn);
+      messages.appendChild(item);
+      welcome.style.display = 'none';
+      if (shouldFollow) scrollToBottom();
+      return contentNode;
+    }
+
+    // 按历史渲染消息，同时给每条用户消息标上它的序号（从 0 开始），回退要用。
+    function renderHistory(history) {
+      messages.innerHTML = '';
+      let userTurn = 0;
+      history.forEach((message) => {
+        const isUser = message.role === 'user';
+        addMessage(message.role, message.content, false, message.operations || [], isUser ? userTurn : null);
+        if (isUser) userTurn += 1;
+      });
+      if (!history.length) welcome.style.display = 'block';
+      updateScrollBottomButton();
+    }
+
+    function addTrace(node, label, details = '') {
+      if (!node?.traceList) return;
+      node.trace.hidden = false;
+      const event = document.createElement('div');
+      event.className = 'trace-event';
+      event.textContent = details ? `${label} · ${details}` : label;
+      node.traceList.appendChild(event);
+    }
+
+    async function loadConversations() {
+      // 列表每次都是整块重建，菜单里缓存的 row 会变成脱离 DOM 的旧节点；
+      // 顺手收起来，避免「重命名」改到一个看不见的行上。
+      closeConversationMenu();
+      let data;
+      try {
+        const response = await fetch('/api/conversations');
+        if (!response.ok) {
+          setHint(`会话列表加载失败：${await readError(response, '会话列表加载失败')}`, true);
+          return;
+        }
+        data = await response.json();
+      } catch (error) {
+        setHint(`无法连接后端：${error.message}`, true);
+        return;
+      }
+      const activeConversation = data.find((conversation) => conversation.thread_id === state.threadId);
+      conversationTitle.textContent = activeConversation ? activeConversation.summary : '未选择会话';
+      list.innerHTML = '';
+      data.forEach((conversation) => {
+        const row = document.createElement('div');
+        row.className = 'conversation-item';
+        const button = document.createElement('button');
+        button.className = `conversation ${conversation.thread_id === state.threadId ? 'active' : ''}`;
+        button.innerHTML = `<div class="conversation-title"></div><div class="conversation-count">${conversation.message_count} 条消息</div>`;
+        button.querySelector('.conversation-title').textContent = conversation.summary;
+        button.onclick = () => selectConversation(conversation.thread_id);
+        // 删除和重命名都收进右键菜单，列表里不再常住一个删除按钮
+        row.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          openConversationMenu(event.clientX, event.clientY, row, conversation);
+        });
+        row.append(button);
+        list.appendChild(row);
+      });
+    }
+
+    async function deleteConversation(threadId, summary) {
+      if (!window.confirm(`确定删除“${summary}”吗？此操作不可恢复。`)) return;
+      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
+      if (!response.ok) {
+        setHint(`删除失败：${await readError(response, '删除失败')}`, true);
+        return;
+      }
+      if (state.threadId === threadId) {
+        state.threadId = null;
+        state.autoFollow = true;
+        conversationTitle.textContent = '未选择会话';
+        messages.innerHTML = '';
+        welcome.style.display = 'block';
+        updateScrollBottomButton();
+      }
+      await loadConversations();
+      setStatus('');
+    }
+
+    // ---------- 会话右键菜单（重命名 / 删除） ----------
+    let menuTarget = null;
+
+    function openConversationMenu(x, y, row, conversation) {
+      menuTarget = { row, conversation };
+      conversationMenu.hidden = false;
+      // 先显示再量尺寸，才拿得到菜单自身的宽高来做视口内收边
+      const rect = conversationMenu.getBoundingClientRect();
+      const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+      const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+      conversationMenu.style.left = `${left}px`;
+      conversationMenu.style.top = `${top}px`;
+    }
+
+    function closeConversationMenu() {
+      conversationMenu.hidden = true;
+      menuTarget = null;
+    }
+
+    async function renameConversation(threadId, title) {
+      try {
+        const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title })
+        });
+        if (!response.ok) {
+          const detail = await readError(response, '重命名失败');
+          // 405 说明路径存在、只是这个 HTTP 方法没注册——一般是后端进程还是改 PATCH
+          // 之前启动的那个，重启 uvicorn 才会生效（和回退接口的 404 是同一类问题）。
+          throw new Error(response.status === 405
+            ? `${detail}。后端可能是在这次改动之前启动的，重启 uvicorn 后重命名接口才会生效。`
+            : detail);
+        }
+        await loadConversations();
+        // 和回退一致：不在提示行播报成功，直接还原成默认输入提示
+        setStatus('');
+      } catch (error) {
+        setHint(`重命名失败：${error.message}`, true);
+        await loadConversations();
+      }
+    }
+
+    // 就地改标题：把整行的内容换成输入框（不能把 input 塞进 .conversation 按钮里，
+    // 那样点输入框会连带触发按钮的选中逻辑）。提交或取消后靠 loadConversations 重建整行。
+    function startInlineRename(row, conversation) {
+      const field = document.createElement('input');
+      field.className = 'conversation-rename';
+      field.type = 'text';
+      field.maxLength = 30;
+      field.value = conversation.summary;
+      field.setAttribute('aria-label', '会话标题');
+      row.replaceChildren(field);
+      field.focus();
+      field.select();
+
+      let settled = false;
+      const commit = async () => {
+        if (settled) return;
+        settled = true;
+        const title = field.value.trim();
+        if (!title || title === conversation.summary) {
+          await loadConversations();
+          return;
+        }
+        await renameConversation(conversation.thread_id, title);
+      };
+      const cancel = async () => {
+        if (settled) return;
+        settled = true;
+        await loadConversations();
+      };
+
+      field.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); commit(); }
+        else if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+      });
+      // 点走即提交，和常见的待办应用一致；settled 保证 Enter 之后 blur 不会再提交一次
+      field.addEventListener('blur', () => { commit(); });
+    }
+
+    conversationMenu.querySelector('[data-action="rename"]').onclick = () => {
+      const target = menuTarget;
+      closeConversationMenu();
+      if (target) startInlineRename(target.row, target.conversation);
+    };
+
+    conversationMenu.querySelector('[data-action="delete"]').onclick = () => {
+      const target = menuTarget;
+      closeConversationMenu();
+      if (target) deleteConversation(target.conversation.thread_id, target.conversation.summary);
+    };
+
+    // 左键点别处、滚轮、Esc、改窗口大小、失焦，都把菜单收起来。
+    // 这里刻意不用 scroll：scroll 事件是异步派发的，右键之前那次滚动的 scroll
+    // 可能在菜单打开之后才到达，会把刚打开的菜单立刻关掉（点击可滚动区域时
+    // 浏览器的 scrollIntoView 就会稳定触发这个竞态）。wheel / mousedown 是
+    // 同步的用户意图，不会误伤。
+    document.addEventListener('mousedown', (event) => {
+      if (!event.target.closest('#conversationMenu')) closeConversationMenu();
+    }, true);
+    document.addEventListener('wheel', () => closeConversationMenu(), { passive: true });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeConversationMenu();
+    });
+    window.addEventListener('resize', () => closeConversationMenu());
+    window.addEventListener('blur', () => closeConversationMenu());
+
+    async function selectConversation(threadId) {
+      setStatus('正在加载历史…', true);
+      state.autoFollow = true;
+      const response = await fetch(`/api/conversations/${encodeURIComponent(threadId)}/messages`);
+      if (!response.ok) {
+        setHint(`加载历史失败：${await readError(response, '加载历史失败')}`, true);
+        setBusy(false);
+        return;
+      }
+      const data = await response.json();
+      state.threadId = threadId;
+      renderHistory(data.messages);
+      await loadConversations();
+      setStatus('');
+    }
+
+    // 回退：删掉这条用户消息以及它之后的全部对话，并把原文放回输入框方便改完重发。
+    async function rewindTo(turn) {
+      if (state.busy) return;
+      if (state.threadId === null) {
+        setHint('回退失败：当前没有活动会话。', true);
+        return;
+      }
+      if (!window.confirm('回退到这条消息之前？这条消息以及它之后的对话都会被删除，原文会放回输入框。')) return;
+      setStatus('正在回退…', true);
+      try {
+        const response = await fetch(`/api/conversations/${encodeURIComponent(state.threadId)}/rewind`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ turn })
+        });
+        if (!response.ok) {
+          const detail = await readError(response, '回退失败');
+          throw new Error(response.status === 404
+            ? `${detail}。如果后端是在这次改动之前启动的，重启 uvicorn 后接口才会生效。`
+            : detail);
+        }
+        const data = await response.json();
+        state.autoFollow = true;
+        renderHistory(data.messages);
+        input.value = data.text || '';
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+        input.focus({ preventScroll: true });
+        await loadConversations();
+        // 不额外播报「已回退…」：原文已经在输入框里了，直接把提示行还原成默认输入提示
+        setStatus('');
+      } catch (error) {
+        setBusy(false);
+        setHint(`回退失败：${error.message}`, true);
+      }
+    }
+
+    async function newConversation() {
+      try {
+        const response = await fetch('/api/conversations', { method: 'POST' });
+        if (!response.ok) throw new Error(await readError(response, '新建会话失败'));
+        const data = await response.json();
+        state.threadId = data.thread_id;
+        state.autoFollow = true;
+        conversationTitle.textContent = data.summary;
+        messages.innerHTML = '';
+        welcome.style.display = 'block';
+        updateScrollBottomButton();
+        await loadConversations();
+        setStatus('');
+        input.focus({ preventScroll: true });
+      } catch (error) {
+        setHint(`新建会话失败：${error.message}`, true);
+      }
+    }
+
+    async function sendMessage(text) {
+      if (!text || state.busy) return;
+      state.autoFollow = true;
+      addMessage('user', text, false, [], messages.querySelectorAll('.message.user').length);
+      input.value = '';
+      input.style.height = 'auto';
+      setStatus('正在思考…', true);
+      let assistantNode = null;
+      let assistantText = '';
+      let streamFailed = false;
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, thread_id: state.threadId, user_id: '1' })
+        });
+        if (!response.ok) throw new Error(await readError(response, '请求失败'));
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split('\n\n');
+          buffer = blocks.pop();
+          for (const block of blocks) {
+            const line = block.split('\n').find((part) => part.startsWith('data: '));
+            if (!line) continue;
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'conversation') {
+              state.threadId = event.thread_id;
+            } else if (event.type === 'title') {
+              conversationTitle.textContent = event.title;
+            } else if (event.type === 'tool_call') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              (event.calls || [{ name: event.tool, args: {} }]).forEach((call) => {
+                addTrace(assistantNode, `调用工具：${call.name}`, Object.keys(call.args || {}).length ? JSON.stringify(call.args) : '');
+              });
+              setStatus(`正在调用工具：${event.tool}…`, true);
+            } else if (event.type === 'tool_result') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              addTrace(assistantNode, `工具完成：${event.tool}`);
+            } else if (event.type === 'assistant_delta') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              assistantText += event.content;
+              assistantNode.innerHTML = renderMarkdown(assistantText);
+              if (state.autoFollow) scrollToBottom();
+            } else if (event.type === 'assistant') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              assistantText = event.content;
+              assistantNode.innerHTML = renderMarkdown(assistantText);
+            } else if (event.type === 'error') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              assistantNode.innerHTML = renderMarkdown(event.message);
+              streamFailed = true;
+              setHint(`服务端出错：${event.message}`, true);
+            }
+          }
+        }
+        await loadConversations();
+        if (streamFailed) setBusy(false); else setStatus('');
+      } catch (error) {
+        addMessage('assistant', `请求失败：${error.message}`);
+        setBusy(false);
+        setHint(`请求失败：${error.message}`, true);
+      } finally {
+        setBusy(false);
+        input.focus({ preventScroll: true });
+      }
+    }
+
+    $('#composer').addEventListener('submit', (event) => { event.preventDefault(); sendMessage(input.value.trim()); });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#composer').requestSubmit(); }
+    });
+    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 180)}px`; });
+    $('#newChat').onclick = newConversation;
+    document.querySelectorAll('.suggestion').forEach((button) => { button.onclick = () => { input.value = button.dataset.prompt; input.focus(); }; });
+    loadConversations();
+  </script>
+</body>
+</html>
