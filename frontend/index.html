@@ -76,6 +76,10 @@
     .trace summary:hover { color: var(--ink); }
     .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--mint); background: #f7faf5; }
     .trace-event { line-height: 1.5; }
+    /* 思维链单独一块，比工具调用那几行更暗、更窄，视觉上退到后面去。
+       summary 直接沿用上面 `.trace summary` 的样式，不重复写一套。 */
+    .trace-reasoning { color: var(--muted); }
+    .trace-reasoning-body { margin-top: 6px; padding: 8px 10px; border-left: 2px dashed var(--line); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
     .message-content { line-height: 1.75; font-size: 15px; overflow-wrap: anywhere; }
     .message-content p { margin: 0 0 12px; }
     .message-content p:last-child { margin-bottom: 0; }
@@ -656,6 +660,11 @@
       contentNode.trace = item.querySelector('.trace');
       contentNode.traceList = item.querySelector('.trace-list');
       operations.forEach((operation) => {
+        // 历史里的思维链（kind=reasoning）整段拿回来，一次性填进折叠块。
+        if (operation.kind === 'reasoning') {
+          appendReasoning(addReasoning(contentNode), operation.text || '');
+          return;
+        }
         const details = operation.kind === 'call' && operation.args && Object.keys(operation.args).length
           ? JSON.stringify(operation.args)
           : '';
@@ -689,6 +698,38 @@
       event.className = 'trace-event';
       event.textContent = details ? `${label} · ${details}` : label;
       node.traceList.appendChild(event);
+    }
+
+    // 思维链做成可折叠块，而不是像工具调用那样平铺一行。
+    // 理由：它比正文长一个量级（实测一次提问：思维链 317 字 / 正文 80 字，
+    // 分片数 166 / 47）。平铺会把工具调用挤到看不见。折叠起来、summary 上带
+    // 实时字数，既能看出「它正在想」，又不占地方。
+    function addReasoning(node, text = '') {
+      if (!node?.traceList) return null;
+      node.trace.hidden = false;
+      const box = document.createElement('details');
+      box.className = 'trace-reasoning';
+      box.innerHTML = '<summary></summary><div class="trace-reasoning-body"></div>';
+      box.summary = box.querySelector('summary');
+      box.body = box.querySelector('.trace-reasoning-body');
+      box.chars = 0;
+      box.head = '';
+      node.traceList.appendChild(box);
+      if (text) appendReasoning(box, text);
+      return box;
+    }
+
+    function appendReasoning(box, text) {
+      if (!box || !text) return;
+      // 用 appendChild(TextNode) 而不是 `textContent +=`：后者每来一片都要把
+      // 整块内容读出来再写回去，几百个分片下来会退化成 O(n²)。
+      box.body.appendChild(document.createTextNode(text));
+      box.chars += text.length;
+      // 只留开头一小截做预览，别让 summary 随着思维链一起变长。
+      box.head = (box.head + text).slice(0, 40);
+      const preview = box.head.replace(/\s+/g, ' ').trim();
+      const more = box.chars > preview.length ? '…' : '';
+      box.summary.textContent = `思考过程（${box.chars} 字）${preview}${more}`;
     }
 
     async function loadConversations() {
@@ -937,6 +978,9 @@
       let assistantNode = null;
       let assistantText = '';
       let streamFailed = false;
+      // 当前这一轮模型的思考块。模型一轮里「先想、再答」，调完工具进入下一轮时
+      // 要另起一块，所以 tool_call 那里会把它清掉（见下）。
+      let reasoningBox = null;
       try {
         const response = await apiFetch('/api/chat/stream', {
           method: 'POST',
@@ -963,7 +1007,14 @@
               state.threadId = event.thread_id;
             } else if (event.type === 'title') {
               conversationTitle.textContent = event.title;
+            } else if (event.type === 'reasoning_delta') {
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              if (!reasoningBox) reasoningBox = addReasoning(assistantNode);
+              appendReasoning(reasoningBox, event.content);
+              if (state.autoFollow) scrollToBottom();
             } else if (event.type === 'tool_call') {
+              // 这条之后模型要重新开始推理，下一段思维链另起一块。
+              reasoningBox = null;
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               (event.calls || [{ name: event.tool, args: {} }]).forEach((call) => {
                 addTrace(assistantNode, `调用工具：${call.name}`, Object.keys(call.args || {}).length ? JSON.stringify(call.args) : '');

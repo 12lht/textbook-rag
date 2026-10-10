@@ -998,6 +998,15 @@ async def get_history(thread_id: str) -> list[dict[str, object]]:
             history.append({"role": "user", "content": str(message.content)})
             assistant_entry = None
         elif isinstance(message, AIMessage):
+            # 思维链**不用另外存**：它一直躺在 additional_kwargs 里跟着 checkpoint
+            # 走，而且存的是完整一段——分片合并时同名 key 是字符串**相加**而不是
+            # 覆盖（实测逐片之和与聚合结果逐字相等）。这里顺手读出来塞进 operations，
+            # 重开页面时「思考过程」就能补回去。
+            #
+            # 顺序有意放在工具调用之前：一轮里模型永远是「先想，再决定调什么」。
+            reasoning = (message.additional_kwargs or {}).get("reasoning_content")
+            if reasoning:
+                operations.append({"kind": "reasoning", "text": reasoning})
             operations.extend(
                 {
                     "kind": "call",
@@ -1061,12 +1070,17 @@ async def stream_agent(
     # 那段时间会被算进 TTFT，把时延指标污染掉。
     await _mcp.tools()
 
-    # 工具调用只从 updates 通道播报一次。
-    # 原先两条通道都播报，却用两套不相等的键去重：messages 通道用 tool_call_chunks
-    # 的 index（整数），updates 通道用 tool_call 的 id（字符串 "call_xxx"），
-    # 两者永不相等，于是同一次调用被报两遍，前端「调用工具」那行会重复显示。
-    # 现在只留 updates 通道：它拿到的 AIMessage 是模型节点跑完后的完整 tool_calls
-    # （参数齐全，而不是流式半截），按 id 去重也天然唯一。
+    # 两条通道各管一件事，职责不重叠：
+    #
+    #   messages 通道 → 逐字输出（正文 + 思维链）。它是「模型正在写」的实时视图，
+    #                   所以正文和思维链都从这里走，前端才能边生成边显示。
+    #   updates  通道 → 结构化事实（调了哪个工具、工具返回了什么）。它只有在
+    #                   节点**跑完**之后才给，拿到的工具参数是完整的。
+    #
+    # 工具调用只从 updates 通道播报一次。原先两条通道都播报，却用两套不相等的键
+    # 去重：messages 通道用 tool_call_chunks 的 index（整数），updates 通道用
+    # tool_call 的 id（字符串 "call_xxx"），两者永不相等，于是同一次调用被报两遍，
+    # 前端「调用工具」那行会重复显示。现在只留 updates：按 id 去重天然唯一。
     emitted_tool_calls: set[str] = set()
     async for mode, chunk in graph.astream(
         {"messages": messages},
@@ -1080,9 +1094,28 @@ async def stream_agent(
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":
-            message_chunk, _metadata = chunk
+            message_chunk, metadata = chunk
             if isinstance(message_chunk, AIMessageChunk):
+                # 思维链只从 model 节点取，**必须按节点过滤**。
+                #
+                # 这条通道捕获的是「这个图里所有被调用的模型」，不只是主模型。
+                # `truncate` 是入口节点、每轮都跑，它在需要裁剪时会 `await
+                # model.ainvoke(...)` 生成摘要——那一次调用的 token 同样会从这条
+                # 通道冒出来（实测拍到的分片：truncate 347 片 / model 65 片）。
+                # 摘要既不是「助手在回答」，更不是「助手在想」，直接放行会让用户
+                # 在思考过程里看到一段与本次提问无关的摘要草稿。
+                if metadata.get("langgraph_node") == "model":
+                    reasoning = (message_chunk.additional_kwargs or {}).get(
+                        "reasoning_content"
+                    )
+                    if reasoning:
+                        yield {"type": "reasoning_delta", "content": reasoning}
                 if isinstance(message_chunk.content, str) and message_chunk.content:
+                    # 已知问题（本次改动之前就有，没有顺手改）：下面这一行**没有**
+                    # 同样的节点过滤，所以 `truncate` 节点摘要的正文会被当成助手的
+                    # 回答播出去，混在真正的答案前面。实测第 31 轮触发裁剪时混进
+                    # 80 字，用户会看到「……一加一等于二。」前面平白多出一段摘要。
+                    # 修法就是套用上面同一个 `langgraph_node == "model"` 判据。
                     yield {"type": "assistant_delta", "content": message_chunk.content}
             continue
 

@@ -419,6 +419,29 @@ pbkdf2_sha256$600000$<salt_b64>$<hash_b64>
 
 请求体里**没有 `user_id`**：身份只认 `Authorization` 头里的令牌，客户端自报的 `user_id` 会被忽略（字段已从 `ChatRequest` 中删除）。拿别人的 `thread_id` 来聊会直接 404，且在 SSE 开流之前就返回。
 
+### 流式事件
+
+流里每个事件都是 `data: {"type": ..., ...}` 一行。
+
+| `type` | 字段 | 含义 |
+| --- | --- | --- |
+| `conversation` | `thread_id` | 新建了会话，前端记下 id |
+| `title` | `title` | 自动生成的标题 |
+| `reasoning_delta` | `content` | 主模型**思维链**的一个分片 |
+| `assistant_delta` | `content` | 回答正文的一个分片 |
+| `tool_call` | `tool`、`calls` | 模型要调工具，`calls` 里是名字和参数 |
+| `tool_result` | `tool`、`status` | 工具返回，`status` 为 `success` / `error` |
+| `error` | `message` | 出错，前端应把它当回答显示并标红 |
+| `done` | — | 本轮结束 |
+
+思维链和正文都在它**之前**（一轮里模型先想再答），前端把思维链装进「查看操作过程」里的折叠块。
+
+两条通道分工不同，别混着用：`assistant_delta` / `reasoning_delta` 来自 `messages` 通道（逐字、实时），`tool_call` / `tool_result` 来自 `updates` 通道（节点跑完才有、参数完整）。工具调用之所以只从 `updates` 播一次，是因为两条通道的去重键不相等（`index` 是整数、`id` 是字符串），一起播会显示两遍。
+
+`messages` 通道捕获的是**图里所有被调用的模型**，不只是主模型——`truncate` 节点每轮都跑，它在需要裁剪时会调一次模型生成摘要，那次的 token 同样会从这条通道冒出来。所以**必须按 `metadata["langgraph_node"] == "model"` 过滤**，否则用户会在「思考过程」里看到一段与本次提问无关的摘要草稿。
+
+> 已知问题：正文那条分支还没有加同样的过滤，摘要的文字会混进回答气泡（实测第 31 轮触发裁剪时混进 80 字）。属于本次功能上线前就存在的行为，修法是套用同一个判据。
+
 ### 位置怎么传
 
 `location` 是可选的，两种来源二选一或都给：
