@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import hashlib
 import json
 import math
 import asyncio
@@ -169,12 +170,16 @@ def validate_cases(cases: list[dict]) -> list[str]:
 
 # ---------------------------------------------------------------- 单例跑一次
 
-async def _read_usage(thread_id: str) -> dict:
-    """从 checkpoint 里读真实 token 用量。
+async def _read_usage(thread_id: str) -> tuple[dict, str | None]:
+    """从 checkpoint 里读真实 token 用量和工具输出指纹。
 
     model_node 走的是 .ainvoke()（不是流式），所以落库的 AIMessage 带着
     usage_metadata，读一次状态就能拿到确切 token 数——不需要额外发请求，
     也不用给 agent_core 加回调。必须在删 thread 之前调用。
+
+    指纹 = 按顺序把所有 ToolMessage 的内容拼起来做 sha256。它是「录制回放到底
+    有没有生效」的判据：replay 模式下两次运行的指纹逐字相同，就说明模型拿到的
+    外部内容完全一致，剩下的差异只可能来自代码或模型本身，不再被外部内容污染。
     """
     empty = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "model_calls": 0}
     try:
@@ -183,22 +188,50 @@ async def _read_usage(thread_id: str) -> dict:
             {"configurable": {"thread_id": thread_id}}
         )).values.get("messages", [])
     except Exception:  # noqa: BLE001 — 读不到用量不该让用例算失败
-        return empty
+        return empty, None
 
     prompt = completion = calls = 0
+    outputs: list[str] = []
     for message in messages:
         usage = getattr(message, "usage_metadata", None)
-        if not usage:
-            continue
-        calls += 1
-        prompt += usage.get("input_tokens", 0) or 0
-        completion += usage.get("output_tokens", 0) or 0
+        if usage:
+            calls += 1
+            prompt += usage.get("input_tokens", 0) or 0
+            completion += usage.get("output_tokens", 0) or 0
+        if getattr(message, "type", "") == "tool" or type(message).__name__ == "ToolMessage":
+            outputs.append(_content_text(getattr(message, "content", "")))
+
+    digest = None
+    if outputs:
+        # 排序后再拼：指纹要反映「模型从工具那儿看到了什么内容」，
+        # 不该因为工具调用顺序变了就报不一致。顺序差异由 called_tools 反映。
+        joined = "\x1e".join(sorted(outputs))
+        digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
     return {
         "input_tokens": prompt,
         "output_tokens": completion,
         "total_tokens": prompt + completion,
         "model_calls": calls,
-    }
+    }, digest
+
+
+def _content_text(content: object) -> str:
+    """把消息内容压成纯文本。MCP 工具返回的是 content-block 列表，
+    内层 text 还是转义过的字符串，所以不能直接 str()。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(str(block.get("text", block)))
+            else:
+                parts.append(str(block))
+        return "".join(parts)
+    return str(content)
 
 
 async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
@@ -216,6 +249,7 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
     answer_parts: list[str] = []
     error: str | None = None
     usage: dict = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "model_calls": 0}
+    tool_output_digest: str | None = None
 
     try:
         async for event in agent_core.stream_agent("eval-user", thread_id, case["query"]):
@@ -231,7 +265,7 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
                     "tool": str(event.get("tool", "")),
                     "status": str(event.get("status", "success")),
                 })
-        usage = await _read_usage(thread_id)
+        usage, tool_output_digest = await _read_usage(thread_id)
     except Exception as exc:  # noqa: BLE001 — 单条用例崩溃不该中断整轮评测
         error = f"{type(exc).__name__}: {exc}"
     finally:
@@ -289,6 +323,7 @@ async def run_case(case: dict, repeat_index: int, run_slug: str) -> dict:
         "tool_call_events": len(tool_call_events),
         "tool_result_events": len(tool_results),
         "tool_results": tool_results,
+        "tool_output_digest": tool_output_digest,
         "tool_success": success_statuses,
         "usage": usage,
         "ttft_ms": _round(ttft_ms, 1),
@@ -343,8 +378,9 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     }
 
     if cassette_stats is not None:
-        # 这两个是「本次运行」的增量，不是样本级指标。未命中不为 0 说明有工具的
+        # 这三个是「本次运行」的增量，不是样本级指标。未命中不为 0 说明有工具的
         # 入参没被录过，那些样本的外部内容仍然不可控，对比时要把它们挑出来。
+        metrics["外部调用录制"] = cassette_stats["records"]
         metrics["外部调用命中"] = cassette_stats["hits"]
         metrics["外部调用未命中"] = cassette_stats["misses"]
 
@@ -487,6 +523,46 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
             delta = new_rate - old_rate
             marker = "+" if delta > 0 else ""
             print(f"  {category:<18} {_fmt(old_rate):>12} {_fmt(new_rate):>12} {marker + _fmt(delta):>12}")
+
+    # 工具输出指纹：录制回放模式下，同一个入参应该拿到逐字一致的返回值。这里要把
+    # 两种「不一致」分开，否则会把模型行为差异误判成冻结失败：
+    #   工具调用序列也变了      → 模型这一轮少调/多调了工具，是行为差异，属于要测的信号
+    #   调用序列一样但内容不同   → 外部内容没被冻结住，这次对比不干净，必须报出来
+    old_records = {(r["case_id"], r.get("repeat", 0)): r for r in previous.get("records", [])}
+    new_records = {(r["case_id"], r.get("repeat", 0)): r for r in current.get("records", [])}
+    common = sorted(set(old_records) & set(new_records))
+    compared = same = 0
+    frozen_ok_failed: list[str] = []
+    behavior_changed: list[str] = []
+    for key in common:
+        old_record, new_record = old_records[key], new_records[key]
+        old_digest = old_record.get("tool_output_digest")
+        new_digest = new_record.get("tool_output_digest")
+        if old_digest is None and new_digest is None:
+            continue
+        compared += 1
+        if old_digest == new_digest:
+            same += 1
+            continue
+        same_calls = (
+            old_record.get("called_tools") == new_record.get("called_tools")
+            and old_record.get("tool_result_events") == new_record.get("tool_result_events")
+        )
+        if same_calls:
+            frozen_ok_failed.append(key[0])
+        else:
+            behavior_changed.append(key[0])
+    if compared:
+        _line("工具输出指纹（外部内容有没有被冻结住）")
+        print(f"  逐字一致的样本 {same} / {compared}")
+        if frozen_ok_failed:
+            print(f"  冻结失效：{frozen_ok_failed}")
+            print("  → 这些样本工具调用次数一样但内容不同，token 和时延的差异不能直接归给代码")
+        else:
+            print("  冻结失效：无（相同调用拿到的内容逐字一致）")
+        if behavior_changed:
+            print(f"  工具调用序列不同：{behavior_changed}")
+            print("  → 模型这一轮多调/少调了工具，属于要测的行为差异，不是外部内容问题")
 
 
 # ---------------------------------------------------------------- main

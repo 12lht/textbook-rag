@@ -1,0 +1,102 @@
+{
+ "version": 1,
+ "created_at": "2026-10-10T06:41:10+00:00",
+ "interactions": {
+  "215474864725e38a": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "北京",
+    "mode": "current"
+   },
+   "value": "北京北京市当前天气：晴，气温 25°C，湿度 36%，风向 东，风力 ≤3级，更新时间：2026-10-10 14:39:33。",
+   "recorded_at": "2026-10-10T06:41:10+00:00"
+  },
+  "95675365b1eee4c9": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "北京",
+    "mode": "forecast"
+   },
+   "value": "北京北京市天气预报：2026-10-10：白天多云，夜间晴，14~25°C，东北风1-3级；2026-10-11：白天多云，夜间阴，15~25°C，东南风1-3级；2026-10-12：白天多云，夜间多云，14~23°C，西南风1-3级；2026-10-13：白天小雨，夜间晴，8~20°C，东北风1-3级",
+   "recorded_at": "2026-10-10T06:41:10+00:00"
+  },
+  "be148a23e07ca947": {
+   "tool": "get_current_time",
+   "args": {},
+   "value": "2026-10-10 14:41:10",
+   "recorded_at": "2026-10-10T06:41:10+00:00"
+  },
+  "bd6424fd720ce079": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "上海",
+    "mode": "current"
+   },
+   "value": "上海上海市当前天气：阴，气温 25°C，湿度 65%，风向 东北，风力 ≤3级，更新时间：2026-10-10 14:32:58。",
+   "recorded_at": "2026-10-10T06:41:13+00:00"
+  },
+  "b52d901bd39fe58c": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "杭州",
+    "mode": "current"
+   },
+   "value": "浙江杭州市当前天气：晴，气温 26°C，湿度 45%，风向 东南，风力 ≤3级，更新时间：2026-10-10 14:35:24。",
+   "recorded_at": "2026-10-10T06:41:15+00:00"
+  },
+  "2c8fd6a96ec491aa": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "成都",
+    "mode": "current"
+   },
+   "value": "四川成都市当前天气：阴，气温 18°C，湿度 100%，风向 南，风力 ≤3级，更新时间：2026-10-10 14:36:22。",
+   "recorded_at": "2026-10-10T06:41:18+00:00"
+  },
+  "160463752270ec94": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "深圳",
+    "mode": "forecast"
+   },
+   "value": "广东深圳市天气预报：2026-10-10：白天晴，夜间晴，23~31°C，北风1-3级；2026-10-11：白天晴，夜间晴，24~32°C，北风1-3级；2026-10-12：白天多云，夜间多云，24~32°C，北风1-3级；2026-10-13：白天多云，夜间多云，24~32°C，北风1-3级",
+   "recorded_at": "2026-10-10T06:41:20+00:00"
+  },
+  "18f25d83a445dca2": {
+   "tool": "get_user_location",
+   "args": {},
+   "value": "当前位置：北京市北京市，adcode：110000",
+   "recorded_at": "2026-10-10T06:41:23+00:00"
+  },
+  "e5bb85c7ea1c36ae": {
+   "tool": "get_weather_for_location",
+   "args": {
+    "city": "广州",
+    "mode": "forecast"
+   },
+   "value": "广东广州市天气预报：2026-10-10：白天晴，夜间晴，20~31°C，北风1-3级；2026-10-11：白天晴，夜间晴，21~32°C，北风1-3级；2026-10-12：白天多云，夜间多云，23~32°C，北风1-3级；2026-10-13：白天多云，夜间多云，24~33°C，北风1-3级",
+   "recorded_at": "2026-10-10T06:41:23+00:00"
+  },
+  "6f4e1af4d7f996d8": {
+   "tool": "web_extract",
+   "args": {
+    "url": "https://example.com"
+   },
+   "value": "[{\"url\": \"https://example.com\", \"content\": \"This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\"}]",
+   "recorded_at": "2026-10-10T06:41:33+00:00"
+  },
+  "f7d65bc44ad3a97f": {
+   "tool": "web_extract",
+   "args": {
+    "url": "https://www.python.org"
+   },
+   "value": "[{\"url\": \"https://www.python.org\", \"content\": \"**Notice:** This page displays a fallback because interactive scripts did not run. Possible causes include disabled JavaScript or failure to load scripts or stylesheets.\\n\\n[Skip to content](https://www.python.org/#content \\\"Skip to content\\\")\\n\\n[▼ Close](https://www.python.org/#python-network)\\n*   [Python](https://www.python.org/ \\\"The Python Programming Language\\\")\\n*   [PSF](https://www.python.org/psf/ \\\"The Python Software Foundation\\\")\\n*   [Docs](https://docs.python.org/ \\\"Python Documentation\\\")\\n*   [PyPI](https://pypi.org/ \\\"Python Package Index\\\")\\n*   [Jobs](https://www.python.org/jobs/ \\\"Python Job Board\\\")\\n*   [Community](https://www.python.org/community/)\\n\\n[▲ The Python Network](https://www.python.org/#top)\\n\\n[![Image 1: python™](https://www.python.org/static/img/python-logo.png)](https://www.python.org/)\\n\\n[Donate](https://donate.python.org/)\\n\\n[≡ Menu](https://www.python.org/#site-map)Search This Site  GO \\n\\n*   [**A A**](https://www.python.org/#)\\n    *   [Smaller](javascript:; \\\"Make Text Smaller\\\")\\n    *   [Larger](javascript:; \\\"Make Text Larger\\\")\\n    *   [Reset](javascript:; \\\"Reset any font size changes I have made\\\")\\n\\n*   [Socialize](https://www.python.org/#)\\n    *   [LinkedIn](https://www.linkedin.com/company/python-software-foundation/)\\n    *   [Mastodon](https://fosstodon.org/@ThePSF)\\n    *   [Chat on IRC](https://www.python.org/community/irc/)\\n    *   [Twitter](https://twitter.com/ThePSF)\\n\\n*   [Sign In](https://www.python.org/accounts/login/ \\\"Sign Up or Sign In to Python.org\\\")\\n    *   [Sign Up / Register](https://www.python.org/accounts/signup/)\\n    *   [Sign In](https://www.python.org/accounts/login/)\\n\\n*   [About](https://www.python.org/about/)\\n    *   [Applications](https://www.python.org/about/apps/)\\n    *   [Quotes](https://www.python.org/about/quotes/)\\n    *   [Getting Started](https://www.python.org/about/gettingstarted/)\\n    *   [Help](https://www.python.org/about/help/)\\n    *   #### Python is a programming language that lets you work more quickly and integrate your systems more effectively.\\n\\nYou can learn to use Python and see almost immediate gains in productivity and lower maintenance costs. [Learn more about Python](https://www.python.org/about).\\n\\n*   [Downloads](https://www.python.org/downloads/)\\n    *   [All releases](https://www.python.org/downloads/)\\n    *   [Source code](https://www.python.org/downloads/source/)\\n    *   [Windows](https://www.python.org/downloads/windows/)\\n    *   [macOS](https://www.python.org/downloads/macos/)\\n    *   [Android](https://www.python.org/downloads/android/)\\n    *   [iOS](https://www.python.org/downloads/ios/)\\n    *   [Other Platforms](https://www.python.org/download/other/)\\n    *   [License](https://docs.python.org/3/license.html)\\n    *   [Alternative Implementations](https://www.python.org/download/alternatives)\\n    *   ### Python Source\\n\\n[Python 3.15.0](https://www.python.org/ftp/python/3.15.0/Python-3.15.0.tar.xz)\\n\\nNot the OS you are looking for? Python can be used on many operating systems and environments. [View the full list of downloads](https://www.python.org/downloads/). #### Download for Windows\\n\\n[Python install manager](https://www.python.org/ftp/python/pymanager/python-manager-26.4.msix)\\n\\nOr get the standalone installer for [Python 3.15.0](https://www.python.org/ftp/python/3.15.0/python-3.15.0-amd64.exe)\\n\\nNot the OS you are looking for? Python can be used on many operating systems and environments. [View the full list of downloads](https://www.python.org/downloads/). #### Download for macOS\\n\\n[Python 3.15.0](https://www.python.org/ftp/python/3.15.0/python-3.15.0-macos11.pkg)\\n\\nNot the OS you are looking for? Python can be used on many operating systems and environments. [View the full list of downloads](https://www.python.org/downloads/). #### Download Python for Any OS\\n\\nPython can be used on many operating systems and environments.\\n\\n[View the full list of downloads](https://www.python.org/downloads/operating-systems/) \\n\\n*   [Documentation](https://www.python.org/doc/)\\n    *   [Docs](https://www.python.org/doc/)\\n    *   [Audio/Visual Talks](https://www.python.org/doc/av)\\n    *   [Beginner's Guide](https://wiki.python.org/moin/BeginnersGuide)\\n    *   [FAQ](https://docs.python.org/3/faq/)\\n    *   [Non-English Docs](https://translations.python.org/)\\n    *   [PEP Index](https://peps.python.org/)\\n    *   [Python Books](https://wiki.python.org/moin/PythonBooks)\\n    *   [Python Essays](https://www.python.org/doc/essays/)\\n    *   #### Python’s standard documentation: download, browse or watch a tutorial.\\n\\nGet started below, or visit the [Documentation page to browse by version](https://www.python.org/doc/versions/).\\n\\n  \\n\\n[Python Docs](https://docs.python.org/3/)\\n\\n*   [Community](https://www.python.org/community/)\\n    *   [Diversity](https://www.python.org/community/diversity/)\\n    *   [Mailing Lists](https://www.python.org/community/lists/)\\n    *   [IRC](https://www.python.org/community/irc/)\\n    *   [Forums](https://www.python.org/community/forums/)\\n    *   [PSF Annual Impact Report](https://www.python.org/psf/annual-report/2024/)\\n    *   [Python Conferences](https://www.python.org/community/workshops/)\\n    *   [Special Interest Groups](https://www.python.org/community/sigs/)\\n    *   [Python Logo](https://www.python.org/community/logos/)\\n    *   [Python Wiki](https://wiki.python.org/moin/)\\n    *   [Code of Conduct](https://www.python.org/psf/conduct/)\\n    *   [Community Awards](https://www.python.org/community/awards)\\n    *   [Get Involved](https://www.python.org/psf/get-involved/)\\n    *   [Shared Stories](https://www.python.org/psf/community-stories/)\\n    *   #### The Python Community\\n\\nGreat software is supported by great people. Our user base is enthusiastic, dedicated to encouraging use of the language, and committed to being diverse and friendly.\\n\\n*   [Success Stories](https://www.python.org/success-stories/ \\\"success-stories\\\")\\n    *   [Arts](https://www.python.org/success-stories/category/arts/)\\n    *   [Business](https://www.python.org/success-stories/category/business/)\\n    *   [Education](https://www.python.org/success-stories/category/education/)\\n    *   [Engineering](https://www.python.org/success-stories/category/engineering/)\\n    *   [Government](https://www.python.org/success-stories/category/government/)\\n    *   [Scientific](https://www.python.org/success-stories/category/scientific/)\\n    *   [Software Development](https://www.python.org/success-stories/category/software-development/)\\n    *   > Want to know how Python is performing on Arm across Linux, Windows, and the cloud? Our 2025 update highlights the latest JIT improvements, ecosystem milestones like GitHub runners and PyTorch on Windows, and the continued collaboration driving it all forward.\\n\\nDiego Russo, [Arm Ltd](https://www.arm.com/)\\n\\n*   [News](https://www.python.org/blogs/ \\\"News from around the Python world\\\")\\n    *   [Python News](https://www.python.org/blogs/ \\\"Python Insider Blog Posts\\\")\\n    *   [PSF Newsletter](https://www.python.org/psf/newsletter/ \\\"Python Software Foundation Newsletter\\\")\\n    *   [PSF News](https://pyfound.blogspot.com/ \\\"PSF Blog\\\")\\n    *   [PyCon US News](https://pycon.blogspot.com/ \\\"PyCon Blog\\\")\\n    *   [Python Insider](https://blog.python.org/ \\\"News and updates from the Python core team\\\")\\n    *   [News from the Community](https://planetpython.org/ \\\"Planet Python\\\")\\n\\n*   [Events](https://www.python.org/events/)\\n    *   [Python Events](https://www.python.org/events/python-events/)\\n    *   [User Group Events](https://www.python.org/events/python-user-group/)\\n    *   [Python Events Archive](https://www.python.org/events/python-events/past/)\\n    *   [User Group Events Archive](https://www.python.org/events/python-user-group/past/)\\n    *   [Submit an Event](https://wiki.python.org/moin/PythonEventsCalendar#Submitting_an_Event)\\n    *   Find events from the Python Community around the world!\\n\\n*   [>_ Launch Interactive Shell](https://www.python.org/shell/)\\n\\n*   ```\\n# Write Fibonacci series up to n\\n>>> def fib(n):\\n...     a, b = 0, 1\\n...     while a < n:\\n...         print(a, end=' ')\\n...         a, b = b, a+b\\n...     print()\\n...\\n>>> fib(1000)\\n0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610 987\\n``` # Functions Defined\\n\\nThe core of extensible programming is defining functions. Python allows mandatory and optional arguments, keyword arguments, and even arbitrary argument lists. [More about defining functions](https://docs.python.org/3/tutorial/controlflow.html#defining-functions) \\n*   ```\\n# For loop on a list\\n>>> numbers = [2, 4, 6, 8]\\n>>> product = 1\\n>>> for number in numbers:\\n...     product = product * number\\n...\\n>>> print('The product is:', product)\\nThe product is: 384\\n``` # All the Flow You’d Expect\\n\\nPython knows the usual control flow statements that other languages speak — `if`, `for`, `while` and `range` — with some of its own twists, of course. [More control flow tools](https://docs.python.org/3/tutorial/controlflow.html) \\n*   ```\\n# List comprehensions\\n>>> fruits = ['Banana', 'Apple', 'Lime']\\n>>> loud_fruits = [fruit.upper() for fruit in fruits]\\n>>> print(loud_fruits)\\n['BANANA', 'APPLE', 'LIME']\\n\\n# List and the enumerate function\\n>>> list(enumerate(fruits))\\n[(0, 'Banana'), (1, 'Apple'), (2, 'Lime')]\\n``` # Compound Data Types\\n\\nLists (known as arrays in other languages) are one of the compound data types that Python understands. Lists can be indexed, sliced and manipulated with other built-in functions. [More about lists](https://docs.python.org/3/tutorial/introduction.html#lists) \\n*   ```\\n# Simple arithmetic\\n>>> 1 / 2\\n0.5\\n>>> 2 ** 3\\n8\\n>>> 17 / 3  # true division returns a float\\n5.666666666666667\\n>>> 17 // 3  # floor division\\n5\\n``` # Intuitive Interpretation\\n\\nCalculations are simple with Python, and expression syntax is straightforward: the operators `+`, `-`, `*` and `/` work as expected; parentheses `()` can be used for grouping. [More about simple math functions](https://docs.python.org/3/tutorial/introduction.html#using-python-as-a-calculator). \\n*   ```\\n# Simple output (with Unicode)\\n>>> print(\\\"Hello, I'm Python!\\\")\\nHello, I'm Python!\\n\\n# Input, assignment\\n>>> name = input('What is your name?\\\\n')\\n>>> print(f'Hi, {name}.')\\nWhat is your name?\\nPython\\nHi, Python.\\n``` # Quick & Easy to Learn\\n\\nExperienced programmers in any other language can pick up Python very quickly, and beginners find the clean syntax and indentation structure easy to learn. [Whet your appetite](https://docs.python.org/3/tutorial/) with our Python overview. \\n\\n1.   [1](https://www.python.org/)\\n2.   [2](https://www.python.org/)\\n3.   [3](https://www.python.org/)\\n4.   [4](https://www.python.org/)\\n5.   [5](https://www.python.org/)\\n\\nPython is a programming language that lets you work quickly and integrate systems more effectively. [Learn More](https://www.python.org/doc/)\\n\\n## Get Started\\n\\nWhether you're new to programming or an experienced developer, it's easy to learn and use Python.\\n\\n[Start with our Beginner’s Guide](https://www.python.org/about/gettingstarted/)\\n\\n## Download\\n\\nPython source code and installers are available for download for all versions!\\n\\nLatest: [Python 3.15.0](https://www.python.org/downloads/release/python-3150/)\\n\\n## Docs\\n\\nDocumentation for Python's standard library, along with tutorials and guides, are available online.\\n\\n[docs.python.org](https://docs.python.org/)\\n\\n## Jobs\\n\\nLooking for work or have a Python related position that you're trying to hire for? Our **relaunched community-run job board** is the place to go.\\n\\n[jobs.python.org](https://jobs.python.org/)\\n\\n## Latest News\\n\\n[More news](https://www.python.org/blogs/)\\n\\n*   2026-10-10[PSF News: Board & Inaugural Python Packaging Council Election Results, Strategic Plan, and PyPI Security](https://mailchi.mp/python/python-software-foundation-july-2024-newsletter-19889969)\\n*   2026-10-09[Python 3.15.0 (final) is here!](https://blog.python.org/2026/10/python-3150-final-is-here/)\\n*   2026-10-07[PSF News: Board & Inaugural Python Packaging Council Election Results, Strategic Plan, and PyPI Security](https\"}]",
+   "recorded_at": "2026-10-10T06:41:36+00:00"
+  }
+ },
+ "counters": {
+  "records": 11,
+  "hits": 33,
+  "misses": 0
+ }
+}

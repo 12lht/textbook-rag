@@ -1,0 +1,586 @@
+{
+  "metrics": {
+    "样本数": 11,
+    "用例数": 11,
+    "工具选择完全匹配率": 0.7273,
+    "工具召回率": 1.0,
+    "工具精确率": 0.8485,
+    "负例抑制率": null,
+    "工具调用成功率": 1.0,
+    "端到端通过率": 0.7273,
+    "平均调用工具数": 1.3636,
+    "TTFT P50 (ms)": 1052.5,
+    "TTFT P95 (ms)": 2206.7,
+    "端到端 P50 (ms)": 2243.0,
+    "端到端 P95 (ms)": 6188.6,
+    "总 token 消耗": 23231,
+    "平均每用例 token": 2111.9,
+    "平均模型调用次数": 2.0,
+    "输入 token 占比": 0.8366,
+    "重复的 tool_call 事件数": 0,
+    "外部调用录制": 0,
+    "外部调用命中": 0,
+    "外部调用未命中": 0
+  },
+  "by_category": {
+    "网页提取": {
+      "样本数": 2,
+      "通过数": 2,
+      "完全匹配数": 2,
+      "完全匹配率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.0
+    },
+    "定位": {
+      "样本数": 3,
+      "通过数": 3,
+      "完全匹配数": 3,
+      "完全匹配率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.0
+    },
+    "天气": {
+      "样本数": 6,
+      "通过数": 3,
+      "完全匹配数": 3,
+      "完全匹配率": 0.5,
+      "端到端通过率": 0.5,
+      "平均工具数": 1.6667
+    }
+  },
+  "config": {
+    "tag": "live-external",
+    "repeat": 1,
+    "concurrency": 1,
+    "cases_file": "eval\\cases.jsonl",
+    "category_filter": "天气,定位,网页提取",
+    "cassette_mode": "off",
+    "cassette": null
+  },
+  "failed_case_ids": [
+    "weather-current-01",
+    "weather-current-03",
+    "weather-forecast-02"
+  ],
+  "unrecognized_tool_names": [],
+  "errored_case_ids": [],
+  "tag": "live-external",
+  "created_at": "2026-10-10T14:45:00+08:00",
+  "environment": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "temperature": 0.5,
+    "title_model": "glm-4.7-flash",
+    "keys_present": {
+      "DEEPSEEK_API_KEY": true,
+      "AMAP_API_KEY": true,
+      "TAVILY_API_KEY": true,
+      "GLM_API_KEY": true
+    },
+    "python": "3.11.16",
+    "langgraph": "1.2.12",
+    "langchain": "1.4.2"
+  },
+  "wall_ms": 35006.5,
+  "cassette": {
+    "mode": "off",
+    "path": null,
+    "hits": 0,
+    "misses": 0,
+    "records": 0,
+    "total_interactions": 0
+  },
+  "records": [
+    {
+      "case_id": "extract-01",
+      "category": "网页提取",
+      "repeat": 0,
+      "query": "读一下 https://example.com 这个网页的正文。",
+      "thread_id": "eval-ebd1c9-extract-01-0-a3dc69",
+      "expected_tools": [
+        "web_extract"
+      ],
+      "called_tools": [
+        "web_extract"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "web_extract",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "191e37dbb0e26c1b",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1294,
+        "output_tokens": 186,
+        "total_tokens": 1480,
+        "model_calls": 2
+      },
+      "ttft_ms": 1052.5,
+      "total_ms": 3672.9,
+      "answer_chars": 353,
+      "answer": "我来帮你读取这个网页的内容。网页正文内容如下：\n\n> **Example Domain**\n>\n> This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\n**说明：**\n`https://example.com` 是一个由 IANA（互联网号码分配局）保留的示例域名，页面内容非常简短，仅用于文档、教程和代码示例中作为占位符使用。它不提供任何实际服务，也不建议用于测试或监控用途。\n\n如果你需要读取其他有实质内容的网页，把 URL 发给我即可。",
+      "error": null
+    },
+    {
+      "case_id": "extract-02",
+      "category": "网页提取",
+      "repeat": 0,
+      "query": "把 https://www.python.org 的内容提取出来。",
+      "thread_id": "eval-ebd1c9-extract-02-0-177141",
+      "expected_tools": [
+        "web_extract"
+      ],
+      "called_tools": [
+        "web_extract"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "web_extract",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "634885789c2dd983",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 5003,
+        "output_tokens": 1099,
+        "total_tokens": 6102,
+        "model_calls": 2
+      },
+      "ttft_ms": 489.3,
+      "total_ms": 6605.6,
+      "answer_chars": 2405,
+      "answer": "I'll extract the content from python.org for you.我已成功提取了 python.org 首页的内容。以下是整理后的要点：\n\n---\n\n## 🐍 Python.org 首页内容\n\n### 顶部导航（The Python Network）\n- **Python** — 主页\n- **PSF** — Python 软件基金会\n- **Docs** — 文档（docs.python.org）\n- **PyPI** — 包索引\n- **Jobs** — 职位板\n- **Community** — 社区\n\n站点简介：\n> Python 是一门编程语言，让你更快地工作，并更有效地集成系统。你可以很快学会 Python，并几乎立刻看到生产力提升和维护成本降低。\n\n---\n\n### 📥 下载（Downloads）\n最新版本为 **Python 3.15.0**，提供各平台安装包：\n- **源码**：Python-3.15.0.tar.xz\n- **Windows**：Python 安装管理器（pymanager）；或独立安装包 `python-3.15.0-amd64.exe`\n- **macOS**：`python-3.15.0-macos11.pkg`\n- 其他平台（Android、iOS 等）见完整下载列表\n\n### 📚 文档（Documenta",
+      "error": null
+    },
+    {
+      "case_id": "location-01",
+      "category": "定位",
+      "repeat": 0,
+      "query": "我现在在哪个城市？",
+      "thread_id": "eval-ebd1c9-location-01-0-528e5b",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "2f5b34cb2af71f88",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1261,
+        "output_tokens": 66,
+        "total_tokens": 1327,
+        "model_calls": 2
+      },
+      "ttft_ms": 1743.7,
+      "total_ms": 1846.5,
+      "answer_chars": 53,
+      "answer": "你现在位于 **北京市**（adcode：110000）。\n\n需要我帮你查一下北京的天气，或者做点别的吗？",
+      "error": null
+    },
+    {
+      "case_id": "location-02",
+      "category": "定位",
+      "repeat": 0,
+      "query": "帮我定位一下我当前的位置。",
+      "thread_id": "eval-ebd1c9-location-02-0-4022f5",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "2f5b34cb2af71f88",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1274,
+        "output_tokens": 111,
+        "total_tokens": 1385,
+        "model_calls": 2
+      },
+      "ttft_ms": 682.2,
+      "total_ms": 1785.5,
+      "answer_chars": 104,
+      "answer": "我来帮你查询当前的位置信息。根据 IP 定位，你当前所在的位置是：\n\n- **省/市**：北京市 北京市\n- **行政区划代码（adcode）**：110000\n\n需要我帮你查一下北京的天气或者做点别的吗？😊",
+      "error": null
+    },
+    {
+      "case_id": "location-03",
+      "category": "定位",
+      "repeat": 0,
+      "query": "我这里属于哪个省？",
+      "thread_id": "eval-ebd1c9-location-03-0-f65350",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "2f5b34cb2af71f88",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1268,
+        "output_tokens": 185,
+        "total_tokens": 1453,
+        "model_calls": 2
+      },
+      "ttft_ms": 474.4,
+      "total_ms": 2162.7,
+      "answer_chars": 180,
+      "answer": "我来帮您查询一下您当前所在的位置。根据定位，您当前所在的位置是 **北京市**（adcode：110000）。\n\n需要说明的是，北京是**直辖市**，属于省级行政区，本身不隶属于任何一个省——它的行政级别和\"省\"是平级的。\n\n如果您想确认的是户籍或常驻地所属省份，那需要看具体地址；但如果只是问\"我人现在在哪个省\"，答案就是：**没有省，直接就是北京市**。😊",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-01",
+      "category": "天气",
+      "repeat": 0,
+      "query": "北京今天天气怎么样？",
+      "thread_id": "eval-ebd1c9-weather-current-01-0-0501d5",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": false,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": false,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "5bd83baaaff90d1b",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 1469,
+        "output_tokens": 281,
+        "total_tokens": 1750,
+        "model_calls": 2
+      },
+      "ttft_ms": 1704.9,
+      "total_ms": 3368.2,
+      "answer_chars": 237,
+      "answer": "I'll check Beijing's current weather for you.北京今天（10月10日 14:44）的实时天气如下：\n\n- **天气**：晴 ☀️\n- **气温**：25°C\n- **湿度**：36%（比较干燥）\n- **风向风力**：东风，≤3 级（微风）\n- **数据更新时间**：14:39\n\n整体来说是个晴朗舒适、秋高气爽的下午，适合外出活动。不过湿度偏低、昼夜温差通常较大，建议注意补水和早晚适当添衣。\n\n需要我再查一下未来几天的预报吗？",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-02",
+      "category": "天气",
+      "repeat": 0,
+      "query": "上海现在的气温是多少度？",
+      "thread_id": "eval-ebd1c9-weather-current-02-0-a16b7c",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "5e3fd9a193138a93",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1396,
+        "output_tokens": 116,
+        "total_tokens": 1512,
+        "model_calls": 2
+      },
+      "ttft_ms": 1509.2,
+      "total_ms": 1679.4,
+      "answer_chars": 71,
+      "answer": "上海现在的气温是 **25°C**。\n\n天气情况补充：阴天，湿度 65%，东北风 ≤3 级（数据更新时间：2026-10-10 14:32）。",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-03",
+      "category": "天气",
+      "repeat": 0,
+      "query": "杭州现在冷不冷？",
+      "thread_id": "eval-ebd1c9-weather-current-03-0-baa25e",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": false,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": false,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "a2d3338c73f8e082",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 1463,
+        "output_tokens": 268,
+        "total_tokens": 1731,
+        "model_calls": 2
+      },
+      "ttft_ms": 542.2,
+      "total_ms": 1960.4,
+      "answer_chars": 264,
+      "answer": "我来查一下杭州的实时天气。**杭州现在不冷**，反而挺暖和的 🌤️\n\n| 项目 | 数据 |\n|---|---|\n| 天气 | 晴 |\n| 气温 | **26°C** |\n| 湿度 | 45% |\n| 风 | 东南风 ≤3 级 |\n| 更新时间 | 2026-10-10 14:44 |\n\n26°C 属于舒适偏暖的天气，晴、湿度不高、风也不大，穿件长袖或短袖就挺合适。\n\n小提示：10 月中旬杭州昼夜温差通常较大，傍晚太阳落山后可能会凉一些，如果晚上要在外面待着，建议外出时带一件薄外套。需要的话我可以帮你查一下未来几天的预报。",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-04",
+      "category": "天气",
+      "repeat": 0,
+      "query": "成都有没有出太阳？",
+      "thread_id": "eval-ebd1c9-weather-current-04-0-3091e2",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "861bf088c5ec7bef",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1396,
+        "output_tokens": 223,
+        "total_tokens": 1619,
+        "model_calls": 2
+      },
+      "ttft_ms": 770.5,
+      "total_ms": 2243.0,
+      "answer_chars": 189,
+      "answer": "我来帮您查一下成都现在的天气。成都现在**没有出太阳** ☁️\n\n实时天气情况如下：\n- **天气**：阴\n- **气温**：18°C\n- **湿度**：100%\n- **风向风力**：南风，≤3 级\n- **更新时间**：2026-10-10 14:36\n\n湿度拉满、天色阴沉，是典型的成都秋日阴天。如果您想晒太阳，可以再等两天看看——需要的话我可以帮您查一下未来几天的预报。",
+      "error": null
+    },
+    {
+      "case_id": "weather-forecast-01",
+      "category": "天气",
+      "repeat": 0,
+      "query": "深圳未来三天会下雨吗？",
+      "thread_id": "eval-ebd1c9-weather-forecast-01-0-fb83c9",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "dd4dee33931e77fa",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1577,
+        "output_tokens": 427,
+        "total_tokens": 2004,
+        "model_calls": 2
+      },
+      "ttft_ms": 2669.6,
+      "total_ms": 3909.6,
+      "answer_chars": 350,
+      "answer": "**深圳未来三天基本不会下雨** ☀️\n\n| 日期 | 天气 | 气温 | 风力 |\n|---|---|---|---|\n| 10月10日 | 白天晴，夜间晴 | 23~31°C | 北风 1-3 级 |\n| 10月11日 | 白天晴，夜间晴 | 24~32°C | 北风 1-3 级 |\n| 10月12日 | 白天多云，夜间多云 | 24~32°C | 北风 1-3 级 |\n\n要点：\n- 前两天天况晴好，第三天（12日）云量增多转为多云，但预报中**没有降雨**。\n- 气温偏高，白天最高 31~32°C，早晚 23~24°C，昼夜温差较大，注意防晒补水、早晚适时添衣。\n- 若12日之后有计划（如13日也是多云），也暂无需担心下雨。\n\n如果想更精确到具体时段或后续几天，可以告诉我，我再帮你查～",
+      "error": null
+    },
+    {
+      "case_id": "weather-forecast-02",
+      "category": "天气",
+      "repeat": 0,
+      "query": "明天适合去广州出差吗？",
+      "thread_id": "eval-ebd1c9-weather-forecast-02-0-589e24",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_user_location",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "exact_match": false,
+      "recall": 1.0,
+      "precision": 0.3333,
+      "contains_ok": null,
+      "e2e_ok": false,
+      "tool_call_events": 4,
+      "tool_result_events": 4,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "3422b507d088fb8b",
+      "tool_success": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 2034,
+        "output_tokens": 834,
+        "total_tokens": 2868,
+        "model_calls": 2
+      },
+      "ttft_ms": 1597.0,
+      "total_ms": 5771.6,
+      "answer_chars": 432,
+      "answer": "我来查一下明天广州的天气情况，以及您当前的位置。**结论：非常适合。** 明天（10月11日）广州天气很好，出行和办事都不受影响。\n\n**广州明天（10月11日）天气**\n- 天气：白天晴，夜间晴\n- 气温：21~32°C，昼夜温差约 11°C\n- 风：北风 1-3 级，风力小\n- 当前实况（今天14:30）：晴，30°C，湿度 47%，东南风 ≤3 级\n\n**出差小提醒**\n1. **早晚加衣**：早上 21°C 左右、中午 32°C，建议穿薄外套或长袖衬衫，方便随时增减。\n2. **防晒补水**：连续晴天，紫外线较强，户外跑客户记得涂防晒、多喝水。\n3. **无需带伞**：未来几天（10/11 晴、10/12-13 多云）都没有降水，雨具可以省了。\n4. 后续两天广州为多云，23~33°C，若有延长的行程也不会受影响。\n\n另外您当前在北京，如果需要，我可以顺便帮您查一下明天北京的天气，看看出发当天的航班/高铁出行条件是否顺畅——需要的话告诉我一声。",
+      "error": null
+    }
+  ]
+}
