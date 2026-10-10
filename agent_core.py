@@ -556,15 +556,50 @@ def build_glm_model(temperature: float = 0.5, max_tokens: int = 5000):
         )
 
 
-def build_model():
+def build_model(
+    temperature: float = 0.5,
+    max_tokens: int = 5000,
+    *,
+    disable_reasoning: bool = False,
+):
+    """按 `MODEL_PROVIDER` 建模型。
+
+    后面的参数都是为了起标题能**复用同一个 provider**、只改这几个小项，
+    而不是再写一份 provider 分支。
+
+    `disable_reasoning` 只对 deepseek 生效：它是**推理模型**，回答前会先吐一段
+    `reasoning_content`，那部分也算 output token。起标题这种任务不需要思考，
+    开着纯属浪费（实测关掉后输出从 40 token 掉到 4）。
+    走 `extra_body` 发这个参数是因为它不是 OpenAI 标准字段。
+    """
     provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
     if provider == "glm":
-        return build_glm_model()
-    return init_chat_model("deepseek:deepseek-flash", temperature=0.5, max_tokens=5000)
+        return build_glm_model(temperature=temperature, max_tokens=max_tokens)
+    extra = {"extra_body": {"reasoning_effort": "none"}} if disable_reasoning else {}
+    return init_chat_model(
+        "deepseek:deepseek-flash",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        **extra,
+    )
 
 
 model = build_model()
-title_model = build_glm_model(temperature=0.2, max_tokens=40) if os.getenv("GLM_API_KEY") else None
+
+# 起标题用**和主模型同一个 provider**，只是温度调低、token 卡紧、并且关掉推理——
+# 标题要的是稳定和短，不是创意，更不是思考过程。
+#
+# 这里原来硬编码成 GLM（`build_glm_model(...) if GLM_API_KEY else None`），后果是：
+# `.env` 里只要还留着 GLM_API_KEY（留着做备用很正常），**标题就一直在走智谱**，
+# 和 `MODEL_PROVIDER` 说的不是一回事；而且 GLM 的 key 一撤，标题功能就静默消失
+# （退回「取用户原话前 30 字」），不报错也不提示。
+#
+# `max_tokens=400` 是**安全垫**，不是预期用量：关掉推理之后实测只花 4 个 token。
+# 定这么宽是因为万一日后换了模型、`reasoning_effort` 不被认（参数被静默忽略），
+# 有 400 的余地标题还能出来；真卡到 40 的话推理会把额度吃光、content 变成空串，
+# 表现就是「标题莫名其妙没了」。上限宽着不花钱——`max_tokens` 是天花板不是目标，
+# 计费只按实际生成算。
+title_model = build_model(temperature=0.2, max_tokens=400, disable_reasoning=True)
 
 
 # --------------------------------------------------------------------------
@@ -899,11 +934,13 @@ async def delete_checkpoint_thread(thread_id: str) -> None:
 async def generate_title(context: str) -> str | None:
     """让标题模型给一段对话上下文起个短标题。
 
-    没配标题模型、或调用失败时返回 None——回退文案和长度截断由调用方
-    （service.py）决定，这里只负责「用模型产出标题」。
+    调用失败时返回 None——回退文案和长度截断由调用方（service.py）决定，
+    这里只负责「用模型产出标题」。
+
+    没有「没配标题模型」这个分支了：`title_model` 现在跟着 `MODEL_PROVIDER` 一起
+    在模块加载时建出来，不再依赖 `GLM_API_KEY` 是否设置。真出问题（key 无效、
+    限流）会走下面那条 `except`，效果一样是退回用户原话。
     """
-    if title_model is None:
-        return None
     try:
         response = await title_model.ainvoke(
             "请根据下面的对话主题生成一个简短的中文会话标题。"

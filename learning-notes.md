@@ -1686,6 +1686,169 @@ def ids_of_user(user_id: str) -> set[str]:
    混成一个，必然在某一边出错。而且**关掉的时候也要写提示词**——
    模型会从工具说明书里自行推断能力，沉默会被它当成「有」。
 
+## 31. 推理模型会吃掉 `max_tokens`：一次「标题莫名其妙没了」的排查
+
+> 这一节材料来自一次很小的需求：「把起标题的模型也改成 deepseek」。改动一行，
+> 却牵出两类错误——一个**配置漂移**，一个**推理模型特有的坑**。
+
+### 31.1 先看原来的代码
+
+```python
+model = build_model()
+title_model = build_glm_model(temperature=0.2, max_tokens=40) if os.getenv("GLM_API_KEY") else None
+```
+
+主模型跟着 `MODEL_PROVIDER` 走，**标题模型却硬编码成 GLM**。两个后果：
+
+1. `.env` 里只要还留着 `GLM_API_KEY`（留着做备用很正常），**标题就一直在走智谱**，
+   和 `MODEL_PROVIDER` 说的不是一回事；
+2. `GLM_API_KEY` 一撤，`title_model` 变成 `None`，标题功能**静默消失**——不报错、
+   不打日志，只是悄悄退回「取用户原话前 30 字」。
+
+修法是把 provider 的判断收成一处，再让两个用途共用它：
+
+```python
+def build_model(temperature=0.5, max_tokens=5000, *, disable_reasoning=False):
+    provider = os.getenv("MODEL_PROVIDER", "deepseek").lower()
+    if provider == "glm":
+        return build_glm_model(temperature=temperature, max_tokens=max_tokens)
+    extra = {"extra_body": {"reasoning_effort": "none"}} if disable_reasoning else {}
+    return init_chat_model("deepseek:deepseek-flash",
+                           temperature=temperature, max_tokens=max_tokens, **extra)
+
+model = build_model()
+title_model = build_model(temperature=0.2, max_tokens=400, disable_reasoning=True)
+```
+
+**这类 bug 的形态值得记**：不是「算错了」，是「两个地方各自声明了同一件事」。
+只要有两个声明点，它们迟早会漂开，而且漂开之后不报错——一个还在正常工作（主模型），
+一个在悄悄降级（标题）。判据是：
+
+> **同一个概念（这里是「用哪个 provider」）只能有一个声明点。**
+
+### 31.2 改完之后：标题变成了 `None`
+
+换 provider 是一行的事，改完真发一次请求，`generate_title()` 返回 `None`。
+于是不猜，直接把这一个请求的原始返回打出来：
+
+```text
+content      : ''
+content 长度 : 0
+usage        : {'input_tokens': 76, 'output_tokens': 40,
+                'output_token_details': {'reasoning': 40}}
+finish_reason: 'length'
+additional   : {'reasoning_content': 'We need answer Chinese title only <=20 chars. ...'}
+```
+
+三条信息拼起来，结论是唯一的：
+
+- `finish_reason: 'length'` → 被 `max_tokens` 截断了，不是模型不想答；
+- `output_token_details: {'reasoning': 40}` → 那 40 个 token **全是思考**，正文一个都没轮到；
+- `reasoning_content` 里有完整的思维链 → 这个模型回答前会先想一段。
+
+**`deepseek-flash` 是推理模型。** 它先输出思维链再输出答案，而**思维链和答案共用
+同一个 `max_tokens` 额度**。GLM 时代 `max_tokens=40` 是够的（标题只要十几个 token），
+换了推理模型就不够了——40 个 token 连「想清楚要写什么」都不够。
+
+这就是推理模型特有的坑，和「模型变笨了」完全不是一回事。
+
+### 31.3 诊断口径：三个字段，缺一不可
+
+以后再遇到「模型返回空 / 截断」，先看这三个（都在响应的 `usage_metadata` /
+`response_metadata` 里，不用额外发请求）：
+
+| 字段 | 看什么 |
+| --- | --- |
+| `finish_reason` | `length` = 被额度截断；`stop` = 正常说完 |
+| `output_token_details.reasoning` | 有多少 token 花在思考上（非推理模型没有这个字段） |
+| `response_metadata.reasoning_content` | 思维链原文，能看出它在想什么 |
+
+**只打印 `content` 是不够的。** 空字符串这一个现象，可能对应「额度不够」「被截断」
+「真没内容」「调用失败被吞了」四种原因，不看 usage 就只能猜。
+
+### 31.4 修法一：把额度调够
+
+先按最保守的办法量一遍——把 `max_tokens` 拉开，看它到底需要多少：
+
+| `max_tokens` | 推理 token | 输出 token | 耗时 | 结果 |
+| --- | --- | --- | --- | --- |
+| 40 | 40 | 40 | 1.90s | 空 |
+| 200 | 194 | 199 | 1.24s | `一句话说明你是什么` |
+| 500 | 138 | 142 | 1.13s | `AI身份说明` |
+| 1000 | 150 | 155 | 1.10s | `一句话说明AI身份` |
+| 2000 | 341 | 346 | 1.95s | `一句话说明你是什么` |
+
+两个发现：
+
+- **推理长度是波动的**（138 ~ 341），所以卡在 200 这种「刚好够」会**偶发**空标题——
+  这种间歇性故障最难查，宁可留余量。
+- 2000 比 500 还慢、推理还更长——**额度给太多它反而想得更久**。
+
+结论：光调额度能修，但每次起标题都要多烧 140~350 个输出 token。
+
+### 31.5 修法二：直接关掉推理（最终采用）
+
+标题是个「总结成六个字」的任务，不需要思考过程。试了三种关推理的写法：
+
+| 写法 | 推理 token | 输出 token | 结果 |
+| --- | --- | --- | --- |
+| `thinking: {"type": "disabled"}` | 0 | 4 | 有标题 |
+| `enable_thinking: False` | 40 | 40 | **空（参数不认，被忽略）** |
+| `reasoning_effort: "none"` | 0 | 4 | 有标题 |
+
+注意第二行：**不认识的参数会被静默忽略，不报错**。所以「我加了个关推理的参数」
+这句话本身说明不了任何事，必须**拿 usage 里的 reasoning token 验证它真的生效了**。
+
+最终选 `reasoning_effort: "none"`（更接近 OpenAI 的通用字段），通过 `extra_body` 发出去：
+
+```python
+extra = {"extra_body": {"reasoning_effort": "none"}} if disable_reasoning else {}
+```
+
+效果：**输出从 40 个 token 降到 4 个**，耗时从 1.2s 降到 0.4s。
+
+### 31.6 关掉之后，`max_tokens` 反而要放大
+
+这一步反直觉，但理由很实在：
+
+```python
+title_model = build_model(temperature=0.2, max_tokens=400, disable_reasoning=True)
+```
+
+**`max_tokens` 是天花板，不是目标。** 计费按实际生成算，所以把上限放宽**不花钱**。
+而它的作用是安全垫：万一以后换了模型、或者平台不再认 `reasoning_effort`（见 31.5
+第二行——参数被静默忽略是完全可能的），400 的余地还能让标题正常出来；
+如果沿用 40，就又是「推理吃光、正文空串、标题静默消失」。
+
+> 一句话：**给一个「平时只用 4 个 token」的调用留 400 的额度**，不是浪费，
+> 是在为「参数失效」这种不会报错的故障留退路。
+
+### 31.7 顺带：为什么这个改动值得认真做
+
+标题不是「生成一次就完事」：
+
+```python
+if turn_number <= AUTO_TITLE_TURNS and not conversations.is_renamed(thread_id):
+    title = await _build_title(previous_messages, user_input)   # AUTO_TITLE_TURNS = 10
+```
+
+**一个会话的前 10 轮，每轮都会重新生成一次标题**。所以这里的每一分浪费都要乘以 10：
+开着推理的话，一个会话光起标题就要多烧 1400~3500 个输出 token，全是「想标题」的碎碎念。
+
+小功能的单位成本要乘以**调用频率**再看——这是判断「值不值得优化」时最容易被忽略的一步。
+
+### 31.8 这一节的判据
+
+1. **同一个概念只能有一个声明点。** 两个地方各自声明「用哪个 provider」，迟早漂开，
+   而且漂开是静默的。
+2. **「返回空」要先看 `finish_reason` 和 reasoning token，不要猜。** 空字符串对应四种原因，
+   不看 usage 就只能靠试。
+3. **推理模型的思维链和答案共用 `max_tokens`。** 给非推理模型调好的额度，换到推理模型
+   上可能一个字都出不来。
+4. **「参数加了」≠「参数生效了」。** 不认识的参数会被静默忽略，必须用量化字段验证。
+5. **`max_tokens` 是天花板不是目标**，放宽它不花钱；但**推理 token 是实打实花钱的**，
+   该关就关。
+
 ## 待学习
 
 - **Memory 摘要化的评测**：功能已实现（第 25 节），但**长对话事实准确率的
