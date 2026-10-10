@@ -3,7 +3,7 @@
 {"id": "weather-current-03", "category": "天气", "query": "杭州现在冷不冷？", "expect_tools": ["get_weather_for_location"], "allow_tools": ["get_current_time"]}
 {"id": "weather-current-04", "category": "天气", "query": "成都有没有出太阳？", "expect_tools": ["get_weather_for_location"], "allow_tools": ["get_current_time"]}
 {"id": "weather-forecast-01", "category": "天气", "query": "深圳未来三天会下雨吗？", "expect_tools": ["get_weather_for_location"], "allow_tools": ["get_current_time"]}
-{"id": "weather-forecast-02", "category": "天气", "query": "明天适合去广州出差吗？", "expect_tools": ["get_weather_for_location"], "allow_tools": ["get_current_time"], "note": "隐含天气意图，考察能否识别"}
+{"id": "weather-forecast-02", "category": "天气", "query": "明天适合去广州出差吗？", "expect_tools": ["get_weather_for_location"], "allow_tools": ["get_current_time", "get_user_location"], "note": "隐含天气意图，考察能否识别；「适不适合出差」要两边天气，多调一次定位取出发地属于合理子目标"}
 {"id": "location-01", "category": "定位", "query": "我现在在哪个城市？", "expect_tools": ["get_user_location"], "allow_tools": ["get_current_time"]}
 {"id": "location-02", "category": "定位", "query": "帮我定位一下我当前的位置。", "expect_tools": ["get_user_location"], "allow_tools": ["get_current_time"]}
 {"id": "location-03", "category": "定位", "query": "我这里属于哪个省？", "expect_tools": ["get_user_location"], "allow_tools": ["get_current_time"]}
