@@ -22,7 +22,7 @@ mcp_server.py              MCP server：用 stdio 把 tools.py 暴露给 Agent
 geocode.py                 客户端坐标 → 可读位置（高德逆地理编码，带缓存）
 agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、3 个进程内工具（定位 + 记忆读写）、消息状态读写
 conversations.py           会话元数据：id、标题、重命名标记（纯应用层，不依赖 Agent）
-memories.py                跨会话长期记忆：按 user_id 存事实、去重、清洗、写入加锁（纯应用层，不依赖 Agent）
+memories.py                跨会话长期记忆：一条事实一行存进 SQLite，去重、清洗、上限（纯应用层，不依赖 Agent）
 service.py                 应用层：把上面几层拼成用例（列表/新建/重命名/删除/回退/对话流/位置收敛/注入记忆后端）
 api.py                     FastAPI 后端
 cli.py                     CLI 调试入口
@@ -32,7 +32,7 @@ eval/run.py                评测 runner
 eval/baselines/            历史基线 JSON
 eval/cassettes/            录制下来的工具返回值
 frontend/index.html        网页前端
-data/                      SQLite checkpoint 和会话元数据 JSON
+data/                      SQLite（checkpoint / 长期记忆）和会话元数据 JSON
 raw/                       开发历史归档
 learning-notes.md          学习笔记
 requirements.txt           固定版本依赖
@@ -301,10 +301,10 @@ q           退出程序
 data/agent_checkpoints.sqlite
 data/conversation_summaries.json
 data/conversation_renames.json
-data/memories.json
+data/memories.sqlite3
 ```
 
-SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。`conversation_renames.json` 记录哪些会话被手动改过名字，用来让自动起标题跳过它们。`memories.json` 按 `user_id` 存跨会话的长期事实。删除这些文件会清空本地会话记录和长期记忆。
+SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。`conversation_renames.json` 记录哪些会话被手动改过名字，用来让自动起标题跳过它们。`memories.sqlite3` 一条事实一行地存跨会话的长期事实（老版本的 `data/memories.json` 会在第一次启动时自动导入，然后改名成 `memories.json.migrated`）。删除这些文件会清空本地会话记录和长期记忆。
 
 ## 长期记忆
 
@@ -318,7 +318,7 @@ SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘
 三层各管一件事，跨层组合只写在 `service.py`：
 
 ```text
-memories.py            按 user_id 存事实、去重、清洗（纯 JSON，零框架依赖）
+memories.py            一条事实一行存进 SQLite，去重/清洗/上限（零框架依赖）
         ▲
         │  service 启动时 set_memory_backend() 把读写函数注入给 Agent
         │
