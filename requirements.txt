@@ -7,3 +7,14 @@ langchain-deepseek==1.1.1
 langgraph==1.2.12
 langgraph-checkpoint-sqlite==3.1.1
 tavily-python==0.8.5
+
+# MCP：工具跑在独立的 stdio 子进程里（见 mcp_server.py）。
+# 适配器把 mcp 钉在 <2.0.0，所以这里是 1.30.0 而不是最新的 2.x——
+# 单独装 `pip install mcp` 会去拿 2.x，和适配器冲突。
+langchain-mcp-adapters==0.3.2
+mcp==1.30.0
+
+# 图改用 astream 跑，checkpointer 必须换成 AsyncSqliteSaver，它依赖 aiosqlite。
+# 这是个隐性依赖：不加进清单的话，换台机器 pip install -r 之后会在
+# 「第一个请求」时才炸出 ModuleNotFoundError。
+aiosqlite==0.22.1

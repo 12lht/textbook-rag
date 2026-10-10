@@ -1,25 +1,37 @@
-"""Agent 编排层：LangGraph 图、工具、模型，以及读写会话「消息状态」的操作。
+"""Agent 编排层：LangGraph 图、模型，以及读写会话「消息状态」的操作。
 
-这里只管 Agent 本身。会话元数据（id、标题、重命名标记）在 `conversations.py`，
-把两层拼成用例在 `service.py`。所以本模块不 import conversations——
-标题策略这类业务判断由 service 决定，这里只提供「读状态」和「跑图」。
+**工具已经不在本进程里了。** 真实实现在 `tools.py`（那一层零 langchain 依赖），
+由 `mcp_server.py` 暴露成 stdio 传输的 MCP server；本模块作为 MCP client
+通过 JSON-RPC 调用它（见 `_McpToolset`）。所以本模块不再 import tavily，
+也不再持有任何工具函数。
+
+因为 MCP 客户端是异步的，`stream_agent` 与 `generate_title` 都是异步的
+（`graph.astream`），调用方 `service.chat_events` / `eval/run.py` 也必须是异步的。
+
+**本模块的公开函数现在全是 async**，包括读写状态的 `get_history` /
+`rewind_thread` / `delete_checkpoint_thread` / `user_messages`。这不是风格选择，
+而是被迫的：`graph.astream` 要求配 `AsyncSqliteSaver`，而它只有异步接口，
+同步的 `graph.get_state` / `update_state` 会直接抛 NotImplementedError。
+详见下面 `_ensure_graph` 上方的说明。
+
+会话元数据（id、标题、重命名标记）在 `conversations.py`，把两层拼成用例在
+`service.py`。所以本模块不 import conversations——标题策略这类业务判断由
+service 决定，这里只提供「读状态」和「跑图」。
 """
 from __future__ import annotations
 
-import json
+import asyncio
 import os
+import sys
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, Sequence
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
-from urllib.request import urlopen
+from typing import Annotated, Sequence
 
 from dotenv import load_dotenv
-from tavily import TavilyClient
 from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
-from langchain.tools import ToolRuntime, tool
+from langchain.tools import ToolRuntime
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -29,9 +41,12 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
 
 load_dotenv()
 
@@ -47,153 +62,145 @@ class Context:
     user_id: str
 
 
-@tool
-def get_weather_for_location(
-    city: str,
-    mode: Literal["current", "forecast"],
-) -> str:
-    """查询中国城市天气。mode=current 查询实时天气，mode=forecast 查询未来几天预报；city 可以是城市名称或高德 adcode。"""
-    api_key = os.getenv("AMAP_API_KEY")
-    if not api_key:
-        return "天气服务未配置 AMAP_API_KEY。"
-    if mode not in {"current", "forecast"}:
-        return "天气查询模式必须是 current 或 forecast。"
+# --------------------------------------------------------------------------
+# MCP：工具现在跑在独立进程里
+# --------------------------------------------------------------------------
 
-    try:
-        city_code = city.strip()
-        if not city_code.isdigit():
-            params = urlencode({"address": city_code, "key": api_key})
-            with urlopen(f"https://restapi.amap.com/v3/geocode/geo?{params}", timeout=10) as response:
-                geocode_data = json.load(response)
-            geocodes = geocode_data.get("geocodes", [])
-            if geocode_data.get("status") != "1" or not geocodes:
-                return f"找不到城市“{city_code}”的高德地图编码。"
-            city_code = geocodes[0].get("adcode", "")
+MCP_SERVER_NAME = "agent-tools"
+MCP_SERVER_SCRIPT = Path(__file__).with_name("mcp_server.py")
 
-        params = urlencode({
-            "city": city_code,
-            "key": api_key,
-            "extensions": "base" if mode == "current" else "all",
-        })
-        with urlopen(f"https://restapi.amap.com/v3/weather/weatherInfo?{params}", timeout=10) as response:
-            weather_data = json.load(response)
-        if weather_data.get("status") != "1":
-            return f"高德天气查询失败：{weather_data.get('info', '未知错误')}"
-
-        if mode == "current":
-            lives = weather_data.get("lives", [])
-            if not lives:
-                return "高德天气没有返回实时数据。"
-            current = lives[0]
-            return (
-                f"{current.get('province', '')}{current.get('city', '')}当前天气："
-                f"{current.get('weather', '未知')}，气温 {current.get('temperature', '未知')}°C，"
-                f"湿度 {current.get('humidity', '未知')}%，风向 {current.get('winddirection', '未知')}，"
-                f"风力 {current.get('windpower', '未知')}级，更新时间：{current.get('reporttime', '未知')}。"
-            )
-
-        forecasts = weather_data.get("forecasts", [])
-        if not forecasts or not forecasts[0].get("casts"):
-            return "高德天气没有返回预报数据。"
-        forecast = forecasts[0]
-        lines = [
-            f"{cast.get('date', '未知日期')}：白天{cast.get('dayweather', '未知')}，"
-            f"夜间{cast.get('nightweather', '未知')}，{cast.get('nighttemp', '未知')}~"
-            f"{cast.get('daytemp', '未知')}°C，{cast.get('daywind', '未知')}风"
-            f"{cast.get('daypower', '未知')}级"
-            for cast in forecast["casts"]
-        ]
-        return f"{forecast.get('province', '')}{forecast.get('city', '')}天气预报：" + "；".join(lines)
-    except (HTTPError, URLError, TimeoutError):
-        return "无法连接高德天气服务。"
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        return "高德天气数据格式异常。"
+_mcp_client = MultiServerMCPClient({
+    MCP_SERVER_NAME: {
+        # 用当前解释器拉起子进程，保证子进程和主进程在同一个 conda 环境里
+        # （mcp / tavily 都装在那儿）。
+        "command": sys.executable,
+        "args": [str(MCP_SERVER_SCRIPT)],
+        # 必须显式把父进程的整个环境传过去。mcp SDK 在 env=None 时会退回到一份
+        # 精简的默认环境变量（只有 PATH 之类），AMAP_API_KEY / TAVILY_API_KEY
+        # 不会带过去，结果是所有工具都静默变成「服务未配置」。
+        "env": dict(os.environ),
+        "transport": "stdio",
+    }
+})
 
 
-@tool
-def get_user_location(runtime: ToolRuntime[Context]) -> str:
-    """通过高德 IP 定位服务获取当前用户所在的省、市和 adcode。"""
-    api_key = os.getenv("AMAP_API_KEY")
-    if not api_key:
-        return "定位服务未配置 AMAP_API_KEY。"
-    try:
-        params = urlencode({"key": api_key})
-        with urlopen(f"https://restapi.amap.com/v3/ip?{params}", timeout=10) as response:
-            data = json.load(response)
-        if data.get("status") != "1":
-            return f"高德定位失败：{data.get('info', '未知错误')}"
-        province = data.get("province", "")
-        city = data.get("city", "")
-        if not province and not city:
-            return "高德定位成功，但没有返回省市信息。"
-        return f"当前位置：{province}{city}，adcode：{data.get('adcode', '')}"
-    except (HTTPError, URLError, TimeoutError):
-        return "无法连接高德定位服务。"
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-        return "高德定位数据格式异常。"
+class _McpToolset:
+    """在**一个专属常驻任务**里长期持有一个 MCP 会话。
+
+    为什么不能把会话的上下文管理器挂在 AsyncExitStack 上跨调用复用：
+    mcp 的 stdio 会话内部用 anyio 的 cancel scope，而 anyio 要求 cancel scope
+    必须在「进入它的那个任务」里退出。如果会话是在第一个请求的任务里建立的、
+    之后在 FastAPI lifespan 的任务里关闭，就会报
+
+        RuntimeError: Attempted to exit cancel scope in a different task
+        than it was entered in
+
+    （这个坑很隐蔽：单任务脚本里跑得好好的，只有进了 web 服务才炸。）
+    把这套生命周期整体放进一个常驻任务后，进入与退出天然在同一个任务里。
+
+    顺带这也保住了持久连接：会话只建一次，之后每次工具调用都是既有管道上的
+    一次 JSON-RPC 往返，而不是重新拉起一个 Python 子进程——否则测到的就是
+    解释器启动开销而不是 MCP 协议开销，和改造前的时延对比会失真。
+    """
+
+    def __init__(self) -> None:
+        self._task: asyncio.Task | None = None
+        self._ready: asyncio.Event | None = None
+        self._stopped: asyncio.Event | None = None
+        self._tools: list | None = None
+        self._tool_node: ToolNode | None = None
+        self._bound_model = None
+        self._error: BaseException | None = None
+
+    async def _serve(self) -> None:
+        """常驻任务：建立会话、把工具交给外面，然后一直等到被要求关闭。"""
+        try:
+            async with _mcp_client.session(MCP_SERVER_NAME) as session:
+                tools = await load_mcp_tools(session)
+                self._tools = tools
+                self._tool_node = ToolNode(tools)
+                self._bound_model = model.bind_tools(tools)
+                assert self._ready is not None and self._stopped is not None
+                self._ready.set()
+                await self._stopped.wait()
+        except BaseException as exc:  # noqa: BLE001 — 记下来，由 _ensure 抛给调用方
+            self._error = exc
+            if self._ready is not None:
+                self._ready.set()
+
+    async def _ensure(self) -> None:
+        if self._tools is not None:
+            return
+        # 这一段没有 await，在单线程事件循环里是原子的，所以不需要额外的锁：
+        # 并发首次调用不会各自起一个常驻任务。
+        if self._ready is None:
+            self._ready = asyncio.Event()
+            self._stopped = asyncio.Event()
+            self._task = asyncio.create_task(self._serve(), name="mcp-session")
+        await self._ready.wait()
+        if self._error is not None:
+            raise self._error
+        if self._tools is None:
+            raise RuntimeError("MCP 会话未能建立。")
+
+    async def tools(self) -> list:
+        await self._ensure()
+        assert self._tools is not None
+        return self._tools
+
+    async def tool_node(self) -> ToolNode:
+        await self._ensure()
+        assert self._tool_node is not None
+        return self._tool_node
+
+    async def bound_model(self):
+        await self._ensure()
+        return self._bound_model
+
+    async def aclose(self) -> None:
+        task, self._task = self._task, None
+        self._tools = None
+        self._tool_node = None
+        self._bound_model = None
+        if task is None:
+            self._ready = None
+            self._stopped = None
+            self._error = None
+            return
+        assert self._stopped is not None
+        self._stopped.set()
+        try:
+            await task
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — 关闭期的异常不该盖住主流程的报错
+            pass
+        finally:
+            # 允许关闭之后再重新建立（测试里会这么用）
+            self._ready = None
+            self._stopped = None
+            self._error = None
 
 
-@tool
-def get_current_time() -> str:
-    """获取当前时间。"""
-    from datetime import datetime
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+_mcp = _McpToolset()
 
 
-@tool
-def web_search(query: str, topic: Literal["general", "news"] = "general") -> str:
-    """使用 Tavily 搜索互联网。general 用于普通搜索，news 用于新闻和近期事件。"""
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        return "搜索服务未配置 TAVILY_API_KEY。"
-    try:
-        response = TavilyClient(api_key=api_key).search(
-            query=query,
-            topic=topic,
-            search_depth="basic",
-            max_results=5,
-            include_answer=False,
-        )
-        results = response.get("results", [])
-        if not results:
-            return f"没有找到与“{query}”相关的搜索结果。"
-        return json.dumps([
-            {
-                "title": result.get("title", ""),
-                "url": result.get("url", ""),
-                "content": result.get("content", ""),
-                "score": result.get("score"),
-            }
-            for result in results
-        ], ensure_ascii=False)
-    except Exception:
-        return "Tavily 搜索暂时失败。"
+async def load_tools() -> list:
+    """建立 MCP 会话并返回工具列表。
+
+    评测脚本用它读取工具名与 schema，好跟改造前逐字对比。
+    """
+    return await _mcp.tools()
 
 
-@tool
-def web_extract(url: str) -> str:
-    """打开并读取一个网页 URL 的正文内容，适合深入阅读搜索结果。"""
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        return "网页读取服务未配置 TAVILY_API_KEY。"
-    parsed_url = urlparse(url)
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-        return "网页地址无效，请提供完整的 http 或 https URL。"
-    try:
-        response = TavilyClient(api_key=api_key).extract(urls=[url])
-        results = response.get("results", [])
-        if not results:
-            return f"无法读取网页：{url}"
-        return json.dumps([
-            {"url": result.get("url", url), "content": result.get("raw_content", "")[:12000]}
-            for result in results
-        ], ensure_ascii=False)
-    except Exception:
-        return f"读取网页失败：{url}"
+async def close_mcp() -> None:
+    """关掉 MCP 会话及其子进程。api.py 的 lifespan 会调用它。"""
+    await _mcp.aclose()
 
 
-tools = [get_weather_for_location, get_user_location, get_current_time, web_search, web_extract]
-
+# --------------------------------------------------------------------------
+# 模型
+# --------------------------------------------------------------------------
 
 def build_glm_model(temperature: float = 0.5, max_tokens: int = 5000):
     api_key = os.getenv("GLM_API_KEY")
@@ -216,21 +223,25 @@ def build_model():
 
 
 model = build_model()
-model_with_tools = model.bind_tools(tools)
 title_model = build_glm_model(temperature=0.2, max_tokens=40) if os.getenv("GLM_API_KEY") else None
 
+
+# --------------------------------------------------------------------------
+# 图
+# --------------------------------------------------------------------------
 
 class AgentState(dict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
-def model_node(state: AgentState):
-    return {"messages": [model_with_tools.invoke(state["messages"])]}
+async def model_node(state: AgentState):
+    bound = await _mcp.bound_model()
+    return {"messages": [await bound.ainvoke(state["messages"])]}
 
 
-def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
-    from langgraph.prebuilt import ToolNode
-    return ToolNode(tools).invoke(state, runtime=runtime)
+async def tool_node(state: AgentState, runtime: ToolRuntime[Context]):
+    node = await _mcp.tool_node()
+    return await node.ainvoke(state, runtime=runtime)
 
 
 def truncate_node(state: AgentState):
@@ -271,22 +282,79 @@ builder.add_edge("truncate", "model")
 builder.add_conditional_edges("model", should_continue, {"tools": "tools", END: END})
 builder.add_edge("tools", "truncate")
 
-_sqlite_context = SqliteSaver.from_conn_string(str(CHECKPOINT_PATH))
-checkpointer = _sqlite_context.__enter__()
-graph = builder.compile(checkpointer=checkpointer)
+
+# --------------------------------------------------------------------------
+# 图与 checkpoint：懒加载的异步资源
+# --------------------------------------------------------------------------
+#
+# **为什么不能像改造前那样在模块级建连接**：AsyncSqliteSaver.from_conn_string
+# 是一个异步上下文管理器，import 时没有 running event loop，拿不到连接；
+# 而且连接的建立必须发生在将来真正跑图的那个事件循环里——aiosqlite 每条连接
+# 背后一个线程，跨事件循环复用会出问题。
+#
+# **为什么上面的状态操作函数全都变成了 async**：LangGraph 的同步 checkpointer
+# 和异步 checkpointer 是硬绑定的。图要用 astream 跑（异步 MCP 工具要求），
+# 就必须配 AsyncSqliteSaver；而它只提供异步接口（aget_tuple / aput），
+# 于是 graph.get_state / update_state 也不能再同步调用——改造前那套同步写法
+# 会直接抛 NotImplementedError。
+
+_graph = None
+_checkpointer: AsyncSqliteSaver | None = None
+_graph_stack: AsyncExitStack | None = None
+_graph_lock: asyncio.Lock | None = None
+
+
+async def _ensure_graph():
+    """首次调用时建连接、建表、编译图；之后复用同一个图。"""
+    global _graph, _checkpointer, _graph_stack, _graph_lock
+    if _graph is not None:
+        return _graph
+    if _graph_lock is None:
+        _graph_lock = asyncio.Lock()
+    async with _graph_lock:
+        if _graph is None:
+            stack = AsyncExitStack()
+            try:
+                checkpointer = await stack.enter_async_context(
+                    AsyncSqliteSaver.from_conn_string(str(CHECKPOINT_PATH))
+                )
+            except BaseException:
+                await stack.aclose()
+                raise
+            _graph = builder.compile(checkpointer=checkpointer)
+            _checkpointer = checkpointer
+            _graph_stack = stack
+    return _graph
+
+
+async def get_graph():
+    """给需要直接访问图的调用方（评测脚本、测试）使用。"""
+    return await _ensure_graph()
+
+
+async def shutdown() -> None:
+    """关掉 MCP 会话（及其子进程）和 checkpoint 连接。api.py 的 lifespan 会调用。"""
+    global _graph, _checkpointer, _graph_stack
+    await _mcp.aclose()
+    stack, _graph_stack = _graph_stack, None
+    _graph = None
+    _checkpointer = None
+    if stack is not None:
+        await stack.aclose()
 
 
 def _config(thread_id: str) -> dict[str, dict[str, str]]:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def user_messages(thread_id: str) -> list[str]:
+async def user_messages(thread_id: str) -> list[str]:
     """会话里所有用户消息的原文，按先后顺序。
 
     只暴露「读状态」：第几轮开始起标题、拿最近几条做上下文，这些业务判断
     属于应用层，由 service.py 决定。
     """
-    state_values = graph.get_state(_config(thread_id)).values
+    graph = await _ensure_graph()
+    state_values = (await graph.aget_state(_config(thread_id))).values
     return [
         str(message.content)
         for message in state_values.get("messages", [])
@@ -294,12 +362,14 @@ def user_messages(thread_id: str) -> list[str]:
     ]
 
 
-def delete_checkpoint_thread(thread_id: str) -> None:
+async def delete_checkpoint_thread(thread_id: str) -> None:
     """只删 LangGraph 的 checkpoint，不碰会话元数据。"""
-    checkpointer.delete_thread(thread_id)
+    await _ensure_graph()
+    assert _checkpointer is not None
+    await _checkpointer.adelete_thread(thread_id)
 
 
-def generate_title(context: str) -> str | None:
+async def generate_title(context: str) -> str | None:
     """让标题模型给一段对话上下文起个短标题。
 
     没配标题模型、或调用失败时返回 None——回退文案和长度截断由调用方
@@ -308,7 +378,7 @@ def generate_title(context: str) -> str | None:
     if title_model is None:
         return None
     try:
-        response = title_model.invoke(
+        response = await title_model.ainvoke(
             "请根据下面的对话主题生成一个简短的中文会话标题。"
             "只输出标题，不要引号、标点解释或 Markdown，长度不超过 20 个字。\n\n"
             f"对话中的用户问题：\n{context}"
@@ -319,7 +389,7 @@ def generate_title(context: str) -> str | None:
     return title or None
 
 
-def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
+async def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
     """回退到第 turn 条用户消息发出之前。
 
     turn 是当前会话里用户消息的序号，从 0 开始。该条用户消息以及它之后的所有消息
@@ -328,8 +398,9 @@ def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
     删除必须从 HumanMessage 的位置切起：一个回合以 HumanMessage 开头，
     这样切不会留下没有前置 tool_calls 的 ToolMessage。
     """
+    graph = await _ensure_graph()
     config = _config(thread_id)
-    stored = list(graph.get_state(config).values.get("messages", []))
+    stored = list((await graph.aget_state(config)).values.get("messages", []))
     human_positions = [
         index for index, message in enumerate(stored) if isinstance(message, HumanMessage)
     ]
@@ -338,7 +409,7 @@ def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
 
     cut = human_positions[turn]
     removed = stored[cut:]
-    graph.update_state(
+    await graph.aupdate_state(
         config,
         {"messages": [RemoveMessage(id=message.id) for message in removed]},
     )
@@ -352,8 +423,9 @@ def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
     }
 
 
-def get_history(thread_id: str) -> list[dict[str, object]]:
-    snapshot = graph.get_state(_config(thread_id))
+async def get_history(thread_id: str) -> list[dict[str, object]]:
+    graph = await _ensure_graph()
+    snapshot = await graph.aget_state(_config(thread_id))
     history = []
     operations = []
     assistant_entry = None
@@ -391,17 +463,22 @@ def get_history(thread_id: str) -> list[dict[str, object]]:
     return history
 
 
-def stream_agent(user_id: str, thread_id: str, user_input: str):
-    """跑一遍图，产出 Agent 自己的事件流。
+async def stream_agent(user_id: str, thread_id: str, user_input: str):
+    """跑一遍图，产出 Agent 自己的事件流（异步生成器）。
 
     只做「跑图 + 转发事件」：不碰会话元数据，也不发 title 事件。
     按需生成并推送标题是 service.chat_events() 的职责。
     """
     config = _config(thread_id)
-    has_history = bool(graph.get_state(config).values.get("messages", []))
+    graph = await _ensure_graph()
+    has_history = bool((await graph.aget_state(config)).values.get("messages", []))
     messages = [HumanMessage(content=user_input)]
     if not has_history:
         messages.insert(0, SystemMessage(content=SYSTEM_PROMPT))
+
+    # 先把 MCP 会话准备好再开跑。否则第一个节点会现等子进程启动 + 工具加载，
+    # 那段时间会被算进 TTFT，把时延指标污染掉。
+    await _mcp.tools()
 
     # 工具调用只从 updates 通道播报一次。
     # 原先两条通道都播报，却用两套不相等的键去重：messages 通道用 tool_call_chunks
@@ -410,7 +487,7 @@ def stream_agent(user_id: str, thread_id: str, user_input: str):
     # 现在只留 updates 通道：它拿到的 AIMessage 是模型节点跑完后的完整 tool_calls
     # （参数齐全，而不是流式半截），按 id 去重也天然唯一。
     emitted_tool_calls: set[str] = set()
-    for mode, chunk in graph.stream(
+    async for mode, chunk in graph.astream(
         {"messages": messages},
         config=config,
         context=Context(user_id=user_id),
