@@ -3,8 +3,15 @@
 **工具分成两处。** 4 个「纯函数」工具（天气 / 时间 / 搜索 / 网页提取）的真实实现在
 `tools.py`（那一层零 langchain 依赖），由 `mcp_server.py` 暴露成 stdio 传输的
 MCP server；本模块作为 MCP client 通过 JSON-RPC 调用它们（见 `_McpToolset`）。
-第 5 个工具 `get_user_location` 留在本模块，因为它是唯一需要**每次请求的
-运行时上下文**的工具——原因见它自己的注释。
+
+另外 3 个工具留在本模块，因为它们都需要**每次请求的运行时上下文**：
+`get_user_location`（读授权位置）、`recall_memory` / `save_memory`（读用户是谁、
+往哪个 user_id 存）。判据只有一条：**返回值只由参数决定的工具放 MCP，需要本次
+请求上下文的工具留在进程内**——展开说明见各自小节。
+
+记忆工具的后端不是本模块实现的（不许 import 业务存储），由 `service.py` 通过
+`set_memory_backend()` 注入；**没注入时这两个工具不注册**，系统提示也不变——
+所以评测环境看到的工具集和提示词与基线完全一致。
 
 因为 MCP 客户端是异步的，`stream_agent` 与 `generate_title` 都是异步的
 （`graph.astream`），调用方 `service.chat_events` / `eval/run.py` 也必须是异步的。
@@ -24,13 +31,12 @@ service 决定，这里只提供「读状态」和「跑图」。位置则是**�
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Sequence
+from typing import Annotated, Literal, Sequence
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
@@ -70,10 +76,12 @@ class Context:
     # 为 None 表示这次请求没有位置可用——**不要退回任何猜测**（比如 IP 定位），
     # 如实告诉模型没有就是没有。
     location: str | None = None
+    # 本次请求属于哪个会话。记忆工具用它记下来源，方便以后查「这条是哪儿记的」。
+    thread_id: str | None = None
 
 
 # --------------------------------------------------------------------------
-# 唯一留在进程内的工具：定位
+# 留在进程内的工具（一）：定位
 # --------------------------------------------------------------------------
 #
 # **为什么不放在 MCP server 里**：这里要说准确，否则容易得出「协议做不到」的错误结论。
@@ -114,6 +122,185 @@ def get_user_location(runtime: ToolRuntime[Context]) -> str:
 
 
 # --------------------------------------------------------------------------
+# 留在进程内的工具（二）：长期记忆的读写
+# --------------------------------------------------------------------------
+#
+# 判据和定位工具是同一条——**需要本次请求的上下文**。这里需要的是 `user_id`：
+# 模型不知道自己在跟谁说话，但这对编排层是已知的事实。
+#
+# **为什么是「模型自己去记」，而不是每轮偷偷抽一遍**：
+# 早先的实现在每轮对话结束后，由 service 丢一个后台任务，用模型把最近十条消息
+# 提炼成事实再存。它能用，但有两个毛病：
+#   1. **成本不可控**——不管这一轮有没有值得记的东西，都要多付一次模型调用；
+#   2. **只能追加**——去重只能挡住字面重复，解不了「用户改主意了」，
+#      旧的「不吃辣」永远作废不掉。
+# 改成工具之后两个毛病一起消失：值不值得记由模型当场判断，而 `replaces`
+# 让它能直接作废旧条目。
+#
+# **代价要认**：触发权交给模型，就存在「它忘了记」的风险。所以工具描述和系统
+# 提示里的 `MEMORY_GUIDE` 都要把「什么时候该记」写清楚——这笔账记在提示词
+# 质量上，不是白拿的。
+#
+# **后端是注入进来的**：本模块有一条硬规矩——不许 import 业务存储
+# （`conversations` / `memories`）。所以这里只声明「往哪读、往哪写」，
+# 具体实现由 `service.py` 通过 `set_memory_backend()` 传进来。
+# 依赖方向不变：service → agent_core，反向没有 import。
+#
+# **没注入后端时这两个工具根本不注册**（见 `_McpToolset._serve`）：
+# 一个「调用必然返回不可用」的空壳工具只会白占模型的选择面。评测脚本只 import
+# `agent_core`，拿到的仍然是和基线一模一样的 5 个工具。
+_memory_read = None  # Callable[[str], list[dict]]
+_memory_write = None  # Callable[[str, list], dict[str, int]]
+_memory_forget = None  # Callable[[str, str], bool]
+
+# `kind` 的取值。**必须和 `memories.KINDS` 逐字一致**——本模块不许 import 业务存储，
+# 所以只能在这里重抄一遍，改一边就得改另一边。
+#
+# 写成 `Literal` 不是装饰：模型看到的是 JSON Schema，`Literal` 会变成带 `enum`
+# 的字段，它就只能从这几个里挑。踩过的坑：早先是自由字符串，模型自己造了
+# 「禁忌」「背景」两个新词，全被存储层归到「其他」，kind 这个字段等于白设。
+MemoryKind = Literal["偏好", "身份", "计划", "事实"]
+
+# `recall_memory` 一次最多列多少条。存储层上限是 200，全倒进上下文会很难看。
+MAX_RECALL_ITEMS = 50
+
+
+def set_memory_backend(*, read, write, forget) -> None:
+    """由应用层注入长期记忆的读写实现。
+
+    **必须在第一次用到工具之前调用**：工具列表是建 MCP 会话时一次性算好的，
+    之后会被缓存。晚注入只会让工具消失，不会让它们出现。
+    """
+    global _memory_read, _memory_write, _memory_forget
+    _memory_read, _memory_write, _memory_forget = read, write, forget
+
+
+def _user_id_of(runtime: ToolRuntime[Context]) -> str:
+    context = getattr(runtime, "context", None)
+    return str(getattr(context, "user_id", "") or "")
+
+
+def _thread_id_of(runtime: ToolRuntime[Context]) -> str | None:
+    context = getattr(runtime, "context", None)
+    return getattr(context, "thread_id", None)
+
+
+@tool
+def recall_memory(runtime: ToolRuntime[Context]) -> str:
+    """读出这个用户在以前会话里留下的长期记忆。
+
+    在想确认「这件事以前记过没有」时用——尤其是要修改或作废某条旧记录之前，
+    先看一眼原文，才能把它准确地放进 `save_memory` 的 `replaces`。
+    """
+    user_id = _user_id_of(runtime)
+    if not user_id or _memory_read is None:
+        return "长期记忆功能未启用。"
+    try:
+        entries = _memory_read(user_id)
+    except Exception:
+        return "长期记忆暂时读不出来。"
+    if not entries:
+        return "这个用户还没有任何长期记忆。"
+
+    # **只列原文，不要附带任何标注**。踩过的坑：早先这里写成
+    # `- {text}（{kind}）`，模型就把整行「不吃香菜。（其他）」当成原文抄进
+    # `replaces`，于是永远匹配不上旧条目。这段文本只有一个用途——
+    # 让模型能逐字引用回去，那就必须干净。
+    lines = [f"- {entry.get('text', '')}" for entry in entries]
+    if len(lines) > MAX_RECALL_ITEMS:
+        hidden = len(lines) - MAX_RECALL_ITEMS
+        lines = lines[:MAX_RECALL_ITEMS] + [f"……还有 {hidden} 条更早的没有列出。"]
+    return "这个用户的长期记忆：\n" + "\n".join(lines)
+
+
+@tool
+def save_memory(
+    runtime: ToolRuntime[Context],
+    text: str,
+    kind: MemoryKind | None = None,
+    replaces: str | None = None,
+) -> str:
+    """把一条关于用户的长期事实记下来，以后的会话还能想起来。
+
+    什么时候该调用：用户主动告知、或明确希望你记住的**长期**信息——
+    稳定的偏好与习惯、身份与背景（职业、所在城市、专业）、长期计划与目标、
+    明确的禁忌（过敏、忌口、不能做某事）。
+
+    什么时候不要调用：一次性的提问或任务要求、寒暄、你对用户的猜测。
+    宁可少记，也不要把临时信息当成长期事实存下来。
+
+    一件事一条，不要把好几件事塞进一个 `text` 里。
+
+    如果新信息**推翻**了已经记过的某条，把那条的原文放进 `replaces`
+    （先调 `recall_memory` 看原文）——**必须逐字照抄，不要添加任何标注**，
+    旧条目会被删掉。用户改主意时走这条路。
+
+    记完不要向用户复述你记了什么，也不要提到这个工具，照平常的方式回话即可。
+    """
+    user_id = _user_id_of(runtime)
+    if not user_id or _memory_write is None:
+        return "长期记忆功能未启用。"
+
+    text = " ".join(str(text).split())
+    if not text:
+        return "没有可记的内容。"
+
+    fact: dict[str, str] = {"text": text}
+    if kind:
+        fact["kind"] = kind
+
+    # **读写失败必须在这里兜住**，不能让异常冒到图上去。
+    # 这是真踩过的：探针跑真实对话时存储层抛了 PermissionError，异常从 ToolNode
+    # 直接炸穿，整轮对话挂掉——辅助功能不该有这个权力。和 `generate_title`
+    # 拿不到标题就退回用户原话是同一个态度。
+    try:
+        # 先删后写。顺序反过来会把刚写的那条一起删掉——新旧条目归一化之后可能
+        # 相同（用户只是把说法补充了一下）。
+        replaced = bool(replaces and _memory_forget and _memory_forget(user_id, replaces))
+        result = _memory_write(user_id, [fact], _thread_id_of(runtime))
+    except Exception:
+        return "长期记忆暂时写不进去，这次先不记了。"
+
+    if replaces:
+        # 没匹配上要明说。静默失败会让模型以为已经作废了，而旧条目还在。
+        note = (
+            f"（作废了旧记录「{replaces}」）"
+            if replaced
+            else f"（注意：没找到旧记录「{replaces}」，原文可能不一致）"
+        )
+    else:
+        note = ""
+
+    if result.get("added"):
+        return f"已记住：{text}{note}"
+    if result.get("merged"):
+        return f"这条已经记过了，刷新了一下：{text}{note}"
+    return f"没能记下来：{text}{note}"
+
+
+# 记忆功能的系统提示补充。**只在注入了后端时才拼上去**——理由见 `_system_prompt`。
+MEMORY_GUIDE = (
+    "\n\n关于长期记忆：你有 `save_memory` 工具，当用户告诉你值得长期记住的信息"
+    "（偏好、身份、长期计划、禁忌）时主动记下来。不确定以前记过没有，可以先"
+    "`recall_memory` 看一眼；要作废某条旧记录时必须先看，才能拿到它的原文。"
+    "不要为了记而记：一次性的需求、寒暄、你自己的猜测都不用记。"
+    "记完不用告诉用户，照常回答即可。"
+)
+
+
+def _system_prompt() -> str:
+    """本次请求真正发给模型的系统提示。
+
+    没有注入记忆后端时**逐字等于 `SYSTEM_PROMPT`**。这样评测环境（只 import
+    `agent_core`）拿到的提示词与基线完全一致——新功能不进评测，A/B 才干净。
+    和工具列表要不要挂上记忆工具，是同一条规则的两半。
+    """
+    if _memory_write is None:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + MEMORY_GUIDE
+
+
+# --------------------------------------------------------------------------
 # MCP：另外 4 个工具跑在独立进程里
 # --------------------------------------------------------------------------
 
@@ -130,6 +317,10 @@ _TOOL_ORDER = [
     "get_current_time",
     "web_search",
     "web_extract",
+    # 记忆工具**刻意排到最后**：前面 5 个的位置要和改造前逐位一致，
+    # 追加在末尾是唯一不打扰它们的位置。
+    "recall_memory",
+    "save_memory",
 ]
 
 
@@ -209,10 +400,16 @@ class _McpToolset:
         """常驻任务：建立会话、把工具交给外面，然后一直等到被要求关闭。"""
         try:
             async with get_mcp_client().session(MCP_SERVER_NAME) as session:
-                # 合并两处工具：MCP 子进程里的 4 个纯函数工具 + 进程内的定位工具。
+                # 合并两处工具：MCP 子进程里的 4 个纯函数工具 + 进程内的工具。
                 # 合并后必须重排，否则定位工具会被追加到末尾，
                 # 发给模型的工具列表顺序就和改造前不一致了。
-                tools = _order_tools([*await load_mcp_tools(session), get_user_location])
+                #
+                # 记忆工具**只在注入了后端时才挂上**。没注入就等于是两个空壳，
+                # 挂着只会白占模型的选择面——评测环境因此拿到和基线完全一样的工具集。
+                in_process = [get_user_location]
+                if _memory_write is not None:
+                    in_process += [recall_memory, save_memory]
+                tools = _order_tools([*await load_mcp_tools(session), *in_process])
                 self._tools = tools
                 self._tool_node = ToolNode(tools)
                 self._bound_model = model.bind_tools(tools)
@@ -451,7 +648,7 @@ def _messages_for_model(state: AgentState) -> list[BaseMessage]:
     # 所以要显式说明这是背景资料、不要复述、也不要提摘要本身的存在。
     system = SystemMessage(
         content=(
-            f"{SYSTEM_PROMPT}\n\n"
+            f"{_system_prompt()}\n\n"
             "以下是本次会话更早内容的摘要，作为背景资料供你参考。"
             "把它当成你已经知道的事实即可，不要原样复述它，"
             "也不要向用户提及「摘要」这件事；"
@@ -659,89 +856,6 @@ async def generate_title(context: str) -> str | None:
     return title or None
 
 
-# --------------------------------------------------------------------------
-# 长期记忆：抽取
-# --------------------------------------------------------------------------
-#
-# 分工说清楚：**这里只负责「用模型把一段对话提炼成事实」和「把最近的消息渲染成文本」**。
-# 存到哪、什么时候存、怎么去重，是 `memories.py` 和 `service.py` 的事——
-# 所以本模块**不 import memories**，跨层组合只写在 service。
-
-MEMORY_WINDOW = 10  # 提炼时看最近多少条消息
-MAX_MEMORY_FACTS = 8  # 单次最多产出几条，防止模型一口气吐一屏
-
-MEMORY_PROMPT = (
-    "下面是一段用户和 AI 助手的对话记录。请提炼出**值得在以后的会话里还记得**的"
-    "关于这个用户的事实。\n"
-    "值得提炼：稳定的偏好（口味、习惯、常用工具）、身份信息（职业、所在地、专业）、"
-    "长期计划与目标、明确的约束（过敏、忌口、不能做某事）。\n"
-    "不要提炼：一次性的提问、寒暄、对助手的评价、以及从对话里推不出来的猜测。\n"
-    '只输出 JSON 数组，每项形如 {"text": "不吃香菜", "kind": "偏好"}，'
-    "kind 只能是 偏好 / 身份 / 计划 / 事实 之一。\n"
-    "没有值得记的就输出 []。不要解释、不要 Markdown 代码块。\n"
-    "\n对话记录：\n"
-)
-
-
-def _parse_facts(raw: str) -> list[dict]:
-    """从模型输出里抠出 JSON 数组。抠不出来就返回空列表，不抛异常。
-
-    只做**一层**容错：剥掉可能的 ``` 包装，再从第一个 `[` 取到最后一个 `]`。
-    模型偶尔会在前后多带一句话，这样能捞回来。更花哨的修复不做——
-    与其猜，不如这次不记。
-    """
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`").strip()
-        if text[:4].lower() == "json":
-            text = text[4:]
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end <= start:
-        return []
-    try:
-        data = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
-        return []
-
-    facts: list[dict] = []
-    for item in data:
-        if isinstance(item, str):
-            facts.append({"text": item})
-        elif isinstance(item, dict) and isinstance(item.get("text"), str):
-            fact = {"text": item["text"]}
-            # 没给 kind 就不要凭空补一个 None 进去——形状干净一点，
-            # 存储层那边才不用为「有键但值是 None」再多写一个分支。
-            if item.get("kind"):
-                fact["kind"] = item["kind"]
-            facts.append(fact)
-    return facts[:MAX_MEMORY_FACTS]
-
-
-async def extract_memories(transcript: str) -> list[dict]:
-    """从一段对话里提炼长期事实；失败或无可提炼时返回空列表。
-
-    返回的是**原始形状**（`{"text", "kind"}`），清洗和去重交给 `memories.py`——
-    这里不判断「算不算重复」，那是存储层的职责。
-    """
-    if not transcript.strip():
-        return []
-    try:
-        response = await model.ainvoke(MEMORY_PROMPT + transcript)
-    except Exception:
-        return []
-    return _parse_facts(_plain_text(response.content))
-
-
-async def recent_conversation(thread_id: str, limit: int = MEMORY_WINDOW) -> str:
-    """取最近若干条消息，渲染成纯文本——给提炼长期记忆当原料。"""
-    graph = await _ensure_graph()
-    snapshot = await graph.aget_state(_config(thread_id))
-    messages = list(snapshot.values.get("messages", []))
-    return _render_for_summary(messages[-limit:])
-
-
 async def rewind_thread(thread_id: str, turn: int) -> dict[str, object]:
     """回退到第 turn 条用户消息发出之前。
 
@@ -837,7 +951,7 @@ async def stream_agent(
     has_history = bool((await graph.aget_state(config)).values.get("messages", []))
     messages = [HumanMessage(content=user_input)]
     if not has_history:
-        messages.insert(0, SystemMessage(content=SYSTEM_PROMPT))
+        messages.insert(0, SystemMessage(content=_system_prompt()))
 
     # 先把 MCP 会话准备好再开跑。否则第一个节点会现等子进程启动 + 工具加载，
     # 那段时间会被算进 TTFT，把时延指标污染掉。
@@ -853,7 +967,7 @@ async def stream_agent(
     async for mode, chunk in graph.astream(
         {"messages": messages},
         config=config,
-        context=Context(user_id=user_id, location=location),
+        context=Context(user_id=user_id, location=location, thread_id=thread_id),
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":

@@ -31,8 +31,21 @@ TITLE_CONTEXT_TURNS = 10
 # 用户手选的城市名长度上限，和 api 层的粗校验保持一致会有重复，所以只在这里管。
 MAX_CITY_LENGTH = 60
 
-# 后台任务必须留引用，否则可能被垃圾回收掉（asyncio 只持弱引用）。
-_background: set[asyncio.Task] = set()
+# 把长期记忆的读写实现注入给 Agent 层。
+#
+# **为什么注入而不是让 agent_core 自己去 import `memories`**：项目有一条硬规矩——
+# `agent_core` 不许 import 业务存储（`conversations` 就是这条规矩的产物）。
+# 记忆工具需要「往哪个 user_id 存」这个动作，但「存哪、怎么去重」属于应用层。
+# 所以由 service 把函数**当参数传下去**，依赖方向仍然是 service → agent_core。
+#
+# 注入之后 Agent 才会挂上 `save_memory` / `recall_memory` 两个工具，并在系统提示里
+# 说明什么时候该记；没注入（评测脚本只 import agent_core）就一个都不出现。
+# 所以**必须在这里、在任何一次请求之前完成**——工具列表是建 MCP 会话时算好的。
+agent_core.set_memory_backend(
+    read=memories.memories_of,
+    write=memories.remember,
+    forget=memories.forget,
+)
 
 
 async def list_conversations() -> list[dict[str, object]]:
@@ -157,38 +170,14 @@ async def chat_events(
         conversations.set_auto_summary(thread_id, title)
         yield {"type": "title", "title": title}
 
+    # 长期记忆原本是在这里「每轮偷偷抽一次」的（丢个后台任务，用模型把最近十条
+    # 消息提炼成事实）。现在改成**模型自己决定**：它需要时会调 `save_memory`，
+    # 值不值得记由它当场判断，用户改主意时还能用 `replaces` 作废旧条目。
+    # 所以这一层不再需要任何收尾动作。
     async for event in agent_core.stream_agent(
         user_id, thread_id, user_input, location=location
     ):
         yield event
-
-    # 记忆提炼放在**响应之后**，而且**不 await**：
-    #   - 不 await：它要多调一次模型，等它就等于让 SSE 连接晚 1~2 秒才关闭，
-    #     用户会白等。丢成后台任务，这轮对话该什么时候结束就什么时候结束。
-    #   - 放在 service 而不是图里：评测走的是 `agent_core.stream_agent`，
-    #     不经过这一层，所以记忆功能不会污染评测的 token 与时延指标。
-    _spawn(_remember(user_id, thread_id))
-
-
-async def _remember(user_id: str, thread_id: str) -> None:
-    """一轮对话结束后，从最近的对话里提炼长期记忆并存下来。
-
-    **失败必须静默**：记不住东西是遗憾，但不能因为它让对话出错。
-    这跟 `generate_title` 拿不到标题就退回用户原话是同一个态度——辅助功能不许反向影响主流程。
-    """
-    try:
-        transcript = await agent_core.recent_conversation(thread_id)
-        facts = await agent_core.extract_memories(transcript)
-        if facts:
-            memories.remember(user_id, facts, source_thread=thread_id)
-    except Exception:
-        return
-
-
-def _spawn(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background.add(task)
-    task.add_done_callback(_background.discard)
 
 
 async def shutdown() -> None:

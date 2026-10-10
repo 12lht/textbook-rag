@@ -3,9 +3,13 @@
 和 `conversations.py` 一样，这一层是纯应用层：只读写 `data/memories.json`，
 **不 import 任何 agent 相关的东西**。分工是：
 
-- 怎么用模型抽出来 —— `agent_core.extract_memories`
-- 什么时候抽、抽完存哪 —— `service.py`
+- 什么时候记、记什么 —— **模型自己判断**（它手里有 `save_memory` / `recall_memory`）
+- 把这两个工具接到这一层 —— `service.py` 通过 `agent_core.set_memory_backend()` 注入
 - 存成什么、怎么去重 —— 就在这里
+
+早先的做法是每轮对话结束后由 service 主动提炼一遍，现在那套已经删掉了：
+改成工具触发之后，成本从「每轮必付」变成「需要时才付」，而且多了「作废旧条目」
+的能力（`forget`）。
 
 存储格式（一个 user_id 对应一条数组）：
 
@@ -34,6 +38,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -50,6 +55,20 @@ KINDS = ("偏好", "身份", "计划", "事实")
 DEFAULT_KIND = "其他"
 
 _STRIP_CHARS = set(" \t\r\n，。！？、；：,.!?;:\"'“”‘’（）()【】[]《》<>-—_~`*#")
+
+# 这是**写**的锁，不是 asyncio 的锁。原因：读写是「读整个文件 → 改 → 整份写回」，
+# 两步之间一旦插进另一个写者，后写的会把先写的整份覆盖掉（不是合并）。
+#
+# 什么时候会并发：模型在**一条消息里发多个工具调用**时，ToolNode 用
+# `asyncio.gather` 同时执行它们；而这些工具是同步函数，会各自被丢进线程池，
+# 于是就真的并行跑了。实测踩到过——「不吃香菜」和「养了只猫叫豆豆」两条同时写，
+# 只剩一条落盘。
+#
+# 用 `threading.Lock` 而不是 `asyncio.Lock`：写发生在工作线程里，
+# 事件循环的锁在这里根本管不住。
+#
+# 单进程内够用。真要多个进程写同一份文件，得换成文件锁或数据库——那是后话。
+_write_lock = threading.Lock()
 
 
 def _load() -> dict:
@@ -99,88 +118,94 @@ def remember(
     调用方直接把这层模型的输出原样丢进来即可，形状不对的项会被跳过，
     不让脏数据落盘。这样解析的容错只写在这一处。
     """
-    data = _load()
-    key = str(user_id)
-    stored = data.get(key)
-    entries = list(stored) if isinstance(stored, list) else []
+    # 整个「读—改—写」必须在锁里完成，理由见 `_write_lock`。
+    with _write_lock:
+        data = _load()
+        key = str(user_id)
+        stored = data.get(key)
+        entries = list(stored) if isinstance(stored, list) else []
 
-    # 归一化文本 -> 已有条目，用于去重
-    index = {_normalize(item.get("text", "")): item for item in entries}
-    now = _now()
-    added = merged = 0
+        # 归一化文本 -> 已有条目，用于去重
+        index = {_normalize(item.get("text", "")): item for item in entries}
+        now = _now()
+        added = merged = 0
 
-    for raw in facts:
-        if isinstance(raw, str):
-            text, kind = raw, DEFAULT_KIND
-        elif isinstance(raw, dict):
-            text, kind = raw.get("text", ""), raw.get("kind")
-        else:
-            continue
+        for raw in facts:
+            if isinstance(raw, str):
+                text, kind = raw, DEFAULT_KIND
+            elif isinstance(raw, dict):
+                text, kind = raw.get("text", ""), raw.get("kind")
+            else:
+                continue
 
-        text = _clean_text(text)
-        if not text:
-            continue
+            text = _clean_text(text)
+            if not text:
+                continue
 
-        fingerprint = _normalize(text)
-        if not fingerprint:
-            continue
+            fingerprint = _normalize(text)
+            if not fingerprint:
+                continue
 
-        existing = index.get(fingerprint)
-        if existing is not None:
-            existing["hits"] = int(existing.get("hits", 1)) + 1
-            existing["last_seen"] = now
-            existing["kind"] = _clean_kind(kind) if kind else existing.get("kind")
-            merged += 1
-            continue
+            existing = index.get(fingerprint)
+            if existing is not None:
+                existing["hits"] = int(existing.get("hits", 1)) + 1
+                existing["last_seen"] = now
+                existing["kind"] = _clean_kind(kind) if kind else existing.get("kind")
+                merged += 1
+                continue
 
-        entry = {
-            "text": text,
-            "kind": _clean_kind(kind),
-            "source": source_thread,
-            "created_at": now,
-            "last_seen": now,
-            "hits": 1,
-        }
-        entries.append(entry)
-        index[fingerprint] = entry
-        added += 1
+            entry = {
+                "text": text,
+                "kind": _clean_kind(kind),
+                "source": source_thread,
+                "created_at": now,
+                "last_seen": now,
+                "hits": 1,
+            }
+            entries.append(entry)
+            index[fingerprint] = entry
+            added += 1
 
-    if len(entries) > MAX_PER_USER:
-        # 先丢最久没再出现的。同一天内按加入顺序稳定排序，避免每次写入都抖动。
-        entries.sort(key=lambda item: str(item.get("last_seen", "")))
-        entries = entries[-MAX_PER_USER:]
+        if len(entries) > MAX_PER_USER:
+            # 先丢最久没再出现的。同一天内按加入顺序稳定排序，避免每次写入都抖动。
+            entries.sort(key=lambda item: str(item.get("last_seen", "")))
+            entries = entries[-MAX_PER_USER:]
 
-    data[key] = entries
-    _save(data)
-    return {"added": added, "merged": merged, "total": len(entries)}
+        data[key] = entries
+        _save(data)
+        return {"added": added, "merged": merged, "total": len(entries)}
 
 
 def forget(user_id: str, text: str) -> bool:
     """按文本删掉一条记忆（同样走归一化匹配）。删掉了返回 True。"""
-    data = _load()
-    key = str(user_id)
-    entries = data.get(key)
-    if not isinstance(entries, list):
-        return False
+    with _write_lock:
+        data = _load()
+        key = str(user_id)
+        entries = data.get(key)
+        if not isinstance(entries, list):
+            return False
 
-    fingerprint = _normalize(text)
-    kept = [item for item in entries if _normalize(item.get("text", "")) != fingerprint]
-    if len(kept) == len(entries):
-        return False
+        fingerprint = _normalize(text)
+        kept = [
+            item for item in entries if _normalize(item.get("text", "")) != fingerprint
+        ]
+        if len(kept) == len(entries):
+            return False
 
-    data[key] = kept
-    _save(data)
-    return True
+        data[key] = kept
+        _save(data)
+        return True
 
 
 def clear(user_id: str) -> int:
     """清空某个用户的长期记忆，返回清掉了多少条。"""
-    data = _load()
-    key = str(user_id)
-    removed = len(data.pop(key, []) or [])
-    if removed:
-        _save(data)
-    return removed
+    with _write_lock:
+        data = _load()
+        key = str(user_id)
+        removed = len(data.pop(key, []) or [])
+        if removed:
+            _save(data)
+        return removed
 
 
 def _now() -> str:
