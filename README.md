@@ -436,7 +436,7 @@ pbkdf2_sha256$600000$<salt_b64>$<hash_b64>
 | `reasoning_delta` | `content` | 主模型**思维链**的一个分片 |
 | `assistant_delta` | `content` | 回答正文的一个分片 |
 | `tool_call` | `tool`、`calls` | 模型要调工具，`calls` 里是名字和参数 |
-| `tool_result` | `tool`、`status` | 工具返回，`status` 为 `success` / `error` |
+| `tool_result` | `tool`、`status` | 工具返回，`status` 为 `success` / `error`，前端渲染成「工具完成 / 工具失败」 |
 | `error` | `message` | 出错，前端应把它当回答显示并标红 |
 | `done` | — | 本轮结束 |
 
@@ -447,6 +447,10 @@ pbkdf2_sha256$600000$<salt_b64>$<hash_b64>
 `messages` 通道捕获的是**图里所有被调用的模型**，不只是主模型——`truncate` 节点每轮都跑，它在需要裁剪时会调一次模型生成摘要，那次的 token 同样会从这条通道冒出来。所以**必须按 `metadata["langgraph_node"] == "model"` 过滤**，否则用户会在「思考过程」里看到一段与本次提问无关的摘要草稿。
 
 > 已知问题：正文那条分支还没有加同样的过滤，摘要的文字会混进回答气泡（实测第 31 轮触发裁剪时混进 80 字）。属于本次功能上线前就存在的行为，修法是套用同一个判据。
+
+**`status` 走两条路，别只修一条。** 实时渲染用流事件里的 `status`；刷新页面后走的是 `/api/conversations/{id}/messages`，那里的 `status` 由 `agent_core.get_history` 塞进 `operations`。**两条路都要带**，否则「刷新一下，失败就变成成功了」。
+
+⚠️ `status` 只在工具**抛异常**时才是 `error`。本项目的工具按约定**不抛异常**——出错时返回一句可读的话（`web_extract` 打不开域名会返回「无法读取网页：…」，`save_memory` 写不进去会返回「暂时写不进去」）。所以「工具失败」标红实际捕获的是**崩溃级故障**（参数校验不过、代码 bug），**不是**「工具没办成这件事」。要区分后者只能靠模型读返回文本，或者给工具加一套结构化的错误返回——后者会改动 `tools.py` 的全部工具，还没做。
 
 ### 位置怎么传
 

@@ -15,6 +15,9 @@
       --panel: #ffffff;
       --accent: #e76f51;
       --accent-dark: #bd4f39;
+      /* 失败色单独一个变量，不借 accent-dark：那是主按钮的悬停色，
+         同一个颜色既表示「操作」又表示「出错」，读起来会串味。 */
+      --danger: #b3352a;
       --mint: #dcefe5;
       --shadow: 0 22px 60px rgba(44, 65, 51, .12);
     }
@@ -76,6 +79,7 @@
     .trace summary:hover { color: var(--ink); }
     .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--mint); background: #f7faf5; }
     .trace-event { line-height: 1.5; }
+    .trace-event.trace-failed { color: var(--danger); font-weight: 500; }
     /* 思维链单独一块，比工具调用那几行更暗、更窄，视觉上退到后面去。
        summary 直接沿用上面 `.trace summary` 的样式，不重复写一套。 */
     .trace-reasoning { color: var(--muted); }
@@ -665,10 +669,15 @@
           appendReasoning(addReasoning(contentNode), operation.text || '');
           return;
         }
+        // 工具返回：按 status 分「完成 / 失败」，和历史流走同一套渲染。
+        if (operation.kind === 'result') {
+          addToolResult(contentNode, operation.tool, operation.status);
+          return;
+        }
         const details = operation.kind === 'call' && operation.args && Object.keys(operation.args).length
           ? JSON.stringify(operation.args)
           : '';
-        addTrace(contentNode, operation.kind === 'call' ? `调用工具：${operation.tool}` : `工具完成：${operation.tool}`, details);
+        addTrace(contentNode, `调用工具：${operation.tool}`, details);
       });
       const rewindButton = item.querySelector('.rewind');
       if (rewindButton) rewindButton.onclick = () => rewindTo(turn);
@@ -691,13 +700,22 @@
       updateScrollBottomButton();
     }
 
-    function addTrace(node, label, details = '') {
+    function addTrace(node, label, details = '', failed = false) {
       if (!node?.traceList) return;
       node.trace.hidden = false;
       const event = document.createElement('div');
-      event.className = 'trace-event';
+      event.className = failed ? 'trace-event trace-failed' : 'trace-event';
       event.textContent = details ? `${label} · ${details}` : label;
       node.traceList.appendChild(event);
+    }
+
+    // 工具成功和失败必须长得不一样。
+    // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
+    // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
+    // 一个界面在无声地说反话，比不显示更糟。
+    function addToolResult(node, tool, status) {
+      const failed = status === 'error';
+      addTrace(node, `${failed ? '工具失败' : '工具完成'}：${tool}`, '', failed);
     }
 
     // 思维链做成可折叠块，而不是像工具调用那样平铺一行。
@@ -1022,7 +1040,7 @@
               setStatus(`正在调用工具：${event.tool}…`, true);
             } else if (event.type === 'tool_result') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
-              addTrace(assistantNode, `工具完成：${event.tool}`);
+              addToolResult(assistantNode, event.tool, event.status);
             } else if (event.type === 'assistant_delta') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               assistantText += event.content;

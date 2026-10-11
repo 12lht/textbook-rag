@@ -1026,9 +1026,14 @@ async def get_history(thread_id: str) -> list[dict[str, object]]:
                     assistant_entry.setdefault("operations", []).extend(operations)
                     operations = []
         elif isinstance(message, ToolMessage):
+            # `status` 是 langchain 的标准字段（success / error）。以前这里把它丢了，
+            # 后果和前端丢掉流事件里的 status 是同一个：**刷新页面之后「工具失败」就
+            # 再也看不出来**，历史里只剩一行「工具完成：xxx」——那是在骗人。
+            # 用 `or "success"` 兜住 None：老 checkpoint 里的消息可能没有这个字段。
             operations.append({
                 "kind": "result",
                 "tool": getattr(message, "name", "tool"),
+                "status": getattr(message, "status", None) or "success",
             })
 
     if operations and assistant_entry is not None:
