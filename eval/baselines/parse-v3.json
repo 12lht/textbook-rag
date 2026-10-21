@@ -1,0 +1,62 @@
+{
+  "pdf": "Hello-Algo.pdf",
+  "toc_copied": 7,
+  "slides": false,
+  "pages": "31-60",
+  "elapsed_s": 4.3,
+  "doc": {
+    "page_count": 30,
+    "chunks": 63,
+    "assets": 18,
+    "toc_entries": 7
+  },
+  "text_layer_ratio": 1.0,
+  "page_anchor_cover": 1.0,
+  "chunk_len": {
+    "p50": 527,
+    "p95": 711,
+    "min": 8,
+    "max": 818
+  },
+  "short_ratio": 0.024,
+  "long_ratio": 0.0,
+  "dirty_ratio": 0.024,
+  "kinds": {
+    "text": 41,
+    "figure": 18,
+    "table": 4
+  },
+  "dirty_examples": [
+    {
+      "chunk_id": "4c23b329-0056",
+      "reasons": [
+        "stub"
+      ],
+      "head": "第3 章数据结构"
+    }
+  ],
+  "chapters": 6,
+  "chapter_list": [
+    "2.3   时间复杂度",
+    "2.4   空间复杂度",
+    "2.5   小结",
+    "3.1   数据结构分类",
+    "3.2   基本数据类型",
+    "3.3   数字编码 *"
+  ],
+  "toc_leaves": 7,
+  "figure_captions_in_pdf": 19,
+  "table_captions_in_pdf": 3,
+  "figures_in_markdown": 18,
+  "caption_recall": 0.947,
+  "table_caption_recall": 1.333,
+  "missing_asset_files": [],
+  "table_pages_in_pdf": 4,
+  "tables_in_markdown": 4,
+  "code_fences": 0,
+  "missing_figures": [
+    "图3‑3连续空间存储与分散空间存储"
+  ],
+  "markdown_sha": "0c18bf9eee96d695",
+  "chunk_sha": "0ddc5bbcc1f83866"
+}

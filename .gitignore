@@ -12,9 +12,20 @@ dist/
 # 这是本机状态，不是源码；每次聊天都会变，入库只会污染 diff。
 data/
 
-# Agent 工作目录：本地记忆与临时测试脚本。
-# 若要给测试脚本做版本管理，应该搬到 tests/ 再入库。
+# 备份产物（scripts/backup.py 生成）。里面是完整的数据快照，
+# 体积与 data/ 同级，绝不能入库。
+backups/
+
+# Agent 工作目录：本地记忆与临时探针。
+# 测试脚本已迁到 tests/（入库），tmp/ 只是临时区，随手会被清空。
 .workbuddy/
+
+# 教材原件：26 个 PDF 共 461M，属于输入数据不是源码。
+# 曾经因为没忽略，反复 git add 大 PDF 中断，在 .git/objects 里留下 36G 临时对象。
+textbook/
+
+# 解析产物：随时能从 textbook/ 重新生成，和 data/ 同理。
+out/
 
 # 编辑器与系统文件
 .vscode/

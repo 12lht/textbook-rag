@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>知识库 · Agent Workspace</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'7'%20fill%3D'%2318201e'%2F%3E%3Cpath%20d%3D'M16%207%208.5%2025M16%207%2023.5%2025M11.2%2018.5H20.8'%20stroke%3D'%23fff'%20stroke-width%3D'3'%20stroke-linecap%3D'round'%20fill%3D'none'%2F%3E%3C%2Fsvg%3E" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+    :root {
+      --ink: #18201e;
+      --muted: #73807a;
+      --line: #dbe4dc;
+      --paper: #f5f7f1;
+      --panel: #ffffff;
+      --accent: #e76f51;
+      --accent-dark: #bd4f39;
+      --danger: #b3352a;
+      --mint: #dcefe5;
+      --shadow: 0 22px 60px rgba(44, 65, 51, .12);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      color: var(--ink);
+      background: radial-gradient(circle at 12% 0%, #e3f1e2 0, transparent 32rem), var(--paper);
+      font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+
+    /* --- 顶栏 ---
+       比主界面多一个「回到对话」：这一页是独立页面，浏览器后退不一定能回到
+       用户来的那个会话（可能是直接开的新标签）。给一个明确的锚点。 */
+    .topbar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 24px;
+      border-bottom: 1px solid #e6dfd3;
+      background: #f7f4ed;
+    }
+    .back {
+      flex: none; padding: 7px 13px; border: 1px solid var(--line); border-radius: 9px;
+      color: var(--muted); background: #fff; font-size: 12.5px; text-decoration: none;
+    }
+    .back:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      display: grid; place-items: center; width: 30px; height: 30px;
+      color: #fff; background: var(--ink); border-radius: 9px; font-weight: 700; font-size: 13px;
+    }
+    .brand-name { font-weight: 700; letter-spacing: -.02em; font-size: 14px; }
+    .brand-sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
+    .who { margin-left: auto; color: var(--muted); font-size: 12px; }
+    .who b { color: var(--ink); font-weight: 600; }
+
+    /* --- 两栏：左分类 / 右文档 ---
+       左栏定宽而不是自适应：分类名长度差别很大（「信号与系统」vs「移动通信」），
+       自适应会让右边的表格每次都被推着左右跳。 */
+    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); height: calc(100vh - 59px); height: calc(100dvh - 59px); }
+
+    .cats {
+      display: flex; flex-direction: column; min-height: 0;
+      padding: 16px 12px; border-right: 1px solid #e6dfd3; background: #f7f4ed;
+    }
+    .cats-title {
+      flex: none; margin: 0 6px 10px; color: var(--muted);
+      font: 500 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase;
+    }
+    /* `0 1 auto` 而不是 `1 1 auto`：分类少的时候不要把它撑满整栏，
+       否则「新建分类」输入框会被推到面板最底下，隔着一大片空白，
+       填个新分类要先跨过半个屏幕。分类多的时候它照样会内部滚动。 */
+    .cat-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
+    .cat {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 9px; border: 1px solid transparent; border-radius: 9px;
+      color: var(--ink); background: transparent; font-size: 13px; text-align: left;
+    }
+    .cat:hover { border-color: var(--line); background: var(--panel); }
+    /* 选中态用左侧色条而不是整块填充：分类行里还有「改名/删除」两个小按钮，
+       整块反白之后它们会看不清。 */
+    .cat.active { border-color: var(--accent); background: #fff; box-shadow: inset 3px 0 0 var(--accent); }
+    .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cat-count { flex: none; color: var(--muted); font: 11px "DM Mono", monospace; }
+    /* 操作按钮平时不占视觉重量（opacity 0 但仍占位，避免悬停时整行抖动）。 */
+    .cat-ops { flex: none; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+    .cat:hover .cat-ops, .cat.active .cat-ops { opacity: 1; }
+    .cat-op {
+      padding: 1px 5px; border: 0; border-radius: 5px;
+      color: var(--muted); background: transparent; font-size: 11px; line-height: 1.5;
+    }
+    .cat-op:hover { color: var(--ink); background: #f2efe8; }
+    .cat-op.danger:hover { color: var(--accent-dark); background: #fff4f1; }
+    .cat-new { flex: none; display: flex; gap: 6px; margin-top: 12px; }
+    .cat-new input {
+      flex: 1; min-width: 0; padding: 8px 10px;
+      border: 1px solid #cfdacf; border-radius: 9px; color: var(--ink); background: #fff;
+      font-size: 12.5px; outline: none;
+    }
+    .cat-new input:focus { border-color: var(--accent); }
+    .cat-new button {
+      flex: none; width: 34px; border: 0; border-radius: 9px;
+      color: #fff; background: var(--accent); font-size: 15px; line-height: 1;
+    }
+    .cat-new button:hover { background: var(--accent-dark); }
+    .cat-new button:disabled { opacity: .6; cursor: wait; }
+    /* 分类相关的错误（重名 409、名字为空 400）就写在这行，不跳 alert——
+       alert 会把刚敲进去的名字一起掀掉，重打一遍很烦。 */
+    .cat-err { flex: none; min-height: 16px; margin: 6px 6px 0; color: var(--accent-dark); font-size: 11.5px; font-weight: 600; }
+
+    .docs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 30px 60px; }
+    .docs-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+    .docs-title { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.02em; }
+    .docs-sub { margin: 0 0 18px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+    .docs-actions { margin-left: auto; display: flex; gap: 8px; }
+    .btn-primary {
+      padding: 9px 15px; border: 0; border-radius: 10px;
+      color: #fff; background: var(--accent); font-size: 12.5px; font-weight: 600;
+      box-shadow: 0 8px 18px rgba(231,111,81,.18);
+    }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-primary:disabled { opacity: .6; cursor: wait; box-shadow: none; }
+
+    /* 批量条：只在有勾选时出现。它把「把一个学科的几个 PDF 归到一类」
+       从 N 次操作变成 1 次——这正是用户提这个页面时说的场景。 */
+    .bulkbar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin-bottom: 14px; padding: 10px 14px;
+      border: 1px solid var(--accent); border-radius: 11px;
+      background: #fff6f3; font-size: 12.5px;
+    }
+    .bulkbar[hidden] { display: none; }
+    .bulkbar b { font-weight: 650; }
+    .bulkbar select { padding: 6px 9px; border: 1px solid #cfdacf; border-radius: 8px; color: var(--ink); background: #fff; font-size: 12.5px; }
+    .bulkbar button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 12.5px; }
+    .bulkbar button:hover { border-color: var(--ink); color: var(--ink); }
+    .bulkbar button.go { border-color: var(--ink); color: #fff; background: var(--ink); }
+    .bulkbar button.go:hover { background: #2b3733; }
+
+    .doc-list { display: grid; gap: 9px; }
+    .doc-card {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 13px; align-items: center;
+      padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    }
+    .doc-card:hover { box-shadow: 0 8px 24px rgba(45,69,51,.07); }
+    .doc-card.picked { border-color: var(--accent); background: #fffaf8; }
+    .doc-card input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+    .doc-body { min-width: 0; }
+    .doc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+    .doc-file { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+    .doc-meta { margin-top: 3px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .doc-meta .bad { color: var(--danger); }
+    .doc-meta .ok { color: #2f7a55; }
+    .doc-meta .warn { color: #b8860b; }
+    .doc-cat { padding: 6px 8px; border: 1px solid #cfdacf; border-radius: 8px; color: var(--ink); background: #fff; font-size: 12px; max-width: 150px; }
+    .doc-cat:focus { border-color: var(--accent); outline: none; }
+    .doc-ops { display: flex; gap: 4px; }
+    .doc-op { padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 11.5px; white-space: nowrap; }
+    .doc-op:hover { border-color: var(--ink); color: var(--ink); }
+    .doc-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .doc-op:disabled { opacity: .5; cursor: not-allowed; }
+
+    .empty { padding: 44px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.85; }
+    .empty b { color: var(--ink); font-weight: 600; }
+
+    /* --- Markdown 预览 ---
+       放在页面内的浮层，不开新窗口：管理文档时是「翻几本对一下」的节奏，
+       新窗口会把页面切走，回来还得重新滚到原来那本。 */
+    .modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: rgba(24,32,30,.42); }
+    .modal[hidden] { display: none; }
+    .modal-card {
+      display: flex; flex-direction: column; min-height: 0;
+      width: min(940px, 100%); height: min(86vh, 100%);
+      border-radius: 16px; background: #fffdf9; box-shadow: 0 26px 70px rgba(20,32,25,.32);
+    }
+    .modal-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+    .modal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+    .modal-tab { padding: 5px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 12px; }
+    .modal-tab.active { border-color: var(--ink); color: #fff; background: var(--ink); }
+    .modal-close { width: 28px; height: 28px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 17px; line-height: 1; }
+    .modal-close:hover { color: var(--ink); background: #f2efe8; }
+    .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 40px; }
+    .modal-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.75 ui-monospace, Menlo, monospace; }
+    .modal-body img { max-width: 100%; height: auto; display: block; margin: 1em auto; border-radius: 6px; }
+    .modal-body h1, .modal-body h2, .modal-body h3 { line-height: 1.4; margin: 1.5em 0 .6em; }
+    .modal-body h1 { font-size: 21px; } .modal-body h2 { font-size: 18px; } .modal-body h3 { font-size: 15.5px; }
+    .modal-body p { margin: .8em 0; line-height: 1.8; font-size: 14px; }
+    .modal-body table { border-collapse: collapse; margin: 1em 0; font-size: 13px; display: block; overflow-x: auto; }
+    .modal-body th, .modal-body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+    .modal-body blockquote { margin: 1em 0; padding: .2em 0 .2em 13px; border-left: 3px solid var(--line); color: var(--muted); }
+
+    /* 登录门。知识库对游客是关的（游客共用同一个库），所以直接在整页层面挡住，
+       不要让人点进一个个按钮才发现全是 401。 */
+    .gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(245,247,241,.92); }
+    .gate[hidden] { display: none; }
+    .gate-card { width: min(400px, 100%); padding: 30px; border-radius: 18px; background: #fffdf9; box-shadow: var(--shadow); text-align: center; }
+    .gate-title { margin: 0 0 8px; font-size: 19px; font-weight: 650; }
+    .gate-text { margin: 0 0 20px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+    .gate-link { display: inline-block; padding: 11px 20px; border-radius: 11px; color: #fff; background: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
+    .gate-link:hover { background: var(--accent-dark); }
+
+    /* 轻提示。下载/删除/归类这类「做完了」的反馈滑一下就走，不打断操作。 */
+    .toast {
+      position: fixed; left: 50%; bottom: 26px; z-index: 100; transform: translateX(-50%);
+      max-width: min(560px, calc(100vw - 40px)); padding: 10px 18px; border-radius: 11px;
+      color: #fff; background: rgba(24,32,30,.93); font-size: 12.5px; line-height: 1.6;
+      box-shadow: 0 12px 30px rgba(20,32,25,.28);
+    }
+    .toast[hidden] { display: none; }
+    .toast.bad { background: rgba(179,53,42,.95); }
+
+    @media (max-width: 720px) {
+      .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: auto; }
+      .cats { max-height: 34vh; border-right: 0; border-bottom: 1px solid #e6dfd3; }
+      .docs { padding: 18px 16px 40px; }
+      .doc-card { grid-template-columns: auto minmax(0, 1fr); row-gap: 9px; }
+      .doc-cat, .doc-ops { grid-column: 2; }
+      .who { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="back" href="/">← 回到对话</a>
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div>
+        <div class="brand-name">知识库</div>
+        <div class="brand-sub">分类 · 入库 · 删除</div>
+      </div>
+    </div>
+    <div class="who" id="who"></div>
+  </div>
+
+  <div class="layout" id="layout">
+    <aside class="cats">
+      <div class="cats-title">分类</div>
+      <div class="cat-list" id="catList"></div>
+      <form class="cat-new" id="catForm">
+        <input id="catInput" type="text" maxlength="40" placeholder="新建分类，如「移动通信」" autocomplete="off" />
+        <button id="catSubmit" type="submit" title="新建分类" aria-label="新建分类">＋</button>
+      </form>
+      <div class="cat-err" id="catError"></div>
+    </aside>
+
+    <main class="docs">
+      <div class="docs-head">
+        <h1 class="docs-title" id="docsTitle">全部文档</h1>
+        <div class="docs-actions">
+          <button class="btn-primary" id="uploadButton" type="button">＋ 上传并入库</button>
+          <input type="file" id="fileInput" accept=".pdf,.pptx,.docx" multiple hidden />
+        </div>
+      </div>
+      <p class="docs-sub" id="docsSub"></p>
+
+      <div class="bulkbar" id="bulkBar" hidden>
+        <span id="bulkCount">已选 0 本</span>
+        <select id="bulkCategory"></select>
+        <button class="go" id="bulkApply" type="button">移到这个分类</button>
+        <button id="bulkClear" type="button">取消选择</button>
+      </div>
+
+      <div class="doc-list" id="docList"></div>
+    </main>
+  </div>
+
+  <div class="gate" id="gate" hidden>
+    <div class="gate-card">
+      <h2 class="gate-title">知识库需要登录</h2>
+      <p class="gate-text" id="gateText">
+        游客没有自己的库。回到对话页登录后，上传的教材才会只归你所有。
+      </p>
+      <a class="gate-link" href="/">回到对话页登录</a>
+    </div>
+  </div>
+
+  <div class="modal" id="preview" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="previewName">
+      <div class="modal-head">
+        <div class="modal-name" id="previewName">解析预览</div>
+        <button class="modal-tab active" id="tabRender" type="button">渲染</button>
+        <button class="modal-tab" id="tabRaw" type="button">原文</button>
+        <button class="modal-close" id="previewClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body" id="previewBody"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    // 令牌和主界面共用同一个 localStorage 键：在对话页登录过，这里直接是登录态，
+    // 不用再登一次。反向也成立——这里退出会连带对话页退出，所以这一页不提供退出。
+    const TOKEN_KEY = 'agent.token';
+    // 「未分类」用这个哨兵值做筛选条件，而不是空字符串——空字符串已经被
+    // 「全部」占用了。它永远不会和真实的 category_id（`c-xxxx`）撞上。
+    const UNFILED = '__unfiled__';
+
+    const state = {
+      identity: null,
+      categories: [],
+      documents: [],
+      filter: '',          // '' = 全部，UNFILED = 未分类，其余是 category_id
+      picked: new Set(),   // 勾选的 doc_id
+      pollTimer: null,
+    };
+
+    const catList = $('#catList');
+    const catForm = $('#catForm');
+    const catInput = $('#catInput');
+    const catSubmit = $('#catSubmit');
+    const catError = $('#catError');
+    const docList = $('#docList');
+    const docsTitle = $('#docsTitle');
+    const docsSub = $('#docsSub');
+    const uploadButton = $('#uploadButton');
+    const fileInput = $('#fileInput');
+    const bulkBar = $('#bulkBar');
+    const bulkCount = $('#bulkCount');
+    const bulkCategory = $('#bulkCategory');
+    const bulkApply = $('#bulkApply');
+    const bulkClear = $('#bulkClear');
+    const gate = $('#gate');
+    const who = $('#who');
+    const toast = $('#toast');
+
+    let token = readToken();
+    function readToken() {
+      try { return localStorage.getItem(TOKEN_KEY) || null; } catch (error) { return null; }
+    }
+    function writeToken(value) {
+      token = value;
+      try {
+        if (value) localStorage.setItem(TOKEN_KEY, value);
+        else localStorage.removeItem(TOKEN_KEY);
+      } catch (error) {
+        // 无痕模式下写不进去。影响只是「下次进来看不到自己的库」，不值得打断。
+      }
+    }
+
+    // 所有请求走这里。401 统一回登录门：令牌过期时如果只是几个请求静默失败，
+    // 页面会显示成「一本都没有」，用户会以为书丢了。
+    async function apiFetch(url, options = {}) {
+      const headers = Object.assign({}, options.headers || {});
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(url, Object.assign({}, options, { headers }));
+      if (response.status === 401) {
+        writeToken(null);
+        state.identity = { guest: true };
+        showGate('登录已过期，请重新登录后再管理知识库。');
+      }
+      return response;
+    }
+
+    async function readError(response, fallback) {
+      try {
+        const body = await response.json();
+        if (body && typeof body.detail === 'string') return body.detail;
+      } catch (error) { /* 不是 JSON，用兜底文案 */ }
+      return fallback;
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    let toastTimer = null;
+    function say(message, bad = false) {
+      toast.textContent = message;
+      toast.classList.toggle('bad', Boolean(bad));
+      toast.hidden = false;
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.hidden = true; toastTimer = null; }, 3200);
+    }
+
+    function showGate(message) {
+      if (message) $('#gateText').textContent = message;
+      gate.hidden = false;
+      $('#layout').style.visibility = 'hidden';
+    }
+
+    // ------------------------------------------------------------------
+    // 身份
+    // ------------------------------------------------------------------
+    async function loadIdentity() {
+      try {
+        const response = await fetch('/api/auth/me', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (response.status === 401) { writeToken(null); state.identity = { guest: true }; return false; }
+        if (!response.ok) { state.identity = { guest: true }; return false; }
+        const me = await response.json();
+        state.identity = me && !me.guest
+          ? { account: me.account, guest: false }
+          : { guest: true };
+        return !state.identity.guest;
+      } catch (error) {
+        state.identity = { guest: true };
+        showGate(`连不上后端：${error.message}`);
+        return false;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // 分类
+    // ------------------------------------------------------------------
+    function categoryName(categoryId) {
+      if (!categoryId) return '未分类';
+      const found = state.categories.find((item) => item.category_id === categoryId);
+      return found ? found.name : '未分类';
+    }
+
+    function unfiledCount() {
+      return state.documents.filter((doc) => !doc.category_id).length;
+    }
+
+    function renderCategories() {
+      catList.innerHTML = '';
+      const rows = [
+        { id: '', name: '全部文档', count: state.documents.length, fixed: true },
+        { id: UNFILED, name: '未分类', count: unfiledCount(), fixed: true },
+      ];
+      state.categories.forEach((item) => {
+        rows.push({ id: item.category_id, name: item.name, count: item.doc_count, fixed: false });
+      });
+
+      rows.forEach((row) => {
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'cat' + (state.filter === row.id ? ' active' : '');
+        // 用属性记 category_id 而不是靠名字找回节点：改名时用
+        // `querySelector('[data-category-id="..."]')` 定位，比「遍历所有行、
+        // 比较文字内容」可靠——后者在名字相近时会认错行（改「移动通信」结果
+        // 改到「移动通信（下）」上面）。
+        node.setAttribute('data-category-id', row.id);
+        const name = document.createElement('span');
+        name.className = 'cat-name';
+        name.textContent = row.name;
+        const count = document.createElement('span');
+        count.className = 'cat-count';
+        count.textContent = String(row.count);
+        node.append(name, count);
+        node.onclick = () => { state.filter = row.id; renderCategories(); renderDocuments(); };
+
+        // 「全部 / 未分类」是虚拟行，没有改名和删除——给它们加按钮就得解释
+        // 「删除『全部』是什么意思」，那是自找的歧义。
+        if (!row.fixed) {
+          const ops = document.createElement('span');
+          ops.className = 'cat-ops';
+          const rename = document.createElement('button');
+          rename.type = 'button';
+          rename.className = 'cat-op';
+          rename.textContent = '改名';
+          rename.onclick = (event) => { event.stopPropagation(); beginRename(row); };
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'cat-op danger';
+          remove.textContent = '删除';
+          remove.onclick = (event) => { event.stopPropagation(); removeCategory(row); };
+          ops.append(rename, remove);
+          node.appendChild(ops);
+        }
+        catList.appendChild(node);
+      });
+    }
+
+    // 改名用「就地换成输入框」而不是弹窗：只改一个短字段，弹窗要多两次点击，
+    // 而且弹窗起来时看不清它本来叫什么。
+    function beginRename(row) {
+      const target = catList.querySelector(`[data-category-id="${row.id}"]`);
+      if (!target) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 40;
+      input.value = row.name;
+      input.style.cssText = 'flex:1;min-width:0;padding:5px 7px;border:1px solid #e76f51;border-radius:7px;font-size:12.5px;outline:none;';
+      target.innerHTML = '';
+      target.appendChild(input);
+      // linkedom（探针用的假 DOM）里 input 没有 select()，不加判断会直接抛。
+      if (input.select) input.select();
+
+      let settled = false;
+      const finish = async (commit) => {
+        if (settled) return;
+        settled = true;
+        const next = input.value.trim();
+        if (!commit || !next || next === row.name) { renderCategories(); return; }
+        const response = await apiFetch(`/api/categories/${encodeURIComponent(row.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: next }),
+        });
+        if (!response.ok) {
+          catError.textContent = await readError(response, '改名失败');
+          renderCategories();
+          return;
+        }
+        catError.textContent = '';
+        await loadAll();
+      };
+      input.onkeydown = (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+        if (event.key === 'Escape') { finish(false); }
+      };
+      input.onblur = () => finish(true);
+    }
+
+    async function removeCategory(row) {
+      // 文案里必须说清「书不会跟着没」：这是删分类最容易让人犹豫的点，
+      // 不写清楚用户会去一个个确认书还在不在。
+      const tip = row.count
+        ? `删除分类「${row.name}」？\n\n类下的 ${row.count} 本书不会删除，只会退回「未分类」。`
+        : `删除分类「${row.name}」？`;
+      if (!window.confirm(tip)) return;
+      const response = await apiFetch(`/api/categories/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) {
+        say(await readError(response, '删除分类失败'), true);
+        return;
+      }
+      if (state.filter === row.id) state.filter = '';
+      await loadAll();
+      say(`分类「${row.name}」已删除，书退回未分类。`);
+    }
+
+    async function createCategory(name) {
+      const cleaned = String(name || '').trim();
+      if (!cleaned) { catError.textContent = '分类名不能为空'; return; }
+      catSubmit.disabled = true;
+      try {
+        const response = await apiFetch('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: cleaned }),
+        });
+        if (!response.ok) {
+          catError.textContent = await readError(response, '新建分类失败');
+          return;
+        }
+        const created = await response.json();
+        catInput.value = '';
+        catError.textContent = '';
+        // 新建完直接跳到这个分类：刚建分类的人下一步一定是往里放书，
+        // 留在一堆分类里让他自己再点一下是多余的。
+        state.filter = created.category_id;
+        await loadAll();
+      } finally {
+        catSubmit.disabled = false;
+      }
+    }
+
+    catForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      createCategory(catInput.value);
+    });
+
+    // ------------------------------------------------------------------
+    // 文档
+    // ------------------------------------------------------------------
+    function visibleDocuments() {
+      if (state.filter === '') return state.documents;
+      if (state.filter === UNFILED) return state.documents.filter((doc) => !doc.category_id);
+      return state.documents.filter((doc) => doc.category_id === state.filter);
+    }
+
+    function documentMeta(doc) {
+      if (doc.status === 'failed') {
+        return `<span class="bad">入库失败</span> · ${escapeHtml(doc.error || '未知原因')}`;
+      }
+      if (doc.status !== 'ready') {
+        return '<span class="ok">解析中…</span> 大文件需要几十秒，这一页会自动刷新';
+      }
+      const pages = doc.page_count ? `${doc.page_count} 页 · ` : '';
+      const assets = doc.asset_count ? ` · ${doc.asset_count} 图表` : '';
+      const summary = `${pages}${doc.chunk_count} 段${assets}`;
+      // warning 是「能用但有已知瑕疵」（比如双栏被按单栏解析）。不显示的话，
+      // 用户会以为那本书解析得好好的，答案答偏时完全找不到原因。
+      return doc.warning
+        ? `${summary}<br><span class="warn">${escapeHtml(doc.warning)}</span>`
+        : summary;
+    }
+
+    // 一本书的「归属」下拉。选项来自 state.categories，所以新建分类后
+    // 不用重渲染每一行也能更新——每次渲染都重建，简单且不会漏。
+    function buildCategorySelect(doc) {
+      const select = document.createElement('select');
+      select.className = 'doc-cat';
+      select.title = '移到别的分类';
+      const options = [{ value: '', name: '未分类' }].concat(
+        state.categories.map((item) => ({ value: item.category_id, name: item.name })),
+      );
+      options.forEach((option) => {
+        const node = document.createElement('option');
+        node.value = option.value;
+        node.textContent = option.name;
+        if ((doc.category_id || '') === option.value) node.selected = true;
+        select.appendChild(node);
+      });
+      select.onchange = () => assignDocuments([doc.doc_id], select.value || null);
+      return select;
+    }
+
+    function renderDocuments() {
+      const documents = visibleDocuments();
+      docList.innerHTML = '';
+
+      // 标题和说明跟着筛选走，用户要知道「现在看的是哪一摊」。
+      const label = state.filter === ''
+        ? '全部文档'
+        : state.filter === UNFILED ? '未分类' : categoryName(state.filter);
+      docsTitle.textContent = label;
+      const ready = documents.filter((doc) => doc.status === 'ready').length;
+      docsSub.textContent = documents.length
+        ? `${documents.length} 本，其中 ${ready} 本已入库可以提问。勾选多本可以一次性移到同一个分类。`
+        : '';
+
+      if (!documents.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.innerHTML = state.documents.length
+          ? '这个分类下还没有文档。<br>在上面点<b>上传并入库</b>，传完会自动归到这个分类。'
+          : '知识库还是空的。<br>点右上角<b>上传并入库</b>，支持 PDF / PPT / Word。';
+        docList.appendChild(empty);
+        return;
+      }
+
+      documents.forEach((doc) => {
+        const card = document.createElement('div');
+        card.className = 'doc-card' + (state.picked.has(doc.doc_id) ? ' picked' : '');
+
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = state.picked.has(doc.doc_id);
+        check.title = '选中后可批量归类';
+        check.onchange = () => {
+          if (check.checked) state.picked.add(doc.doc_id);
+          else state.picked.delete(doc.doc_id);
+          card.classList.toggle('picked', check.checked);
+          renderBulkBar();
+        };
+
+        const body = document.createElement('div');
+        body.className = 'doc-body';
+        const title = document.createElement('div');
+        title.className = 'doc-title';
+        title.textContent = doc.title;
+        title.title = doc.title;
+        const file = document.createElement('div');
+        file.className = 'doc-file';
+        file.textContent = doc.filename || '';
+        const meta = document.createElement('div');
+        meta.className = 'doc-meta';
+        meta.innerHTML = documentMeta(doc);
+        body.append(title, file, meta);
+
+        const ops = document.createElement('div');
+        ops.className = 'doc-ops';
+        const preview = document.createElement('button');
+        preview.type = 'button';
+        preview.className = 'doc-op';
+        preview.textContent = '看解析';
+        preview.disabled = doc.status !== 'ready';
+        preview.title = doc.status === 'ready' ? '查看解析出的原文（带页码锚点）' : '解析完成后才能看';
+        preview.onclick = () => openPreview(doc);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'doc-op danger';
+        remove.textContent = '删除';
+        remove.onclick = () => removeDocument(doc);
+        ops.append(preview, remove);
+
+        card.append(check, body, buildCategorySelect(doc), ops);
+        docList.appendChild(card);
+      });
+    }
+
+    function renderBulkBar() {
+      // 勾选可能残留已删除的书（别处删掉后刷新列表）。渲染前先剔一遍，
+      // 否则「已选 3 本」里有一本是幽灵。
+      const alive = new Set(state.documents.map((doc) => doc.doc_id));
+      Array.from(state.picked).forEach((id) => { if (!alive.has(id)) state.picked.delete(id); });
+
+      bulkBar.hidden = state.picked.size === 0;
+      if (!state.picked.size) return;
+      bulkCount.textContent = `已选 ${state.picked.size} 本`;
+
+      // 批量归类的目标分类。和单本的下拉分开建，因为这里的值不需要「当前值」。
+      const keep = bulkCategory.value;
+      bulkCategory.innerHTML = '';
+      const options = [{ value: '', name: '未分类' }].concat(
+        state.categories.map((item) => ({ value: item.category_id, name: item.name })),
+      );
+      options.forEach((option) => {
+        const node = document.createElement('option');
+        node.value = option.value;
+        node.textContent = option.name;
+        bulkCategory.appendChild(node);
+      });
+      // 优先用当前筛选的分类做默认值——「看着某个分类、勾几本、移进去」
+      // 是最常见的顺序，预选好就少一次点击。keep 是上一次选过的值，
+      // 保留它是因为用户可能刚换了目标分类，还没点「移过去」。
+      bulkCategory.value = keep || (state.filter === UNFILED ? '' : state.filter);
+    }
+
+    bulkApply.onclick = () => {
+      assignDocuments(Array.from(state.picked), bulkCategory.value || null);
+    };
+    bulkClear.onclick = () => {
+      state.picked.clear();
+      renderDocuments();
+      renderBulkBar();
+    };
+
+    async function assignDocuments(docIds, categoryId) {
+      if (!docIds.length) return;
+      const label = categoryId ? categoryName(categoryId) : '未分类';
+      const results = await Promise.all(docIds.map(async (docId) => {
+        const response = await apiFetch(`/api/documents/${encodeURIComponent(docId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category_id: categoryId }),
+        });
+        return response.ok;
+      }));
+      const failed = results.filter((ok) => !ok).length;
+      state.picked.clear();
+      await loadAll();
+      if (failed) say(`${failed} 本没能移动，可能是刚被删掉了。`, true);
+      else say(`${docIds.length} 本已移到「${label}」。`);
+    }
+
+    async function removeDocument(doc) {
+      if (!window.confirm(`删除《${doc.title}》？\n\n解析出的正文和图片会一起删掉，之后提问不会再引用这本书。`)) return;
+      const response = await apiFetch(`/api/documents/${encodeURIComponent(doc.doc_id)}`, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) {
+        say(await readError(response, '删除失败'), true);
+        return;
+      }
+      state.picked.delete(doc.doc_id);
+      await loadAll();
+      say(`《${doc.title}》已删除。`);
+    }
+
+    // ------------------------------------------------------------------
+    // 入库（上传 → 后台解析）
+    // ------------------------------------------------------------------
+    async function uploadFiles(files) {
+      const list = Array.from(files || []);
+      if (!list.length) return;
+      uploadButton.disabled = true;
+      const target = state.filter === '' || state.filter === UNFILED ? null : state.filter;
+      let done = 0;
+      for (const item of list) {
+        uploadButton.textContent = `上传中 (${done + 1}/${list.length})`;
+        const body = new FormData();
+        body.append('file', item);
+        try {
+          const response = await apiFetch('/api/documents', { method: 'POST', body });
+          if (!response.ok) {
+            say(`${item.name}：${await readError(response, '上传失败')}`, true);
+          } else {
+            const record = await response.json();
+            // 正在看某个分类时上传的书，直接归到那个分类。不这么做的话，
+            // 传完它是「未分类」，还得再单独指派一次——用户提这个页面就是为了
+            // 「把一个学科的几个 PDF 归到一个分类下」，这一步不该让人重复做。
+            if (target && record.doc_id) {
+              await apiFetch(`/api/documents/${encodeURIComponent(record.doc_id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ category_id: target }),
+              });
+            }
+            if (record.duplicated) say(`《${record.title}》已经在库里了，没有重复解析。`);
+          }
+        } catch (error) {
+          say(`${item.name}：${error.message}`, true);
+        }
+        done += 1;
+      }
+      uploadButton.disabled = false;
+      uploadButton.textContent = '＋ 上传并入库';
+      fileInput.value = '';
+      await loadAll();
+    }
+
+    uploadButton.onclick = () => fileInput.click();
+    fileInput.onchange = () => uploadFiles(fileInput.files);
+
+    // ------------------------------------------------------------------
+    // 解析预览
+    // ------------------------------------------------------------------
+    const preview = $('#preview');
+    const previewName = $('#previewName');
+    const previewBody = $('#previewBody');
+    const tabRender = $('#tabRender');
+    const tabRaw = $('#tabRaw');
+    let previewDoc = null;
+    const previewCache = { render: null, raw: null };
+
+    function closePreview() {
+      preview.hidden = true;
+      previewDoc = null;
+      previewBody.innerHTML = '';
+      previewCache.render = null;
+      previewCache.raw = null;
+    }
+    $('#previewClose').onclick = closePreview;
+    preview.onclick = (event) => { if (event.target === preview) closePreview(); };
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !preview.hidden) closePreview();
+    });
+
+    async function openPreview(doc) {
+      previewDoc = doc;
+      previewName.textContent = `${doc.title} · ${doc.chunk_count} 段 · ${doc.asset_count} 图表`;
+      preview.hidden = false;
+      const canRender = Boolean(window.marked && window.DOMPurify);
+      tabRender.disabled = !canRender;
+      tabRender.title = canRender ? '' : '渲染组件没加载出来（离线或被拦截），只能看原文';
+      await showPreview(canRender ? 'render' : 'raw');
+    }
+
+    async function showPreview(mode) {
+      if (!previewDoc) return;
+      tabRender.classList.toggle('active', mode === 'render');
+      tabRaw.classList.toggle('active', mode === 'raw');
+      previewBody.innerHTML = '';
+      let text = previewCache[mode];
+      if (text === null) {
+        previewBody.textContent = '加载中…';
+        // render=1 让服务端把 `![](as_77.png)` 换成带签名的 URL，
+        // 否则 <img> 请求带不上 Authorization，全是破图。
+        const query = mode === 'render' ? '?render=1' : '';
+        try {
+          const response = await apiFetch(
+            `/api/documents/${encodeURIComponent(previewDoc.doc_id)}/markdown${query}`,
+          );
+          if (!response.ok) throw new Error(await readError(response, '读取失败'));
+          text = await response.text();
+          previewCache[mode] = text;
+        } catch (error) {
+          previewBody.textContent = `读取失败：${error.message}`;
+          return;
+        }
+      }
+      if (mode === 'render') {
+        previewBody.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+        // 图挂了别只留一个空洞：告诉人是哪张图、为什么看不了。
+        previewBody.querySelectorAll('img').forEach((img) => {
+          img.onerror = () => {
+            img.alt = `${img.alt || '插图'}（这张图加载失败）`;
+            img.style.width = '220px';
+          };
+        });
+      } else {
+        const pre = document.createElement('pre');
+        pre.textContent = text;
+        // 先清掉「加载中…」，否则那段文字会顶在正文前面不消失。
+        previewBody.innerHTML = '';
+        previewBody.appendChild(pre);
+      }
+    }
+
+    tabRender.onclick = () => showPreview('render');
+    tabRaw.onclick = () => showPreview('raw');
+
+    // ------------------------------------------------------------------
+    // 加载与轮询
+    // ------------------------------------------------------------------
+    async function loadAll() {
+      let documents;
+      let categories;
+      try {
+        const [docResponse, catResponse] = await Promise.all([
+          apiFetch('/api/documents'),
+          apiFetch('/api/categories'),
+        ]);
+        if (!docResponse.ok || !catResponse.ok) {
+          say(await readError(docResponse.ok ? catResponse : docResponse, '加载失败'), true);
+          return;
+        }
+        documents = await docResponse.json();
+        categories = await catResponse.json();
+      } catch (error) {
+        say(`连不上后端：${error.message}`, true);
+        return;
+      }
+      state.documents = documents;
+      state.categories = categories;
+      // 当前筛选的分类被删了（别的标签页里删的），退回全部，否则页面会一直空着。
+      if (state.filter && state.filter !== UNFILED
+          && !categories.some((item) => item.category_id === state.filter)) {
+        state.filter = '';
+      }
+      renderCategories();
+      renderDocuments();
+      renderBulkBar();
+      schedulePoll();
+    }
+
+    // 解析在后台跑，前端只能问。只在有 pending/parsing 时才继续问，
+    // 全部就绪就停——一直转会把这一页变成永久的请求源。
+    function schedulePoll() {
+      const busy = state.documents.some((doc) => doc.status === 'pending' || doc.status === 'parsing');
+      if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
+      if (!busy) return;
+      state.pollTimer = setTimeout(() => { loadAll(); }, 2500);
+    }
+
+    (async function boot() {
+      const loggedIn = await loadIdentity();
+      if (!loggedIn) {
+        if (!state.identity) state.identity = { guest: true };
+        showGate();
+        return;
+      }
+      who.innerHTML = `已登录 · <b>${escapeHtml(state.identity.account || '')}</b>`;
+      await loadAll();
+    })();
+  </script>
+</body>
+</html>

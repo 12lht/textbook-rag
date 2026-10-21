@@ -1,0 +1,66 @@
+{
+  "pdf": "Hello-Algo.pdf",
+  "pages": "31-60",
+  "elapsed_s": 5.6,
+  "doc": {
+    "page_count": 30,
+    "chunks": 63,
+    "assets": 18,
+    "toc_entries": 0
+  },
+  "text_layer_ratio": 1.0,
+  "page_anchor_cover": 1.0,
+  "chunk_len": {
+    "p50": 515,
+    "p95": 709,
+    "min": 8,
+    "max": 966
+  },
+  "short_ratio": 0.049,
+  "long_ratio": 0.024,
+  "dirty_ratio": 0.024,
+  "kinds": {
+    "text": 41,
+    "figure": 18,
+    "table": 4
+  },
+  "dirty_examples": [
+    {
+      "chunk_id": "a2a7d7d5-0056",
+      "reasons": [
+        "stub"
+      ],
+      "head": "第3 章数据结构"
+    }
+  ],
+  "chapters": 20,
+  "chapter_list": [
+    "2.2.3 两者对比",
+    "2.3 时间复杂度",
+    "2.3.1 统计时间增长趋势",
+    "2.3.2 函数渐近上界",
+    "2.3.3 推算方法",
+    "2.3.4 常见类型",
+    "2.3.5 最差、最佳、平均时间复杂度",
+    "2.4 空间复杂度",
+    "2.4.1 算法相关空间",
+    "2.4.2 推算方法",
+    "2.4.3 常见类型",
+    "2.4.4 权衡时间与空间"
+  ],
+  "toc_leaves": 0,
+  "figure_captions_in_pdf": 19,
+  "table_captions_in_pdf": 3,
+  "figures_in_markdown": 18,
+  "caption_recall": 0.947,
+  "table_caption_recall": 1.333,
+  "missing_asset_files": [],
+  "table_pages_in_pdf": 4,
+  "tables_in_markdown": 4,
+  "code_fences": 0,
+  "missing_figures": [
+    "图3‑3连续空间存储与分散空间存储"
+  ],
+  "markdown_sha": "836a068c95fab813",
+  "chunk_sha": "8eebfc3d97018087"
+}

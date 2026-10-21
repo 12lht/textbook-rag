@@ -1,0 +1,29 @@
+# 构建上下文排除清单。
+#
+# 为什么必须有：仓库里有 461MB 教材 PDF 和 202MB 运行时数据，
+# 不排除的话每次 `docker build` 都要把它们塞进构建上下文（慢，且会把
+# 本机聊天记录、教材原文件打进镜像层）。镜像里只该有代码和依赖。
+
+# 运行时状态（容器里用数据卷挂载）
+data/
+out/
+textbook/
+backups/
+
+# 密钥
+.env
+
+# 开发与测试
+.git/
+.workbuddy/
+tests/
+eval/cassettes/
+raw/
+__pycache__/
+*.py[cod]
+.vscode/
+.idea/
+
+# 文档与笔记不进镜像
+docs/
+learning-notes.md

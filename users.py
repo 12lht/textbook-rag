@@ -104,6 +104,15 @@ _HASH_ALGORITHM = "pbkdf2_sha256"
 #    会互相读到对方记下的东西——那就不只是「看到会话」，而是「看到别人的偏好」。
 GUEST_USER_ID = "1"
 
+# 邀请码用的字符集：去掉了 I / L / O / 0 / 1。
+#
+# 这不是洁癖：邀请码要靠人**手工转发**（微信里发一句、口述给同学），
+# 那几个字符在不同字体下会看错，一次输错就白跑。31 个字符取 8 位
+# ≈ 8.5×10¹¹ 种，对「发给几个同学」的规模绰绰有余。
+INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+INVITE_SEGMENTS = 2       # AW-XXXX-XXXX
+INVITE_SEGMENT_LEN = 4
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id       TEXT PRIMARY KEY,
@@ -120,6 +129,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 -- 退出所有设备时要按 user_id 批量删
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+-- 邀请码。**code 存明文**，和密码、令牌都不一样，理由见 `create_invite`。
+CREATE TABLE IF NOT EXISTS invites (
+    code       TEXT PRIMARY KEY,
+    note       TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    used_by    TEXT,
+    used_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invites_used ON invites(used_by);
 """
 
 
@@ -131,6 +150,20 @@ class AccountTaken(ValueError):
 class InvalidCredentials(ValueError):
     """账号或密码不对。**故意不区分这两者**，否则攻击者可以拿它当
     「这个账号存不存在」的探测器。"""
+
+
+class InviteRequired(ValueError):
+    """这个站已经有人了，注册必须带邀请码。
+
+    和 `InvalidInvite` 分开，是因为对用户来说这是两件事：一个是「你漏填了」，
+    另一个是「你填的那个不对」。都回一句「邀请码无效」会让人以为是码错了，
+    反复换码试。
+    """
+
+
+class InvalidInvite(ValueError):
+    """邀请码不存在，或者已经被别人用掉了。**这两者也不区分**：
+    区分了就等于提供了一个「这个码存在吗」的探测器。"""
 
 
 # **初始化的**锁，和数据无关。这段和 `memories.py` 里的是同一套，理由也一样：
@@ -150,12 +183,21 @@ _init_lock = threading.Lock()
 # --------------------------------------------------------------------------
 
 def _schema_ready(conn: sqlite3.Connection) -> bool:
-    return (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
-        ).fetchone()
-        is not None
-    )
+    """两张表都在才算就绪。
+
+    **加了新表就必须把它加进来**：`_bootstrap` 只在「不就绪」时才跑，
+    只判 `users` 的话，一个已有的老库永远进不了建表分支，新表建不出来
+    （然后每个请求都报 `no such table: invites`）。这和 `memories.py`
+    里「加了 `id` 列就要一起改初始化条件」是同一类坑。
+    """
+    names = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+            " AND name IN ('users', 'invites')"
+        )
+    }
+    return names == {"users", "invites"}
 
 
 def _bootstrap(conn: sqlite3.Connection) -> None:
@@ -313,17 +355,176 @@ def get_user(user_id: str) -> dict | None:
     return _row_to_user(row) if row else None
 
 
-def register(account: object, password: object) -> dict:
+def count_users() -> int:
+    with _db() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+
+def owner_id() -> str | None:
+    """最早注册的那个人，站点的「主人」。没有用户时返回 None。
+
+    **只有这个人能发邀请码。** 不这么做的话邀请制形同虚设：任何一个被邀请
+    进来的人都能再拉无限个进来。也不用另设管理员账号或环境变量——
+    「第一个注册的人」天然只有一个，不需要额外配置，也不会配错。
+    """
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM users ORDER BY created_at ASC, rowid ASC LIMIT 1"
+        ).fetchone()
+    return row["user_id"] if row else None
+
+
+# --------------------------------------------------------------------------
+# 对外接口：邀请码
+# --------------------------------------------------------------------------
+
+def _new_invite_code() -> str:
+    part = lambda: "".join(secrets.choice(INVITE_ALPHABET) for _ in range(INVITE_SEGMENT_LEN))
+    return "AW-" + "-".join(part() for _ in range(INVITE_SEGMENTS))
+
+
+def normalize_invite(code: object) -> str:
+    """统一成大写并去掉空白。用户可能粘贴成 `aw-abcd-efgh` 或带空格。"""
+    return "".join(str(code or "").split()).upper()
+
+
+def create_invite(created_by: str, note: object = None) -> dict:
+    """发一个新邀请码，返回 `{"code", "note", "created_at"}`。
+
+    **`code` 存明文**，这和密码（只存哈希）、令牌（只存摘要）的做法相反。
+    差别在用途：密码和令牌是「验证你知道某个秘密」，验证完就该忘掉原文；
+    邀请码是**要被转发出去的东西**——管理员需要回头查「我发出去哪几个、
+    哪个还没用」，存哈希就再也看不到了。而且它一次性、用完即废，
+    泄露窗口只到被用掉那一刻，风险比长期凭证小得多。
+
+    重码概率极低（8 位 × 31 字符），撞上了就重试几次——比直接报错友好。
+    """
+    cleaned_note = " ".join(str(note or "").split())[:80] or None
+    now = _stamp(_now())
+    for _ in range(8):
+        code = _new_invite_code()
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "INSERT INTO invites (code, note, created_by, created_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (code, cleaned_note, str(created_by), now),
+                )
+            return {"code": code, "note": cleaned_note, "created_at": now}
+        except sqlite3.IntegrityError:
+            continue  # 撞了已有的码，换一个
+    raise RuntimeError("生成邀请码连续撞码，这不该发生")
+
+
+def list_invites(created_by: str | None = None) -> list[dict]:
+    """已发出的邀请码，新的在前。给了 `created_by` 就只看这个人发的。"""
+    sql = (
+        "SELECT code, note, created_by, created_at, used_by, used_at"
+        " FROM invites"
+    )
+    params: tuple = ()
+    if created_by is not None:
+        sql += " WHERE created_by = ?"
+        params = (str(created_by),)
+    sql += " ORDER BY created_at DESC, rowid DESC"
+    with _db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "code": row["code"],
+            "note": row["note"],
+            "created_at": row["created_at"],
+            "used": row["used_by"] is not None,
+            "used_at": row["used_at"],
+        }
+        for row in rows
+    ]
+
+
+def delete_invite(code: str, created_by: str | None = None) -> bool:
+    """删掉一个邀请码。返回它此前是否存在（且是不是他发的）。
+
+    ## 删了就等于作废，不需要额外的「撤销」字段
+
+    `_consume_invite` 是 `UPDATE ... WHERE code = ?`，删掉行之后这条 UPDATE
+    的 `rowcount` 自然是 0，注册那边收到的就是 `InvalidInvite`。所以
+    「删除」和「撤销」在行为上是同一件事，区别只在于**还查不查得到历史**——
+    这里刻意选「查不到」：这张表的用途是「我发出去哪些码、还剩几个能用」，
+    不是审计日志，留一堆已作废的行只会让列表越来越长。
+
+    ## 已用掉的码也允许删，但调用方要提示清楚
+
+    已用的码删掉之后，**「这个账号是通过哪个码进来的」就再也查不到了**
+    ——`users` 表里没有这一列，`invites.used_by` 是唯一的线索。
+    这是个真实的损失，所以界面上删已用的码要单独给一句确认文案。
+    **但账号本身不受影响**：注册时 users 那行已经落库，邀请码只是当时的一道门。
+
+    ## 为什么按 `created_by` 过滤
+
+    只按 code 删的话，一个知道别人码的人（码本来就是要转发出去的）就能把
+    别人的记录删掉。加上 `created_by` 之后，「不是你的」和「不存在」走同一条
+    路径返回 False，外面照样报 404，不会变成「这个码是别人的」的探测器。
+    """
+    normalized = normalize_invite(code)
+    if not normalized:
+        return False
+    sql = "DELETE FROM invites WHERE code = ?"
+    params: tuple = (normalized,)
+    if created_by is not None:
+        sql += " AND created_by = ?"
+        params = (normalized, str(created_by))
+    with _db() as conn:
+        return conn.execute(sql, params).rowcount > 0
+
+
+def _consume_invite(conn: sqlite3.Connection, code: str, user_id: str, now: str) -> None:
+    """把码标记成「被这个人用掉了」。没抢到就抛 `InvalidInvite`。
+
+    **用一条 UPDATE 的 rowcount 判断，而不是「先查再用」**：先查再用中间有窗口，
+    两个并发注册会拿着同一个码双双通过。`WHERE used_by IS NULL` 让这条 UPDATE
+    自己变成「抢」，只有一个能抢到。
+
+    调用方必须已经在事务里：注册失败（账号重名）时这行要跟着回滚，
+    码才能退回可用状态。
+    """
+    claimed = conn.execute(
+        "UPDATE invites SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL",
+        (str(user_id), now, code),
+    ).rowcount
+    if not claimed:
+        raise InvalidInvite("邀请码不对，或者已经被用过了")
+
+
+def register(account: object, password: object, invite: object = None) -> dict:
     """注册，返回新用户（含 `user_id`）。账号重名抛 `AccountTaken`。
 
     **靠唯一约束判重，不靠「先查再插」**：先查再插中间有一个窗口，
     两个并发注册会同时通过检查。`INSERT` 撞约束才知道，是原子的。
+
+    ## 邀请码
+
+    **第一个用户不需要邀请码，之后都需要。** 这是「先有鸡还是先有蛋」的解法：
+    要求所有人持码注册的话，谁去发第一个码？要么预置一个环境变量，要么留一个
+    后门接口——两个都比「第一个进来的就是主人」更麻烦、更容易配错。
+
+    冷启动那一刻如果有人并发注册两次，理论上两个都能免码。这是**刻意的取舍**：
+    要堵住它得把整个站点的首次启动做成一个带锁的引导流程，而这一刻的真实场景
+    是「他一个人第一次点注册」。风险远小于复杂度。
     """
     cleaned = validate_account(account)
     secret = validate_password(password)
     user_id = new_user_id()
-    try:
-        with _db() as conn:
+    now = _stamp(_now())
+
+    with _db() as conn:
+        first_user = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+        if not first_user:
+            code = normalize_invite(invite)
+            if not code:
+                raise InviteRequired("这个站需要邀请码才能注册")
+            _consume_invite(conn, code, user_id, now)
+
+        try:
             conn.execute(
                 """
                 INSERT INTO users (user_id, account, account_key, password_hash, created_at)
@@ -334,12 +535,15 @@ def register(account: object, password: object) -> dict:
                     cleaned,
                     normalize_account(cleaned),
                     _hash_password(secret),
-                    _stamp(_now()),
+                    now,
                 ),
             )
-    except sqlite3.IntegrityError as exc:
-        raise AccountTaken("这个账号已经被注册了") from exc
-    return {"user_id": user_id, "account": cleaned, "created_at": _stamp(_now())}
+        except sqlite3.IntegrityError as exc:
+            # 注意：这行 raise 退出 `with` 会让整个事务回滚，
+            # 上面抢到的邀请码跟着退回可用——不然这次失败会白烧一个码。
+            raise AccountTaken("这个账号已经被注册了") from exc
+
+    return {"user_id": user_id, "account": cleaned, "created_at": now}
 
 
 def authenticate(account: object, password: object) -> dict:

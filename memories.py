@@ -47,6 +47,7 @@
 ```sql
 CREATE TABLE memories (
     user_id     TEXT NOT NULL,
+    id          TEXT NOT NULL,   -- 给界面用的稳定编号，和内容无关
     text        TEXT NOT NULL,
     fingerprint TEXT NOT NULL,   -- 归一化后的文本，去重的依据
     kind        TEXT NOT NULL,
@@ -64,6 +65,25 @@ CREATE TABLE memories (
 
 语义级的合并（「不吃香菜」和「受不了香菜」算不算一条）是以后上向量库时的事，
 现在**不要**假装做到了。
+
+## 为什么多出一个 `id` 列（踩过的坑）
+
+一开始为了省一列，直接把 `fingerprint` 当界面上那一行的编号用。看起来没问题：
+它能唯一定位一行，还是主键的一半。**但它是从原文算出来的**——
+用户点「改一下措辞」，原文变了，`fingerprint` 就跟着变，那一行在数据库里等于
+**换了个编号**。前端手里还攥着旧编号，接着点「删除」就删不到了：
+
+```text
+列表拿到 id=称呼我为涛哥
+用户改成「叫我涛哥」        → 内部变成 id=叫我涛哥
+前端还拿「称呼我为涛哥」删  → 404 这条记忆不存在   ← 就是这里
+```
+
+这类 bug 特别难看出来：改是成功的、列表刷新后也是对的，**只有「改完马上删」
+这一个动作序列会失败**。所以编号必须和内容解耦：`id` 是随机值，写入时生成，
+之后**再怎么改措辞都不变**（`update_text` 删旧插新时把旧 `id` 带过去）。
+
+老库（没有 `id` 列）在第一次连接时自动补，见 `_ensure_id_column`。
 """
 from __future__ import annotations
 
@@ -71,6 +91,7 @@ import json
 import os
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +118,7 @@ _STRIP_CHARS = set(" \t\r\n，。！？、；：,.!?;:\"'“”‘’（）()【
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     user_id     TEXT NOT NULL,
+    id          TEXT NOT NULL,
     text        TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
     kind        TEXT NOT NULL,
@@ -110,6 +132,9 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_order ON memories(user_id);
 -- 裁掉最旧的那些时要按 last_seen 找
 CREATE INDEX IF NOT EXISTS idx_memories_seen ON memories(user_id, last_seen);
+-- 注意：`id` 的唯一索引**不能**写在这里。老库的表已经存在，
+-- `CREATE TABLE IF NOT EXISTS` 不会给它加列，这条索引会直接报 no such column。
+-- 建到 `_ensure_id_column` 里，一定在 ALTER 之后。
 """
 
 # **初始化的**锁，和数据无关。
@@ -141,22 +166,68 @@ def _schema_ready(conn: sqlite3.Connection) -> bool:
 
 
 def _needs_init(conn: sqlite3.Connection) -> bool:
-    """要不要跑一次初始化：表不在，或者老 JSON 还没搬走。
+    """要不要跑一次初始化：表不在、缺 `id` 列、或者老 JSON 还没搬走。
 
     `_connect` 里是把这个条件**内联展开**写的（不再调用本函数），因为那里要判两次，
     展开后两处比较的是完全一样的表达式，改的时候记得一起改。留在这里是为了给探针
     一个「我问的和生产代码问的是同一件事」的入口。
+
+    表不在时 `_has_id_column` 也是 False，但两个条件是「或」的关系，
+    先短路到 `_schema_ready` 就够了，不用担心 PRAGMA 查空的表。
     """
-    return LEGACY_JSON_PATH.exists() or not _schema_ready(conn)
+    return (
+        LEGACY_JSON_PATH.exists()
+        or not _schema_ready(conn)
+        or not _has_id_column(conn)
+    )
+
+
+def _new_id() -> str:
+    """给一行生成稳定编号。和内容无关，所以改措辞不会换号。
+
+    12 位十六进制 = 48 bit。单用户上限 `MAX_PER_USER` 才 200 条，
+    按生日问题算碰撞概率约 200²/2^49 ≈ 4×10⁻¹²，可以不考虑。
+    真要撞了也只是那条记忆插不进去（`INSERT OR IGNORE`），不会串到别人身上
+    ——索引是 `(user_id, id)`，跨用户重号无所谓。
+    """
+    return uuid.uuid4().hex[:12]
+
+
+def _has_id_column(conn: sqlite3.Connection) -> bool:
+    return any(row[1] == "id" for row in conn.execute("PRAGMA table_info(memories)"))
+
+
+def _ensure_id_column(conn: sqlite3.Connection) -> None:
+    """老库补 `id` 列并回填。**调用方必须已经持有 `_init_lock`。**
+
+    幂等：列在就不再 ALTER，索引是 `IF NOT EXISTS`，回填只挑 id 为空的行。
+    """
+    if not _has_id_column(conn):
+        # 不能直接 `ADD COLUMN id TEXT NOT NULL`：SQLite 要求无默认值的 NOT NULL
+        # 列在已有数据的表上加不了。先加成可空列，回填完再靠代码保证——本层
+        # 每条 INSERT 都会带 id，所以留空只可能是这一次回填之前的旧行。
+        conn.execute("ALTER TABLE memories ADD COLUMN id TEXT")
+
+    stale = conn.execute(
+        "SELECT rowid FROM memories WHERE id IS NULL OR id = ''"
+    ).fetchall()
+    for row in stale:
+        conn.execute("UPDATE memories SET id = ? WHERE rowid = ?", (_new_id(), row[0]))
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_id ON memories(user_id, id)"
+    )
 
 
 def _bootstrap(conn: sqlite3.Connection) -> None:
-    """建表 + 把老 JSON 搬进来。**调用方必须已经持有 `_init_lock`。**
+    """建表 + 补列 + 把老 JSON 搬进来。**调用方必须已经持有 `_init_lock`。**
 
     幂等：`CREATE TABLE IF NOT EXISTS` 和 `INSERT OR IGNORE` 重复跑都没有副作用，
     所以「不小心多跑一次」只是白干，不会坏数据。
     """
     conn.executescript(_SCHEMA)
+    # 要排在导出老 JSON 之前：那个 INSERT 会写 id，列得先在。
+    _ensure_id_column(conn)
     migrated = _import_legacy_json(conn)
     conn.commit()
     if migrated:
@@ -206,12 +277,20 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     # 连到**已存在**的文件是并发安全的，所以这里可以放心在外面判。
-    # 要跑初始化只有两种可能：老 JSON 还没搬走，或表还没建。
-    if LEGACY_JSON_PATH.exists() or not _schema_ready(conn):
+    # 要跑初始化只有三种可能：老 JSON 还没搬走、表还没建、老表缺 `id` 列。
+    if (
+        LEGACY_JSON_PATH.exists()
+        or not _schema_ready(conn)
+        or not _has_id_column(conn)
+    ):
         # 里面的动作都要串行做，理由见 `_init_lock`。判两次是为了别让每次连接
         # 都去抢锁——只有第一次（或老文件还没搬走时）才进得来。
         with _init_lock:
-            if LEGACY_JSON_PATH.exists() or not _schema_ready(conn):
+            if (
+                LEGACY_JSON_PATH.exists()
+                or not _schema_ready(conn)
+                or not _has_id_column(conn)
+            ):
                 # **刻意不开 WAL**，用 SQLite 默认的回滚日志。这是个反直觉的决定，
                 # 但实测过：本环境下 WAL + 多连接并发写会有一半左右失败——
                 #
@@ -274,11 +353,18 @@ def _now() -> str:
 # --------------------------------------------------------------------------
 
 def memories_of(user_id: str) -> list[dict]:
-    """读某个用户已有的长期记忆，按写入先后排列。没有就返回空列表。"""
+    """读某个用户已有的长期记忆，按写入先后排列。没有就返回空列表。
+
+    `id` 是界面那一行的编号，**和内容无关**（理由见模块开头那个坑）。
+    用户点「删除」「改一下措辞」时传回来的就是它。
+
+    `fingerprint` 刻意**不对外**：它是去重用的内部字段，一旦暴露，调用方很容易
+    顺手拿它当编号——那就正好把踩过的坑重新挖一遍。
+    """
     with _db() as conn:
         rows = conn.execute(
             """
-            SELECT text, kind, source, created_at, last_seen, hits
+            SELECT id, text, kind, source, created_at, last_seen, hits
             FROM memories WHERE user_id = ? ORDER BY rowid
             """,
             (str(user_id),),
@@ -323,10 +409,20 @@ def remember(
             inserted = conn.execute(
                 """
                 INSERT OR IGNORE INTO memories
-                    (user_id, text, fingerprint, kind, source, created_at, last_seen, hits)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    (user_id, id, text, fingerprint, kind, source,
+                     created_at, last_seen, hits)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """,
-                (key, text, fingerprint, _clean_kind(kind), source_thread, now, now),
+                (
+                    key,
+                    _new_id(),
+                    text,
+                    fingerprint,
+                    _clean_kind(kind),
+                    source_thread,
+                    now,
+                    now,
+                ),
             ).rowcount
             if inserted:
                 added += 1
@@ -360,6 +456,93 @@ def forget(user_id: str, text: str) -> bool:
             (str(user_id), fingerprint),
         ).rowcount
     return bool(removed)
+
+
+def forget_by_id(user_id: str, memory_id: str) -> bool:
+    """按 `id` 删一条。界面上的「删除这条」走这里。删掉了返回 True。
+
+    和 `forget(text)` 的区别：那边拿一段**原文**再归一化去匹配，适合模型手里
+    只有原文的场景；这边直接命中稳定编号，**不做任何归一化**——`id` 是随机值，
+    归一化它只会把不同的两个编号弄成同一个。
+
+    名字从 `forget_by_key` 改过来，是因为对外只认 `id` 了（见模块开头的坑）。
+    """
+    key = str(memory_id).strip()
+    if not key:
+        return False
+    with _db() as conn:
+        removed = conn.execute(
+            "DELETE FROM memories WHERE user_id = ? AND id = ?",
+            (str(user_id), key),
+        ).rowcount
+    return bool(removed)
+
+
+def update_text(
+    user_id: str,
+    memory_id: str,
+    text: str,
+    kind: object = None,
+) -> str:
+    """改一条记忆的原文（`kind` 不给就沿用原来的）。按稳定编号 `id` 定位。
+
+    返回 `"ok"` / `"missing"`（没这条）/ `"clash"`（改完和已有条目重了）。
+    不用 bool：调用方要区分 404 和 409，混成一个 False 就分不出来了。
+
+    为什么要「读旧 → 删旧 → 插新」：`fingerprint` 是主键，原文一变它就跟着变，
+    原地 UPDATE 主键在 SQLite 里等于先删后插，不如写明白。`id`、`created_at`、
+    `hits` 都**保留原值**——这条记忆是那时候留下来的、被提过几次，改个措辞
+    不该让它变成一条新记忆。`id` 尤其不能换，换了前端手里那个编号就失效了。
+    """
+    key = str(memory_id).strip()
+    cleaned = _clean_text(text)
+    if not key or not cleaned:
+        return "missing"
+    new_fingerprint = _normalize(cleaned)
+    if not new_fingerprint:
+        return "missing"
+
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id, fingerprint, kind, source, created_at, last_seen, hits"
+            " FROM memories WHERE user_id = ? AND id = ?",
+            (str(user_id), key),
+        ).fetchone()
+        if row is None:
+            return "missing"
+        old_fingerprint = row["fingerprint"]
+
+        # 改出来的措辞可能和**另一条**已经重了（比如把「叫我涛哥」改成
+        # 「先给结论再展开」，而那条本来就有）。这时不能静默合并——用户以为
+        # 自己只是在改措辞，却把两条并成了一条，是不可逆的意外。
+        if new_fingerprint != old_fingerprint:
+            clash = conn.execute(
+                "SELECT 1 FROM memories WHERE user_id = ? AND fingerprint = ?",
+                (str(user_id), new_fingerprint),
+            ).fetchone()
+            if clash is not None:
+                return "clash"
+
+        conn.execute(
+            "DELETE FROM memories WHERE user_id = ? AND fingerprint = ?",
+            (str(user_id), old_fingerprint),
+        )
+        conn.execute(
+            "INSERT INTO memories (user_id, id, text, fingerprint, kind, source,"
+            " created_at, last_seen, hits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(user_id),
+                row["id"],  # 沿用旧编号：对外它必须是不变的
+                cleaned,
+                new_fingerprint,
+                _clean_kind(kind) if kind else row["kind"],
+                row["source"],
+                row["created_at"],
+                row["last_seen"],
+                row["hits"],
+            ),
+        )
+    return "ok"
 
 
 def clear(user_id: str) -> int:
@@ -453,11 +636,13 @@ def _insert_legacy_entries(
         conn.execute(
             """
             INSERT OR IGNORE INTO memories
-                (user_id, text, fingerprint, kind, source, created_at, last_seen, hits)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (user_id, id, text, fingerprint, kind, source,
+                 created_at, last_seen, hits)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
+                _new_id(),
                 text,
                 fingerprint,
                 _clean_kind(entry.get("kind")),

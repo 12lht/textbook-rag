@@ -1,0 +1,56 @@
+{
+  "pdf": "Hello-Agents.pdf",
+  "toc_copied": 18,
+  "slides": false,
+  "pages": "41-70",
+  "elapsed_s": 10.0,
+  "doc": {
+    "page_count": 30,
+    "chunks": 93,
+    "assets": 11,
+    "toc_entries": 18
+  },
+  "text_layer_ratio": 1.0,
+  "page_anchor_cover": 1.0,
+  "chunk_len": {
+    "p50": 442,
+    "p95": 671,
+    "min": 24,
+    "max": 676
+  },
+  "short_ratio": 0.067,
+  "long_ratio": 0.0,
+  "dirty_ratio": 0.0,
+  "kinds": {
+    "text": 60,
+    "figure": 11,
+    "table": 0
+  },
+  "dirty_examples": [],
+  "chapters": 10,
+  "chapter_list": [
+    "2.4.1 从符号到联结",
+    "2.4.2 基于强化学习的智能体",
+    "2.4.3 基于大规模数据的预训练",
+    "2.4.4 基于大语言模型的智能体",
+    "2.4.5 智能体发展关键节点概览",
+    "3.1.1 从 N-gram 到 RNN",
+    "3.1.2 Transformer 架构解析",
+    "3.1.3 Decoder-Only 架构",
+    "3.2.1 提示工程",
+    "3.2.2 文本分词"
+  ],
+  "toc_leaves": 18,
+  "figure_captions_in_pdf": 11,
+  "table_captions_in_pdf": 0,
+  "figures_in_markdown": 11,
+  "caption_recall": 1.0,
+  "table_caption_recall": null,
+  "missing_asset_files": [],
+  "table_pages_in_pdf": 0,
+  "tables_in_markdown": 0,
+  "code_fences": 44,
+  "missing_figures": [],
+  "markdown_sha": "a9b5f417264069b8",
+  "chunk_sha": "a4c6f2220c24a175"
+}

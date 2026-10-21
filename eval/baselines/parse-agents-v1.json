@@ -1,0 +1,74 @@
+{
+  "pdf": "Hello-Agents.pdf",
+  "toc_copied": 18,
+  "pages": "41-70",
+  "elapsed_s": 7.3,
+  "doc": {
+    "page_count": 30,
+    "chunks": 51,
+    "assets": 0,
+    "toc_entries": 18
+  },
+  "text_layer_ratio": 1.0,
+  "page_anchor_cover": 1.0,
+  "chunk_len": {
+    "p50": 592,
+    "p95": 977,
+    "min": 325,
+    "max": 1018
+  },
+  "short_ratio": 0.0,
+  "long_ratio": 0.137,
+  "dirty_ratio": 0.02,
+  "kinds": {
+    "text": 51,
+    "figure": 0,
+    "table": 0
+  },
+  "dirty_examples": [
+    {
+      "chunk_id": "f108d239-0020",
+      "reasons": [
+        "punct_start"
+      ],
+      "head": "：表示单个词在语料库中出现的总次数。\n\nCount(w\n\n​, w\n\n​) Count(w i−1 i\n\n​) i−1 "
+    }
+  ],
+  "chapters": 10,
+  "chapter_list": [
+    "2.4.1 从符号到联结",
+    "2.4.2 基于强化学习的智能体",
+    "2.4.3 基于大规模数据的预训练",
+    "2.4.4 基于大语言模型的智能体",
+    "2.4.5 智能体发展关键节点概览",
+    "3.1.1 从 N-gram 到 RNN",
+    "3.1.2 Transformer 架构解析",
+    "3.1.3 Decoder-Only 架构",
+    "3.2.1 提示工程",
+    "3.2.2 文本分词"
+  ],
+  "toc_leaves": 18,
+  "figure_captions_in_pdf": 12,
+  "table_captions_in_pdf": 0,
+  "figures_in_markdown": 0,
+  "caption_recall": 0.0,
+  "table_caption_recall": null,
+  "missing_asset_files": [],
+  "table_pages_in_pdf": 0,
+  "tables_in_markdown": 0,
+  "code_fences": 0,
+  "missing_figures": [
+    "图2.10LLM驱动的智能体核心组件架构",
+    "图2.10）？",
+    "图2.11智能体发展演进时间线（未完全版）",
+    "图2.12AIAgent技术栈概览",
+    "图2.7符号主义与联结主义范式对比",
+    "图2.8强化学习的核心交互循环",
+    "图2.9“预训练-微调”范式示意图",
+    "图3.1马尔可夫假设示意图",
+    "图3.2神经网络语言模型架构示意图",
+    "图3.3RNN结构示意图"
+  ],
+  "markdown_sha": "fb7bc6f19ea68d37",
+  "chunk_sha": "7982c57a8037dbe1"
+}

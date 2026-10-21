@@ -1,0 +1,82 @@
+{
+  "pdf": "第1章 移动通信概述202603101500.pdf",
+  "toc_copied": 32,
+  "slides": true,
+  "pages": "1-32",
+  "elapsed_s": 4.0,
+  "doc": {
+    "page_count": 32,
+    "chunks": 39,
+    "assets": 4,
+    "toc_entries": 32
+  },
+  "text_layer_ratio": 1.0,
+  "page_anchor_cover": 1.0,
+  "chunk_len": {
+    "p50": 206,
+    "p95": 415,
+    "min": 15,
+    "max": 492
+  },
+  "short_ratio": 0.314,
+  "long_ratio": 0.0,
+  "dirty_ratio": 0.086,
+  "kinds": {
+    "text": 35,
+    "figure": 4,
+    "table": 0
+  },
+  "dirty_examples": [
+    {
+      "chunk_id": "bd30a917-0013",
+      "reasons": [
+        "stub"
+      ],
+      "head": "1 移动通信发展简述\n\n❖系统"
+    },
+    {
+      "chunk_id": "bd30a917-0019",
+      "reasons": [
+        "stub"
+      ],
+      "head": "3 移动通信频段\n\n移动通信工作频段"
+    },
+    {
+      "chunk_id": "bd30a917-0033",
+      "reasons": [
+        "stub"
+      ],
+      "head": "R\n\nR\n\nR\n\nR\n\n双工中继"
+    }
+  ],
+  "chapters": 32,
+  "chapter_list": [
+    "幻灯片 1: 移动通信",
+    "幻灯片 2: 课程内容",
+    "幻灯片 3: 教学目标与支撑毕业的指标点",
+    "幻灯片 4: 成绩构成与教材",
+    "幻灯片 5: 第一章 移动通信概述",
+    "幻灯片 6: 社会对通信的需求",
+    "幻灯片 7: 1 移动通信发展简述",
+    "幻灯片 8: 1 移动通信发展简述",
+    "幻灯片 9: 1 移动通信发展简述",
+    "幻灯片 10: 1 移动通信发展简述",
+    "幻灯片 11: 1 移动通信发展简述",
+    "幻灯片 12: 通信技术高速发展及其代价"
+  ],
+  "toc_leaves": 32,
+  "figure_captions_in_pdf": 5,
+  "table_captions_in_pdf": 0,
+  "figures_in_markdown": 4,
+  "caption_recall": 0.8,
+  "table_caption_recall": null,
+  "missing_asset_files": [],
+  "table_pages_in_pdf": 0,
+  "tables_in_markdown": 0,
+  "code_fences": 0,
+  "missing_figures": [
+    "图1-5半双工方式"
+  ],
+  "markdown_sha": "6717c0f911ef290b",
+  "chunk_sha": "5642fd113936178f"
+}

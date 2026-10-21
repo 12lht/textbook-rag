@@ -1,5 +1,9 @@
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
+# `UploadFile`（教材上传）靠它解析 multipart。**必须显式声明**：
+# 目前它是被 `mcp` 间接带上来的，版本不受我们控制——换一天 mcp 改了依赖，
+# 上传会在运行时才报 "Form data requires python-multipart"。
+python-multipart==0.0.32
 python-dotenv==1.2.3
 langchain==1.4.2
 langchain-openai==1.6.6
@@ -18,3 +22,15 @@ mcp==1.30.0
 # 这是个隐性依赖：不加进清单的话，换台机器 pip install -r 之后会在
 # 「第一个请求」时才炸出 ModuleNotFoundError。
 aiosqlite==0.22.1
+
+# 教材解析（documents.py）。三个都是**可选依赖**：没装时 documents.py 仍能 import，
+# 只是上传对应格式会返回「缺少解析依赖 xxx，请先安装」。
+# 这样纯聊天部署不必为教材功能付出 30MB 的依赖体积。
+pymupdf==2.0.0
+python-pptx==1.0.2
+python-docx==1.2.0
+
+# 教材检索的向量打分（retrieval.py）。只用来算「一条查询 × 几千条向量」的点积：
+# 纯 Python 循环要几秒，numpy 十几毫秒。**也是可选依赖**——没装就退回纯 BM25，
+# 检索本身仍然可用，只是「换个说法搜不到」这个洞补不上。
+numpy==2.4.6

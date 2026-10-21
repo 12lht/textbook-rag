@@ -13,7 +13,13 @@ Agent 编排（LangGraph 图、工具、模型、消息状态）都在 `agent_co
 conversation_summaries.json  {thread_id: 标题}
 conversation_renames.json    {thread_id: true}
 conversation_owners.json     {thread_id: user_id}
+conversation_touched.json    {thread_id: ISO 时间}
 ```
+
+第四个（`conversation_touched`）是 2026-10-22 加的，给**访客会话清理**用：
+访客的会话不归任何人管，不清就会一直堆在 checkpoint 里。为什么不塞进
+`summaries`：那个文件是 `thread_id -> 标题` 的扁平结构，前端直接消费，
+加字段要动所有读它的地方。
 
 ## 归属为什么要有兜底
 
@@ -29,6 +35,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from users import GUEST_USER_ID
@@ -38,6 +45,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 SUMMARY_PATH = DATA_DIR / "conversation_summaries.json"
 RENAME_PATH = DATA_DIR / "conversation_renames.json"
 OWNER_PATH = DATA_DIR / "conversation_owners.json"
+TOUCH_PATH = DATA_DIR / "conversation_touched.json"
 
 MAX_TITLE_LENGTH = 30
 DEFAULT_SUMMARY = "新会话（暂无消息）"
@@ -79,6 +87,52 @@ def load_conversation_owners() -> dict[str, str]:
 
 def save_conversation_owners(owners: dict[str, str]) -> None:
     _save(OWNER_PATH, owners)
+
+
+def load_touched() -> dict[str, str]:
+    return _load(TOUCH_PATH)
+
+
+def save_touched(touched: dict[str, str]) -> None:
+    _save(TOUCH_PATH, touched)
+
+
+def _now_stamp() -> str:
+    """UTC ISO 时间戳，秒级。统一用 UTC，和 `users._stamp` 的习惯一致。
+
+    只用来比「多久没动静」，不带时区对人类阅读的困扰不影响判断。
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def touch_conversation(thread_id: str) -> None:
+    """记下这个会话最后一次有动静的时刻。
+
+    **清理只靠这个时间戳**：checkpoint 库里没有可靠的时间列（LangGraph 的
+    `checkpoints` 表只有 `thread_id` / `checkpoint_id`），拿不到「上次聊天是什么时候」。
+    每次发消息顺手写一次，清理时才有判据。
+    """
+    touched = load_touched()
+    touched[str(thread_id)] = _now_stamp()
+    save_touched(touched)
+
+
+def age_days(thread_id: str, touched: dict[str, str] | None = None) -> float | None:
+    """这个会话最后一次有动静是几天前。没有记录返回 None（调用方自己决定怎么办）。
+
+    解析失败也返回 None：时间戳是辅助信息，不该因为它格式坏了就把清理流程
+    带崩——那属于「清理代码自己制造故障」。
+    """
+    stamp = (touched if touched is not None else load_touched()).get(str(thread_id))
+    if not stamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - moment).total_seconds() / 86400
 
 
 def is_renamed(thread_id: str) -> bool:
@@ -148,6 +202,7 @@ def create_conversation(user_id: str) -> str:
     owners = load_conversation_owners()
     owners[thread_id] = str(user_id)
     save_conversation_owners(owners)
+    touch_conversation(thread_id)
     return thread_id
 
 
@@ -193,19 +248,53 @@ def reset_summary(thread_id: str) -> None:
 
 
 def drop_conversation(thread_id: str) -> bool:
-    """删掉会话的元数据（标题 + 重命名标记 + 归属）。返回它此前是否存在。
+    """删掉一个会话的四份元数据，返回它此前是否存在。等价于 `drop_conversations([id])`。
 
-    三份都要删：留着归属记录不会让会话「复活」（`ids_of_user` 以会话表为准），
-    但会一直堆在文件里，而且万一 thread_id 被复用就会串号。
+    四份都要删：留着归属记录不会让会话「复活」（`ids_of_user` 以会话表为准），
+    但会一直堆在文件里，而且万一 thread_id 被复用就会串号。时间戳同理——
+    留着它的唯一后果是清理时多一次无用的 IO。
     """
-    summaries = load_conversation_summaries()
-    if thread_id not in summaries:
-        return False
-    del summaries[thread_id]
-    save_conversation_summaries(summaries)
-    clear_renamed_flag(thread_id)
+    return drop_conversations([thread_id]) > 0
 
+
+def drop_conversations(thread_ids: list[str]) -> int:
+    """批量删元数据，**只重写一次文件**。返回实际删掉几个。
+
+    和 `drop_conversation` 的关系：单个删除复用这里（传一个元素的列表）。
+    需要批量版本的唯一原因是清理：访客会话一次可能清掉几十上百个，
+    逐个调 `drop_conversation` 会把四个 JSON 文件各重写上百遍（O(n²) IO）。
+
+    *不* 检查会话是否属于谁——归属判断在 `service`，这一层只负责「删」。
+    调用方必须是已经判定过可以删的（见 `service.purge_stale_guests`）。
+    """
+    wanted = {str(thread_id) for thread_id in thread_ids}
+    if not wanted:
+        return 0
+
+    summaries = load_conversation_summaries()
+    removed = [thread_id for thread_id in wanted if thread_id in summaries]
+    if not removed:
+        return 0
+    for thread_id in removed:
+        del summaries[thread_id]
+    save_conversation_summaries(summaries)
+
+    flags = load_renamed_flags()
     owners = load_conversation_owners()
-    if owners.pop(thread_id, None) is not None:
+    touched = load_touched()
+    changed_flags = changed_owners = changed_touched = False
+    for thread_id in removed:
+        if flags.pop(thread_id, None) is not None:
+            changed_flags = True
+        if owners.pop(thread_id, None) is not None:
+            changed_owners = True
+        if touched.pop(thread_id, None) is not None:
+            changed_touched = True
+
+    if changed_flags:
+        save_renamed_flags(flags)
+    if changed_owners:
         save_conversation_owners(owners)
-    return True
+    if changed_touched:
+        save_touched(touched)
+    return len(removed)

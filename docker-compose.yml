@@ -1,0 +1,55 @@
+# 教材助教的运行编排。
+#
+# 只做两件事：起一个应用容器、把状态目录挂进来。
+# 反向代理（TLS）刻意不放在这里——它取决于你用什么（Nginx / Caddy / 云厂商 LB），
+# 配置片段见 docs/DEPLOY.md 第 3 节。
+#
+# 用法：
+#   mkdir -p data out backups && sudo chown -R 10001:10001 data out
+#   docker compose up -d --build
+services:
+  app:
+    build: .
+    image: agent-workspace:latest
+    container_name: agent-workspace
+    restart: unless-stopped
+
+    # 只绑本机回环：公网流量必须经过反向代理（HTTPS 在上面终结）。
+    # 直接写 "8000:8000" 等于把明文 HTTP 接口暴露出去，令牌会裸奔。
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    env_file:
+      - .env
+
+    volumes:
+      # 状态、解析产物、备份都要落在宿主上：容器是可替换的，这些不是。
+      - ./data:/app/data
+      - ./out:/app/out
+      - ./backups:/app/backups
+      # 教材原件。只读挂载——应用只读它，写坏了就是丢原始数据。
+      - ./textbook:/app/textbook:ro
+
+    # 单本 250MB 的 PDF 解析（pymupdf 渲染插图）是内存大头，
+    # 峰值大约「文件大小 + 200MB」。低于 1G 容易被 OOM killer 挑中。
+    mem_limit: 2g
+
+    logging:
+      # 不限制的话，跑几周日志能把宿主磁盘写满。
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import urllib.request, sys
+          sys.exit(0 if urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=3).status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

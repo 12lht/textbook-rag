@@ -42,6 +42,58 @@
     .new-chat:hover { background: var(--accent-dark); }
     .section-label { flex: none; margin: 28px 10px 10px; color: var(--muted); font: 500 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
     .conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 5px; align-content: start; }
+    /* 知识库入口。原来这里是「教材库」标题 + 上传按钮 + 文档列表（最多 32vh），
+       现在文档管理有了独立页面，侧栏只留这一行，把高度还给会话列表。
+       样式跟着 .memory-open 走（虚线框、次要色），一眼能看出它是个跳转入口。 */
+    .library-entry {
+      flex: none; display: block; margin: 18px 10px 4px; padding: 10px 12px;
+      border: 1px dashed var(--line); border-radius: 10px;
+      color: var(--muted); background: transparent; font-size: 12px; text-decoration: none;
+    }
+    .library-entry:hover { border-color: var(--accent); color: var(--accent-dark); }
+    /* --- 记忆面板 ---
+       「AI 记住了什么」是低频但必须能查的东西：用户偶尔要核对有没有记错。
+       所以侧栏只放一个入口，内容放进弹窗——条目可能有几十条，摆在侧栏
+       会把会话列表挤没。 */
+    .memory-entry { flex: none; display: grid; gap: 6px; margin-bottom: 14px; }
+    .memory-open { width: 100%; padding: 10px 12px; text-align: left; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); background: transparent; font-size: 12px; }
+    .memory-open:hover { border-color: var(--accent); color: var(--accent-dark); }
+    /* 游客没有记忆，入口整个不显示——留个点了会说「先登录」的按钮是噪音。 */
+    .memory-entry[hidden] { display: none; }
+    .modal-card.wide { width: min(560px, 100%); }
+    .modal-title { margin: 0 0 6px; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+    .modal-sub { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+    .memory-list { display: grid; gap: 8px; max-height: 56vh; overflow-y: auto; overscroll-behavior: contain; }
+    .memory-row { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .memory-head { display: flex; gap: 8px; align-items: center; margin-bottom: 7px; }
+    .memory-kind { padding: 2px 7px; border-radius: 6px; color: #3d5b48; background: var(--mint); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+    /* 「其他」是模型给了不认识的 kind 时的兜底，不该和正常分类一样显眼 */
+    .memory-kind.other { color: var(--muted); background: #f2efe8; }
+    .memory-hits { margin-left: auto; color: var(--muted); font: 10.5px "DM Mono", monospace; }
+    .memory-text { font-size: 13px; line-height: 1.65; word-break: break-word; }
+    .memory-ops { display: flex; gap: 6px; margin-top: 9px; }
+    .memory-op { padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: #fff; font-size: 11.5px; }
+    .memory-op:hover { border-color: var(--ink); color: var(--ink); }
+    .memory-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .memory-op:disabled { opacity: .55; cursor: wait; }
+    .memory-edit { display: grid; gap: 8px; }
+    .memory-edit input { width: 100%; padding: 9px 10px; border: 1px solid var(--accent); border-radius: 9px; color: var(--ink); background: #fff; font-size: 13px; outline: none; }
+    .memory-empty { padding: 22px 6px; color: var(--muted); font-size: 12.5px; line-height: 1.75; text-align: center; }
+    /* 弹窗底部的错误行：改重了（409）、条目不见了（404）都写在这里，
+       不跳 alert——那样会把刚编辑的输入框一起掀掉。 */
+    .memory-err { min-height: 16px; margin-top: 10px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+    /* --- 邀请码面板 ---
+       和记忆面板共用 .memory-row / .memory-list 那套卡片样式，
+       只有顶部「生成」那一行是新的。 */
+    .invite-new { display: flex; gap: 8px; margin-bottom: 14px; }
+    .invite-new input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid #cfdacf; border-radius: 9px; color: var(--ink); background: #fff; font-size: 12.5px; outline: none; }
+    .invite-new input:focus { border-color: var(--accent); }
+    .invite-make { flex: none; padding: 9px 14px; border: 0; border-radius: 9px; color: #fff; background: var(--accent); font-size: 12.5px; font-weight: 600; }
+    .invite-make:hover { background: var(--accent-dark); }
+    .invite-make:disabled { opacity: .6; cursor: wait; }
+    /* 邀请码本身用等宽字体 + 字距，抄写和核对都方便 */
+    .invite-code { font: 600 15px "DM Mono", monospace; letter-spacing: .12em; word-break: break-all; }
+    .invite-row.used .invite-code { color: var(--muted); text-decoration: line-through; }
     .conversation-item { display: flex; gap: 4px; align-items: stretch; }
     .conversation { flex: 1; min-width: 0; padding: 11px 12px; text-align: left; border: 1px solid transparent; border-radius: 10px; color: var(--ink); background: transparent; }
     .conversation:hover, .conversation.active { border-color: var(--line); background: var(--panel); box-shadow: 0 5px 18px rgba(45, 69, 51, .05); }
@@ -80,11 +132,24 @@
     .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--mint); background: #f7faf5; }
     .trace-event { line-height: 1.5; }
     .trace-event.trace-failed { color: var(--danger); font-weight: 500; }
+    /* 工具返回原文：可折叠，默认收起。内容用等宽小字号 + 限高滚动，
+       展开也不至于把页面拉长一屏。 */
+    .trace-tool-result summary { cursor: pointer; color: var(--accent-dark); font: 11px "DM Mono", monospace; }
+    .trace-tool-result summary:hover { color: var(--ink); }
+    .trace-tool-result.trace-failed summary { color: var(--danger); }
+    .trace-tool-result-body { margin-top: 6px; padding: 8px 10px; max-height: 240px; overflow-y: auto; border-left: 2px solid var(--line); color: var(--muted); font: 12px/1.5 "DM Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     /* 思维链单独一块，比工具调用那几行更暗、更窄，视觉上退到后面去。
        summary 直接沿用上面 `.trace summary` 的样式，不重复写一套。 */
     .trace-reasoning { color: var(--muted); }
     .trace-reasoning-body { margin-top: 6px; padding: 8px 10px; border-left: 2px dashed var(--line); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
     .message-content { line-height: 1.75; font-size: 15px; overflow-wrap: anywhere; }
+    /* 回答里的 markdown 标题（## 等）默认字号太大（h2 = 24px 加粗），压到和
+       正文一个量级，只留粗细和上下边距差异。 */
+    .message-content h1, .message-content h2, .message-content h3,
+    .message-content h4, .message-content h5, .message-content h6 {
+      margin: 14px 0 6px; font-size: 15px; font-weight: 700; line-height: 1.5;
+    }
+    .message-content h1 { font-size: 16px; }
     .message-content p { margin: 0 0 12px; }
     .message-content p:last-child { margin-bottom: 0; }
     .message-content strong { font-weight: 700; }
@@ -102,11 +167,45 @@
     .rewind { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 11px; line-height: 1.7; }
     .rewind:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
     .rewind:disabled { opacity: .4; cursor: not-allowed; }
+    /* ---------- 引用溯源（C 域） ---------- */
+    /* 正文里的 [c1] 角标。可点：弹出引用小窗。 */
+    .message-content img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); margin: 4px 0; }
+    sup.cite { cursor: pointer; margin: 0 1px; padding: 0 5px; border-radius: 5px; color: var(--accent-dark); background: #fff0eb; font: 11px "DM Mono", monospace; }
+    sup.cite:hover, sup.cite.active { color: white; background: var(--accent); }
+    /* 引用小窗：点角标弹出，显示出处和原文。position: fixed（视口坐标定位，
+       不随聊天区滚动走；聊天区一滚动就把它关掉，避免悬空错位）。 */
+    .cite-popover { position: fixed; z-index: 70; width: min(430px, calc(100vw - 16px)); max-height: min(360px, 60vh); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(45, 69, 51, .18); overflow: hidden; }
+    .cite-popover .head { display: flex; gap: 8px; align-items: baseline; padding: 9px 12px; border-bottom: 1px dashed var(--line); background: #fbfcf8; }
+    .cite-popover .head .cite-code { flex: none; }
+    .cite-popover .head .source-meta { min-width: 0; font-size: 12.5px; }
+    .cite-popover .body { max-height: min(300px, 50vh); overflow-y: auto; padding: 8px 12px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* 原文是整书 markdown 的切片，常带 # 标题和空行：marked 渲染后 <p>/<h*> 默认
+       外边距会把行距撑得非常大（用户实测「间距太大、有的字过大过粗」）——
+       这里统一压平：标题只保留粗细差异，段落间距收到 3px。 */
+    .cite-popover .body p { margin: 0 0 3px; }
+    .cite-popover .body h1, .cite-popover .body h2, .cite-popover .body h3,
+    .cite-popover .body h4, .cite-popover .body h5, .cite-popover .body h6 {
+      margin: 4px 0 2px; font-size: 13px; font-weight: 600; line-height: 1.4;
+    }
+    .cite-popover .body ul, .cite-popover .body ol { margin: 2px 0; padding-left: 18px; }
+    .cite-popover .body li { margin: 0 0 2px; }
+    .cite-popover .body img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); margin: 6px 0; }
+    .cite-code { flex: none; padding: 1px 6px; border-radius: 5px; color: var(--accent-dark); background: #fff0eb; font: 11px "DM Mono", monospace; }
     .composer-wrap { position: relative; flex: none; width: min(900px, 100%); margin: 0 auto; padding: 0 34px 30px; }
     .scroll-bottom { position: absolute; right: 34px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(255,255,255,.95); box-shadow: 0 6px 18px rgba(45,69,51,.16); font-size: 16px; line-height: 1; }
     .scroll-bottom.visible { display: grid; }
     .scroll-bottom:hover { border-color: var(--accent); color: var(--accent-dark); }
-    .composer { display: flex; align-items: flex-end; gap: 10px; padding: 10px; border: 1px solid #cfdacf; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
+    .composer { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #cfdacf; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
+    .composer-main { display: flex; align-items: flex-end; gap: 10px; }
+    /* 两个开关。实心点 = 开，空心点 = 关：光靠底色区分在浅色主题上不够明显，
+       而且色弱用户看不出来，所以状态同时用形状和颜色两重编码。 */
+    .composer-toggles { display: flex; flex-wrap: wrap; gap: 8px; padding-left: 2px; }
+    .toggle { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; line-height: 1.6; }
+    .toggle .dot { flex: none; width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
+    .toggle.active .dot { background: currentColor; }
+    .toggle:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
+    .toggle.active { border-color: transparent; color: #fff; background: var(--ink); font-weight: 600; }
+    .toggle:disabled { opacity: .45; cursor: not-allowed; }
     textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.5; }
     textarea::placeholder { color: #9aa79f; }
     .locate { flex: none; align-self: flex-end; max-width: 116px; height: 42px; padding: 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -181,6 +280,20 @@
       <button class="new-chat" id="newChat">＋ 新建会话</button>
       <div class="section-label">Conversations · 右键管理</div>
       <div class="conversation-list" id="conversationList"></div>
+      <!-- 教材的增删改查搬到独立页面（/library）了，这里只留一个入口。
+           原因：分类、上传、入库、删除都要横向空间，塞进 292px 的侧栏时
+           每行只够放书名，状态和分类全靠悬浮提示，上传一本书要来回开关几次。
+           这一行占的高度和原来「教材库」那段标题一样，所以左下角回到
+           加这个功能之前的紧凑样子。 -->
+      <a class="library-entry" id="libraryEntry" href="/library">知识库 · 教材与分类 →</a>
+      <!-- 游客藏起来（无记忆可看），登录后才出现。见 syncMemoryEntry。 -->
+      <div class="memory-entry" id="memoryEntry" hidden>
+        <button class="memory-open" id="memoryOpen" type="button">查看 AI 记住了什么</button>
+      </div>
+      <!-- 只有站点主人（最早注册的账号）看得到。见 syncInviteEntry。 -->
+      <div class="memory-entry" id="inviteEntry" hidden>
+        <button class="memory-open" id="inviteOpen" type="button">邀请同学加入</button>
+      </div>
     </aside>
     <main class="main">
       <header class="topbar">
@@ -202,9 +315,17 @@
       <div class="composer-wrap">
         <button class="scroll-bottom" id="scrollBottom" type="button" title="回到底部" aria-label="回到底部">↓</button>
         <form class="composer" id="composer">
-          <button class="locate" id="locate" type="button" title="设置位置">定位</button>
-          <textarea id="input" rows="1" placeholder=""></textarea>
-          <button class="send" id="send" title="发送" aria-label="发送">↑</button>
+          <div class="composer-main">
+            <button class="locate" id="locate" type="button" title="设置位置">定位</button>
+            <textarea id="input" rows="1" placeholder=""></textarea>
+            <button class="send" id="send" title="发送" aria-label="发送">↑</button>
+          </div>
+          <!-- 两个开关。默认都是开的，和没这两个按钮时的行为一致。
+               服务端说某项不可用时会置灰，见 loadCapabilities。 -->
+          <div class="composer-toggles">
+            <button class="toggle" id="toggleReasoning" type="button" aria-pressed="true"><span class="dot"></span>深度思考</button>
+            <button class="toggle" id="toggleWeb" type="button" aria-pressed="true"><span class="dot"></span>联网搜索</button>
+          </div>
         </form>
         <div class="hint">Enter 发送 · Shift + Enter 换行</div>
       </div>
@@ -220,6 +341,13 @@
       <form id="authForm">
         <label class="field"><span>账号</span><input id="authAccount" type="text" autocomplete="username" placeholder="用户名 / 手机号 / 邮箱" /></label>
         <label class="field"><span>密码</span><input id="authPassword" type="password" autocomplete="current-password" placeholder="你的密码" /></label>
+        <!-- 邀请码只在「站里已经有人」且正在注册时出现。
+             显不显示由服务端说了算（/api/auth/registration-policy），
+             前端不能自己猜库里几个人。 -->
+        <label class="field" id="authInviteField" hidden>
+          <span>邀请码</span>
+          <input id="authInvite" type="text" autocomplete="off" placeholder="AW-XXXX-XXXX" />
+        </label>
         <div class="modal-error" id="authError" role="alert"></div>
         <button class="modal-submit" id="authSubmit" type="submit">登录</button>
       </form>
@@ -229,8 +357,33 @@
     <button type="button" class="context-menu-item" role="menuitem" data-action="rename">重命名</button>
     <button type="button" class="context-menu-item danger" role="menuitem" data-action="delete">删除会话</button>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <!-- 记忆面板。列表由 loadMemories 每次打开时重新拉——
+       开着的时候用户也可能在另一个标签页改过，缓存会骗人。 -->
+  <div class="modal" id="memoryModal" hidden>
+    <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="memoryTitle">
+      <button class="modal-close" id="memoryClose" type="button" aria-label="关闭">×</button>
+      <h2 class="modal-title" id="memoryTitle">AI 记住了什么</h2>
+      <p class="modal-sub">这些内容会跨会话保留。改掉或者删掉，之后就不会再拿来用了。</p>
+      <div class="memory-list" id="memoryList"></div>
+      <div class="memory-err" id="memoryError" role="alert"></div>
+    </div>
+  </div>
+  <!-- 邀请码面板：只有主人能开。一个码只能注册一个人，用过就作废。 -->
+  <div class="modal" id="inviteModal" hidden>
+    <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
+      <button class="modal-close" id="inviteClose" type="button" aria-label="关闭">×</button>
+      <h2 class="modal-title" id="inviteTitle">邀请同学加入</h2>
+      <p class="modal-sub">一个邀请码只能注册一个账号，用过就作废。把码发给同学，他在注册时填进去就行。<br>发错了或者不想给了，点那一行的「删除」——没被用过的码会立刻失效。</p>
+      <div class="invite-new">
+        <input id="inviteNote" type="text" maxlength="40" placeholder="备注（比如：给室友小李）" />
+        <button class="invite-make" id="inviteMake" type="button">生成邀请码</button>
+      </div>
+      <div class="memory-list" id="inviteList"></div>
+      <div class="memory-err" id="inviteError" role="alert"></div>
+    </div>
+  </div>
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
   <script>
     const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '' };
     const $ = (selector) => document.querySelector(selector);
@@ -252,11 +405,18 @@
     const authForm = $('#authForm');
     const authAccount = $('#authAccount');
     const authPassword = $('#authPassword');
+    const authInviteField = $('#authInviteField');
+    const authInvite = $('#authInvite');
     const authError = $('#authError');
     const authSubmit = $('#authSubmit');
     const HINT_IDLE = 'Enter 发送 · Shift + Enter 换行';
     const LOCATION_KEY = 'agent.location';
     const TOKEN_KEY = 'agent.token';
+    // 两个开关的选择**记在浏览器里**，不发到服务端也不写进会话。
+    // 理由：这是「我这次想怎么用」的偏好，不是对话内容；写进会话的话
+    // 回退到某一轮时会把开关一起回退，用户会以为自己没改过。
+    const TOGGLE_KEY = 'agent.toggles';
+    const toggles = { reasoning: true, web_search: true };
 
     // ---------- 身份 ----------
     //
@@ -269,6 +429,12 @@
     let token = readToken();
     let identity = null;
     let authMode = 'login';
+    // 注册要不要邀请码。`null` = 还没问过服务端。
+    //
+    // **不能让前端自己猜**：猜「第一个用户不用填」就得先知道库里有几个人，
+    // 那是服务端的事实，猜错了要么让第一个用户去填一个不存在的码，
+    // 要么该拦的时候没拦。
+    let needsInvite = null;
     // 401 只处理一次：一次页面操作可能并发打好几个请求，全都 401 的话
     // 会重复清状态、重复弹提示。处理期间把它挡住。
     let handlingUnauthorized = false;
@@ -290,17 +456,33 @@
 
     function applyIdentity(me) {
       identity = me && !me.guest
-        ? { account: me.account, guest: false, memory_enabled: Boolean(me.memory_enabled) }
-        : { account: null, guest: true, memory_enabled: false };
+        ? {
+            account: me.account,
+            guest: false,
+            memory_enabled: Boolean(me.memory_enabled),
+            // 老服务端不返回这个字段时按「不是主人」处理：宁可少显示一个入口，
+            // 也不要让每个人看到一个点进去挨 403 的按钮。
+            is_owner: Boolean(me.is_owner),
+          }
+        : { account: null, guest: true, memory_enabled: false, is_owner: false };
       accountName.textContent = identity.guest ? '未登录' : identity.account;
+      // 访客的身份是按浏览器发的（签名 cookie），所以会话只在这里可见；
+      // 数据还有 7 天过期。这两句话是「为什么别人看不到我的会话」的答案，
+      // 不写清楚会被当成 bug 问。
       accountNote.textContent = identity.guest
-        ? '游客模式 · 不记录长期记忆'
+        ? '游客模式 · 仅本浏览器可见，7 天后自动清理'
         : '已登录 · 长期记忆已开启';
       accountAction.textContent = identity.guest ? '登录 / 注册' : '退出';
       accountAction.classList.toggle('danger', !identity.guest);
       input.placeholder = identity.guest
-        ? '以游客身份提问（这次对话不会被记住）'
+        ? '以游客身份提问（会话仅本浏览器可见）'
         : '问点什么…';
+      // 两个侧栏入口都跟着身份走。弹窗要是还开着，里面装的是上一个身份的东西，
+      // 必须一起关掉——留着会让人以为看见的是自己新账号的数据。
+      syncMemoryEntry();
+      syncInviteEntry();
+      closeMemory();
+      closeInvite();
     }
 
     // 回到「未选择会话」的空白页。切换身份时必须调用：上一个身份的会话不属于
@@ -354,11 +536,29 @@
       applyIdentity(me);
     }
 
+    async function loadRegistrationPolicy() {
+      // 原生 fetch：这个端点不需要登录，走 apiFetch 会在 401 时误触发登出逻辑。
+      try {
+        const response = await fetch('/api/auth/registration-policy');
+        if (response.ok) {
+          const data = await response.json();
+          needsInvite = Boolean(data.needs_invite);
+        }
+      } catch (error) {
+        // 拿不到就先保持 null（界面按「要填」显示），注册时服务端会给出真相。
+      }
+      syncAuthMode();
+    }
+
     function openAuth(mode) {
       authMode = mode === 'register' ? 'register' : 'login';
       syncAuthMode();
       authError.textContent = '';
       authPassword.value = '';
+      authInvite.value = '';
+      // 每次点「注册」都重新问一次：上一个页面停留期间可能有人在别处
+      // 注册了第一个账号，规矩就变了。这个请求就一次 COUNT，便宜。
+      if (authMode === 'register') loadRegistrationPolicy();
       authModal.hidden = false;
       authAccount.focus({ preventScroll: true });
     }
@@ -366,6 +566,7 @@
     function closeAuth() {
       authModal.hidden = true;
       authPassword.value = '';
+      authInvite.value = '';
       authError.textContent = '';
     }
 
@@ -377,12 +578,25 @@
       authSubmit.textContent = registering ? '注册' : '登录';
       authPassword.placeholder = registering ? '至少 8 位' : '你的密码';
       authPassword.setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
+      // 只有「确定不需要码」时才藏起来。还没问到（null）就照常显示——
+      // 万一其实要码，藏起来会让用户彻底没法注册；多显示一个可选框是无害的。
+      const askInvite = registering && needsInvite !== false;
+      authInviteField.hidden = !askInvite;
+      // 只有真的知道「这是空站」时才说可以留空。还没问到就别乱许诺，
+      // 不然用户会以为不填也能注册，提交后才发现被拦。
+      authInvite.placeholder = needsInvite === false ? '第一个账号可以留空' : 'AW-XXXX-XXXX';
     }
 
     // 登录成功后的收尾：换身份必然换会话列表，所以整页重置再重新拉。
     async function adoptSession(data, message) {
       writeToken(data.token);
-      applyIdentity({ account: data.user.account, guest: false, memory_enabled: true });
+      // 注册/登录接口直接把 is_owner 一起返回了，不用为此再打一次 /api/auth/me。
+      applyIdentity({
+        account: data.user.account,
+        guest: false,
+        memory_enabled: true,
+        is_owner: Boolean(data.is_owner),
+      });
       closeAuth();
       resetConversationView();
       await loadConversations();
@@ -420,14 +634,27 @@
       try {
         // 走原生 fetch：这里失败了只该显示在弹窗里，不该顺手把外面的界面
         // 也切回游客态（用户只是输错一次密码）。
+        const payload = { account, password };
+        // 注册才可能带邀请码。**不在前端拦「必须填」**——要不要码只有服务端知道，
+        // 这里拦了就会在「第一个账号」上逼人填一个根本不该存在的码。
+        if (authMode === 'register') {
+          const invite = authInvite.value.trim();
+          if (invite) payload.invite = invite;
+        }
         const response = await fetch(`/api/auth/${authMode}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ account, password })
+          body: JSON.stringify(payload)
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           authError.textContent = data.detail || `HTTP ${response.status}`;
+          // 服务端说「需要邀请码」而我们没显示输入框（策略拿过时了）→ 补显示出来，
+          // 别让用户对着「需要邀请码」四个字却无处可填。
+          if (response.status === 400 && String(data.detail || '').includes('邀请码')) {
+            needsInvite = true;
+            syncAuthMode();
+          }
           return;
         }
         await adoptSession(data, authMode === 'login' ? '已登录。' : '注册成功，已自动登录。');
@@ -439,7 +666,14 @@
     });
 
     document.querySelectorAll('.modal-tab').forEach((tab) => {
-      tab.onclick = () => { authMode = tab.dataset.mode; syncAuthMode(); authError.textContent = ''; };
+      tab.onclick = () => {
+        authMode = tab.dataset.mode;
+        syncAuthMode();
+        authError.textContent = '';
+        // 直接点「注册」标签页进来的（没经过 openAuth）也要问一次规矩，
+        // 否则 needsInvite 一直是 null，界面只能按「要填」猜。
+        if (authMode === 'register' && needsInvite === null) loadRegistrationPolicy();
+      };
     });
     $('#authClose').onclick = closeAuth;
     accountAction.onclick = () => {
@@ -466,6 +700,144 @@
       }
       return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
     }
+
+    // ---------- 引用溯源（C 域） ----------
+    // 三个纯文本变换 + 一个渲染函数，只对「助手的回答」生效。
+
+    // 正文里的 [c1] 换成可点的角标。(?!\() 排除 Markdown 链接语法 [c1](url)：
+    // 引用编号和链接写法长一样，不排除会把模型贴的正常链接拆坏。
+    function decorateCiteCodes(text) {
+      return String(text ?? '').replace(/\[(c\d+)\](?!\()/g, '<sup class="cite" data-code="$1">$1</sup>');
+    }
+
+    // 正文里的 ![题注](as_xx.png) 换成带签名的图片 URL。urlMap 由引用条目
+    // （asset_id → asset_url）拼出来；没有对应条目就原样保留，不让图悄悄消失。
+    function inlineAssets(text, urlMap) {
+      if (!urlMap) return String(text ?? '');
+      return String(text ?? '').replace(/(!\[[^\]]*\]\()(as_[0-9a-f]{4,})\.png(\))/g,
+        (whole, pre, assetId, post) => (urlMap[assetId] ? pre + urlMap[assetId] + post : whole));
+    }
+
+    function renderAnswer(content, urlMap) {
+      return renderMarkdown(inlineAssets(decorateCiteCodes(content), urlMap));
+    }
+
+    // 引用条目的一行摘要：书名 · 章节 · 第 X 页 · 图。页码起止相同只写一个。
+    function sourceMetaText(item) {
+      const parts = [];
+      if (item.doc_title) parts.push(item.doc_title);
+      if (item.chapter) parts.push(item.chapter);
+      if (item.page_start) {
+        parts.push(item.page_end && item.page_end !== item.page_start
+          ? `第 ${item.page_start}-${item.page_end} 页`
+          : `第 ${item.page_start} 页`);
+      }
+      const kindText = ({ figure: '图', formula: '公式', table: '表' })[item.kind] || item.kind || '';
+      if (kindText) parts.push(kindText);
+      return parts.join(' · ') || '教材原文';
+    }
+
+    // 从引用条目里拼 asset_id → 签名 URL 的映射，供正文和引用原文出图用。
+    function buildAssetMap(items) {
+      const map = {};
+      (items || []).forEach((item) => {
+        if (item.asset_id && item.asset_url) map[item.asset_id] = item.asset_url;
+      });
+      return map;
+    }
+
+    // 引用条目按编号建索引，挂在消息的 contentNode 上（contentNode._citations）。
+    // 不渲染任何 DOM：角标在正文里，点角标时用这个索引弹出小窗。
+    function buildCiteIndex(contentNode, items) {
+      if (!contentNode || !items || !items.length) return;
+      const index = {};
+      items.forEach((item) => {
+        if (item.code) index[item.code] = item;
+      });
+      contentNode._citations = index;
+    }
+
+    // ---------- 引用小窗 ----------
+    // 点正文里的 [cN] 角标弹出。全局只存在一个（重复点击同一个角标 = 关闭）。
+    // 定位用视口坐标 + position: fixed，所以聊天区一滚动就必须关掉，否则会
+    // 悬空在错位的地方。
+    function hideCitePopover() {
+      const old = document.getElementById('citePopover');
+      if (old) old.remove();
+      document.querySelectorAll('sup.cite.active').forEach((badge) => badge.classList.remove('active'));
+    }
+
+    function showCitePopover(badge, item) {
+      hideCitePopover();
+      const pop = document.createElement('div');
+      pop.id = 'citePopover';
+      // class 必须显式挂上：样式全在 .cite-popover 上，漏了它小窗就是一块
+      // 没有定位的静态内容，会被塞到页面末尾（视口外）——看起来像「点了没反应」。
+      pop.className = 'cite-popover';
+      pop._badge = badge;
+      const head = document.createElement('div');
+      head.className = 'head';
+      if (item.code) {
+        const badgeEl = document.createElement('span');
+        badgeEl.className = 'cite-code';
+        badgeEl.textContent = item.code;
+        head.appendChild(badgeEl);
+      }
+      const meta = document.createElement('span');
+      meta.className = 'source-meta';
+      meta.textContent = sourceMetaText(item);
+      head.appendChild(meta);
+      pop.appendChild(head);
+      const text = typeof item.content === 'string' ? item.content.trim() : '';
+      if (text) {
+        const body = document.createElement('div');
+        body.className = 'body';
+        // 实时条目的图引用还是占位文件名，用条目自带的签名 URL 换掉；
+        // 历史条目的图已被服务端内联成真 URL，这里原样通过。
+        body.innerHTML = renderMarkdown(inlineAssets(decorateCiteCodes(text), buildAssetMap([item])));
+        pop.appendChild(body);
+      }
+      document.body.appendChild(pop);
+      // 先挂上 DOM 量出尺寸再定位：默认弹在角标下方，放不下就翻到上方，
+      // 左右夹在视口内。
+      const rect = badge.getBoundingClientRect();
+      const width = pop.offsetWidth;
+      const height = pop.offsetHeight;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      let top = rect.bottom + 8;
+      if (top + height > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - height - 8);
+      }
+      pop.style.left = `${left}px`;
+      pop.style.top = `${top}px`;
+      badge.classList.add('active');
+    }
+
+    function toggleCitePopover(badge) {
+      const contentNode = badge.closest('.message-content');
+      const item = contentNode?._citations?.[badge.dataset.code];
+      if (!item) return; // 引用事件还没到（流式期间），点了没东西可看
+      const existing = document.getElementById('citePopover');
+      if (existing && existing._badge === badge) {
+        hideCitePopover();
+        return;
+      }
+      showCitePopover(badge, item);
+    }
+
+    // 点角标开小窗；点小窗和角标以外的地方、聊天区滚动、按 Esc，都关闭。
+    messages.addEventListener('click', (event) => {
+      const badge = event.target.closest('sup.cite');
+      if (badge) toggleCitePopover(badge);
+    });
+    document.addEventListener('mousedown', (event) => {
+      if (event.target.closest('#citePopover') || event.target.closest('sup.cite')) return;
+      hideCitePopover();
+    }, true);
+    chat.addEventListener('scroll', () => hideCitePopover(), { passive: true });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') hideCitePopover();
+    });
 
     // 状态和错误都显示在输入框下面那行小字上，出错时必须让用户看见，
     // 否则接口失败会表现为「点了没反应」。
@@ -601,6 +973,70 @@
       }
     }
 
+    // ------------------------------------------------------------------
+    // 深度思考 / 联网搜索 两个开关
+    // ------------------------------------------------------------------
+    // 选择存在浏览器里，每次发消息时随请求带上。服务端不记——它是「这一轮
+    // 想要怎么用」，不是对话状态，写进会话会让回退把开关也一起回退。
+    function restoreToggles() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(TOGGLE_KEY) || '{}');
+        // 只认布尔值：存过别的东西（比如旧版本存的是字符串）就当没存过，
+        // 照默认「都开」走。宁可丢掉一次选择，也不要让按钮显示成 undefined。
+        if (typeof saved.reasoning === 'boolean') toggles.reasoning = saved.reasoning;
+        if (typeof saved.web_search === 'boolean') toggles.web_search = saved.web_search;
+      } catch (error) {
+        // 坏 JSON 不影响使用，用默认值
+      }
+    }
+
+    function saveToggles() {
+      localStorage.setItem(TOGGLE_KEY, JSON.stringify(toggles));
+    }
+
+    function paintToggles() {
+      [['#toggleReasoning', 'reasoning'], ['#toggleWeb', 'web_search']].forEach(([selector, key]) => {
+        const button = $(selector);
+        button.classList.toggle('active', toggles[key]);
+        button.setAttribute('aria-pressed', String(toggles[key]));
+      });
+    }
+
+    function bindToggle(selector, key) {
+      $(selector).onclick = () => {
+        toggles[key] = !toggles[key];
+        saveToggles();
+        paintToggles();
+        input.focus({ preventScroll: true });
+      };
+    }
+
+    // 问服务端「这两个开关现在真的有用吗」，没用的置灰。
+    // 不做这步的话，按钮点下去没有任何效果（比如换了个不支持关推理的模型），
+    // 用户只会以为模型坏了——宁可提前把按钮变成灰色。
+    async function loadCapabilities() {
+      let caps;
+      try {
+        const response = await apiFetch('/api/capabilities');
+        if (!response.ok) return;
+        caps = await response.json();
+      } catch (error) {
+        return;  // 拿不到就按「都可用」处理，不要因为一个能力查询挡住两个按钮
+      }
+      if (!caps.reasoning_toggleable) {
+        $('#toggleReasoning').disabled = true;
+        $('#toggleReasoning').title = '当前模型不支持关闭深度思考';
+      }
+      if (!caps.web_search_available) {
+        // 同时把开关拨到关：工具没配 key 时留在工具表里只是让模型白调一次，
+        // 拿到一句「搜索服务未配置」。摘掉更干净。
+        toggles.web_search = false;
+        $('#toggleWeb').disabled = true;
+        $('#toggleWeb').title = '服务端未配置搜索服务，联网不可用';
+      }
+      paintToggles();
+    }
+
     // 把后端返回的 detail 取出来，附加到错误信息上。
     async function readError(response, fallback) {
       try {
@@ -648,7 +1084,7 @@
       updateScrollBottomButton();
     }, { passive: true });
 
-    function addMessage(role, content, activity = false, operations = [], turn = null) {
+    function addMessage(role, content, activity = false, operations = [], turn = null, citations = null) {
       const shouldFollow = state.autoFollow;
       const item = document.createElement('article');
       item.className = `message ${role}`;
@@ -660,7 +1096,12 @@
         : '';
       item.innerHTML = `<div class="avatar">${role === 'user' ? '我' : 'A'}</div><div><div class="message-role">${role === 'user' ? 'You' : 'Agent'}</div>${trace}<div class="message-content${activity ? ' activity' : ''}"></div>${rewindRow}</div>`;
       const contentNode = item.querySelector('.message-content');
-      contentNode.innerHTML = renderMarkdown(content);
+      // 助手的回答走 renderAnswer：[cN] 变可点角标、图引用换签名 URL。
+      // urlMap 只在历史消息带引用条目时非空（实时流是先出正文、后到引用事件）。
+      const urlMap = buildAssetMap(citations);
+      contentNode.innerHTML = role === 'assistant'
+        ? renderAnswer(content, urlMap)
+        : renderMarkdown(content);
       contentNode.trace = item.querySelector('.trace');
       contentNode.traceList = item.querySelector('.trace-list');
       operations.forEach((operation) => {
@@ -671,7 +1112,7 @@
         }
         // 工具返回：按 status 分「完成 / 失败」，和历史流走同一套渲染。
         if (operation.kind === 'result') {
-          addToolResult(contentNode, operation.tool, operation.status);
+          addToolResult(contentNode, operation.tool, operation.status, operation.content);
           return;
         }
         const details = operation.kind === 'call' && operation.args && Object.keys(operation.args).length
@@ -679,6 +1120,10 @@
           : '';
         addTrace(contentNode, `调用工具：${operation.tool}`, details);
       });
+      // 历史消息自带的引用条目 → 建索引（点正文角标弹小窗，C5：刷新后引用还在）。
+      if (role === 'assistant' && citations && citations.length) {
+        buildCiteIndex(contentNode, citations);
+      }
       const rewindButton = item.querySelector('.rewind');
       if (rewindButton) rewindButton.onclick = () => rewindTo(turn);
       messages.appendChild(item);
@@ -693,7 +1138,8 @@
       let userTurn = 0;
       history.forEach((message) => {
         const isUser = message.role === 'user';
-        addMessage(message.role, message.content, false, message.operations || [], isUser ? userTurn : null);
+        addMessage(message.role, message.content, false, message.operations || [],
+          isUser ? userTurn : null, message.citations || null);
         if (isUser) userTurn += 1;
       });
       if (!history.length) welcome.style.display = 'block';
@@ -713,9 +1159,30 @@
     // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
     // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
     // 一个界面在无声地说反话，比不显示更糟。
-    function addToolResult(node, tool, status) {
+    // 工具成功和失败必须长得不一样。
+    // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
+    // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
+    // 一个界面在无声地说反话，比不显示更糟。
+    // content 是工具返回的原文（后端已截断）：做成可折叠块，默认收起——
+    // 教材检索一返回就是几千字，平铺会把回答挤到看不见。
+    function addToolResult(node, tool, status, content = '') {
       const failed = status === 'error';
-      addTrace(node, `${failed ? '工具失败' : '工具完成'}：${tool}`, '', failed);
+      const text = String(content || '').trim();
+      if (!text) {
+        addTrace(node, `${failed ? '工具失败' : '工具完成'}：${tool}`, '', failed);
+        return;
+      }
+      if (!node?.traceList) return;
+      node.trace.hidden = false;
+      const box = document.createElement('details');
+      box.className = failed ? 'trace-tool-result trace-failed' : 'trace-tool-result';
+      const summary = document.createElement('summary');
+      summary.textContent = `${failed ? '工具失败' : '工具完成'}：${tool}（返回 ${text.length} 字）`;
+      const body = document.createElement('div');
+      body.className = 'trace-tool-result-body';
+      body.textContent = text;
+      box.append(summary, body);
+      node.traceList.appendChild(box);
     }
 
     // 思维链做成可折叠块，而不是像工具调用那样平铺一行。
@@ -996,6 +1463,10 @@
       let assistantNode = null;
       let assistantText = '';
       let streamFailed = false;
+      // 本轮的 asset_id → 签名 URL 映射。citations 事件在正文生成完之后才到
+      // （后端要在流结束前才凑齐全部引用），到了以后要把整段正文重渲染一遍，
+      // 正文里的图才能真的显示出来。
+      let assetMap = {};
       // 当前这一轮模型的思考块。模型一轮里「先想、再答」，调完工具进入下一轮时
       // 要另起一块，所以 tool_call 那里会把它清掉（见下）。
       let reasoningBox = null;
@@ -1005,7 +1476,13 @@
           headers: { 'Content-Type': 'application/json' },
           // 请求体里**没有** user_id：身份只认 Authorization 头里的令牌。
           // 以前这里带一个写死的 user_id，改成可编辑就等于谁都能读别人的会话。
-          body: JSON.stringify({ message: text, thread_id: state.threadId, location: state.location })
+          body: JSON.stringify({
+            message: text,
+            thread_id: state.threadId,
+            location: state.location,
+            reasoning: toggles.reasoning,
+            web_search: toggles.web_search,
+          })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));
         const reader = response.body.getReader();
@@ -1040,16 +1517,23 @@
               setStatus(`正在调用工具：${event.tool}…`, true);
             } else if (event.type === 'tool_result') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
-              addToolResult(assistantNode, event.tool, event.status);
+              addToolResult(assistantNode, event.tool, event.status, event.content);
             } else if (event.type === 'assistant_delta') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               assistantText += event.content;
-              assistantNode.innerHTML = renderMarkdown(assistantText);
+              assistantNode.innerHTML = renderAnswer(assistantText, assetMap);
               if (state.autoFollow) scrollToBottom();
             } else if (event.type === 'assistant') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               assistantText = event.content;
-              assistantNode.innerHTML = renderMarkdown(assistantText);
+              assistantNode.innerHTML = renderAnswer(assistantText, assetMap);
+            } else if (event.type === 'citations') {
+              // 流结束前最后一批结构化事件：先攒 asset 映射，再把正文重渲染
+              // 一遍（图从占位文件名变成真 URL），最后给角标建索引供小窗查。
+              assetMap = buildAssetMap(event.items);
+              if (!assistantNode) assistantNode = addMessage('assistant', '');
+              if (assistantText) assistantNode.innerHTML = renderAnswer(assistantText, assetMap);
+              buildCiteIndex(assistantNode, event.items || []);
             } else if (event.type === 'error') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               assistantNode.innerHTML = renderMarkdown(event.message);
@@ -1075,15 +1559,447 @@
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#composer').requestSubmit(); }
     });
     input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 180)}px`; });
+
+    // ------------------------------------------------------------------
+    // 记忆面板（E6）：AI 记住了什么——能看、能改、能删
+    // ------------------------------------------------------------------
+    // 三件事决定了这里的写法：
+    //
+    // 1. **每次打开都重新拉**。这个列表的写入方是模型，用户可能在另一个标签页
+    //    刚聊完，那边存了新记忆。缓存只会骗人。
+    // 2. **id 是稳定编号，不是原文**。所以「改完接着删」不会失手——存储层
+    //    保证了改措辞不换号（见 memories.py 开头那个坑）。
+    // 3. **错误写在弹窗底部，不跳 alert**。alert 会把用户刚敲的那行输入掀掉，
+    //    改重了（409）本来正是要接着改的时候。
+    const memoryEntry = $('#memoryEntry');
+    const memoryModal = $('#memoryModal');
+    const memoryList = $('#memoryList');
+    const memoryError = $('#memoryError');
+    let memoryBusy = false; // 一次只放一个请求出去，防连点
+
+    // 游客没有记忆可看，入口整个不显示——留个点了说「先登录」的按钮是噪音。
+    function syncMemoryEntry() {
+      memoryEntry.hidden = !identity || identity.guest;
+    }
+
+    function openMemory() {
+      memoryError.textContent = '';
+      memoryModal.hidden = false;
+      loadMemories();
+    }
+
+    function closeMemory() {
+      memoryModal.hidden = true;
+      memoryError.textContent = '';
+    }
+
+    function memoryNote(message) {
+      memoryError.textContent = message || '';
+    }
+
+    async function loadMemories() {
+      memoryList.innerHTML = '<div class="memory-empty">正在读取…</div>';
+      let items = [];
+      try {
+        const response = await apiFetch('/api/memories');
+        if (!response.ok) {
+          memoryList.innerHTML = '';
+          memoryNote(`读取失败：${await readError(response, '读取失败')}`);
+          return;
+        }
+        items = await response.json();
+      } catch (error) {
+        memoryList.innerHTML = '';
+        memoryNote('连不上服务，稍后再试。');
+        return;
+      }
+      renderMemories(items);
+    }
+
+    function renderMemories(items) {
+      memoryList.innerHTML = '';
+      if (!items.length) {
+        memoryList.innerHTML = '<div class="memory-empty">还没有记住任何东西。<br>多聊几轮，它会自己开始记。</div>';
+        return;
+      }
+      items.forEach((item) => memoryList.appendChild(memoryRow(item)));
+    }
+
+    function memoryRow(item) {
+      const row = document.createElement('div');
+      row.className = 'memory-row';
+
+      const head = document.createElement('div');
+      head.className = 'memory-head';
+      const kind = document.createElement('span');
+      // 「其他」是模型给了不认识的 kind 时的兜底，颜色压暗一点，
+      // 别让它和「偏好」「身份」这些正常分类一样显眼。
+      kind.className = item.kind === '其他' ? 'memory-kind other' : 'memory-kind';
+      kind.textContent = item.kind || '其他';
+      const hits = document.createElement('span');
+      hits.className = 'memory-hits';
+      // 提过几次 = 模型重复记了几次。次数高的通常是真的稳定偏好。
+      hits.textContent = item.hits > 1 ? `提过 ${item.hits} 次` : '';
+      head.append(kind, hits);
+
+      const text = document.createElement('div');
+      text.className = 'memory-text';
+      text.textContent = item.text;
+
+      const ops = document.createElement('div');
+      ops.className = 'memory-ops';
+      const edit = document.createElement('button');
+      edit.className = 'memory-op';
+      edit.type = 'button';
+      edit.textContent = '改一下';
+      edit.onclick = () => startEditing(row, item);
+      const remove = document.createElement('button');
+      remove.className = 'memory-op danger';
+      remove.type = 'button';
+      remove.textContent = '忘掉这条';
+      remove.onclick = () => forgetMemory(item, remove);
+      ops.append(edit, remove);
+
+      row.append(head, text, ops);
+      return row;
+    }
+
+    // 行内编辑：把这一行换成输入框，不弹第二个弹窗（弹窗套弹窗很难用）。
+    function startEditing(row, item) {
+      memoryNote('');
+      row.innerHTML = '';
+      const form = document.createElement('div');
+      form.className = 'memory-edit';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = item.text;
+      input.maxLength = 120;
+      const ops = document.createElement('div');
+      ops.className = 'memory-ops';
+      const save = document.createElement('button');
+      save.className = 'memory-op';
+      save.type = 'button';
+      save.textContent = '保存';
+      const cancel = document.createElement('button');
+      cancel.className = 'memory-op';
+      cancel.type = 'button';
+      cancel.textContent = '取消';
+      const submit = () => saveMemory(item, input.value, save, cancel);
+      save.onclick = submit;
+      // 取消时重拉而不是把旧节点拼回去：这一来顺手也把别处的改动带回来了。
+      cancel.onclick = () => loadMemories();
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); submit(); }
+        if (event.key === 'Escape') { event.preventDefault(); loadMemories(); }
+      });
+      ops.append(save, cancel);
+      form.append(input, ops);
+      row.appendChild(form);
+      input.focus();
+      // select() 让用户直接覆盖原文，省一次全选。不是必须的，所以判一下：
+      // 真浏览器都有，但精简的 DOM 实现（测试里跑的 linkedom）没实现它。
+      if (input.select) input.select();
+    }
+
+    async function saveMemory(item, text, saveButton, cancelButton) {
+      const next = text.trim();
+      if (!next) { memoryNote('不能改成空的。'); return; }
+      // 没改就别白跑一趟服务端。
+      if (next === item.text) { loadMemories(); return; }
+      if (memoryBusy) return;
+      memoryBusy = true;
+      saveButton.disabled = true;
+      cancelButton.disabled = true;
+      memoryNote('');
+      try {
+        const response = await apiFetch(`/api/memories/${encodeURIComponent(item.id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: next })
+        });
+        if (response.status === 409) { memoryNote('已经有这条了，不用再改一次。'); return; }
+        if (response.status === 404) { memoryNote('这条已经不在了，刷新一下列表。'); await loadMemories(); return; }
+        if (!response.ok) { memoryNote(`改失败：${await readError(response, '改失败')}`); return; }
+        await loadMemories();
+      } catch (error) {
+        memoryNote('连不上服务，稍后再试。');
+      } finally {
+        memoryBusy = false;
+        saveButton.disabled = false;
+        cancelButton.disabled = false;
+      }
+    }
+
+    async function forgetMemory(item, button) {
+      if (memoryBusy) return;
+      memoryBusy = true;
+      button.disabled = true;
+      memoryNote('');
+      try {
+        const response = await apiFetch(`/api/memories/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+        if (response.status === 404) {
+          memoryNote('这条已经不在了，刷新一下列表。');
+          await loadMemories();
+          return;
+        }
+        if (!response.ok) {
+          memoryNote(`删除失败：${await readError(response, '删除失败')}`);
+          return;
+        }
+        // 不弹二次确认：条目小、删错了再聊一轮就能重新记下来，
+        // 每次都拦一下反而把「顺手清掉一条错的」这件小事变得很烦。
+        await loadMemories();
+      } catch (error) {
+        memoryNote('连不上服务，稍后再试。');
+      } finally {
+        memoryBusy = false;
+        button.disabled = false;
+      }
+    }
+
+    $('#memoryOpen').onclick = openMemory;
+    $('#memoryClose').onclick = closeMemory;
+    // 点遮罩关闭。判断 target 是不是遮罩本身——不然点卡片内部也会关。
+    memoryModal.addEventListener('click', (event) => {
+      if (event.target === memoryModal) closeMemory();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !memoryModal.hidden) closeMemory();
+    });
+
+    // ------------------------------------------------------------------
+    // 邀请码面板（F1）：只有站点主人看得到
+    // ------------------------------------------------------------------
+    // 「谁能发码」由服务端判定（`service.create_invite` 会拦），这里只负责
+    // 不给不该用的人显示一个点进去挨 403 的按钮。
+    const inviteEntry = $('#inviteEntry');
+    const inviteModal = $('#inviteModal');
+    const inviteList = $('#inviteList');
+    const inviteError = $('#inviteError');
+    const inviteNote = $('#inviteNote');
+    const inviteMake = $('#inviteMake');
+    let inviteBusy = false;
+
+    function syncInviteEntry() {
+      // 游客没有身份，普通用户不是主人——两种都不显示。
+      inviteEntry.hidden = !identity || identity.guest || !identity.is_owner;
+    }
+
+    function openInvite() {
+      inviteError.textContent = '';
+      inviteNote.value = '';
+      inviteModal.hidden = false;
+      loadInvites();
+    }
+
+    function closeInvite() {
+      inviteModal.hidden = true;
+      inviteError.textContent = '';
+    }
+
+    function inviteNote_(message) {
+      inviteError.textContent = message || '';
+    }
+
+    async function loadInvites() {
+      inviteList.innerHTML = '<div class="memory-empty">正在读取…</div>';
+      let items = [];
+      try {
+        const response = await apiFetch('/api/invites');
+        if (!response.ok) {
+          inviteList.innerHTML = '';
+          inviteNote_(response.status === 403
+            ? '这个账号不能发邀请码。'
+            : `读取失败：${await readError(response, '读取失败')}`);
+          return;
+        }
+        items = await response.json();
+      } catch (error) {
+        inviteList.innerHTML = '';
+        inviteNote_('连不上服务，稍后再试。');
+        return;
+      }
+      renderInvites(items);
+    }
+
+    function renderInvites(items) {
+      inviteList.innerHTML = '';
+      if (!items.length) {
+        inviteList.innerHTML = '<div class="memory-empty">还没发过邀请码。<br>上面填个备注，生成一个发给同学。</div>';
+        return;
+      }
+      items.forEach((item) => inviteList.appendChild(inviteRow(item)));
+    }
+
+    function inviteRow(item) {
+      const row = document.createElement('div');
+      // 已用的码整行压暗 + 划掉：一眼能看出还剩几个能用
+      row.className = item.used ? 'memory-row invite-row used' : 'memory-row invite-row';
+
+      const head = document.createElement('div');
+      head.className = 'memory-head';
+      const code = document.createElement('span');
+      code.className = 'invite-code';
+      code.textContent = item.code;
+      const state = document.createElement('span');
+      state.className = 'memory-hits';
+      state.textContent = item.used ? '已用掉' : '还没人用';
+      head.append(code, state);
+
+      const meta = document.createElement('div');
+      meta.className = 'memory-text';
+      meta.textContent = item.note ? `备注：${item.note}` : '（没写备注）';
+
+      row.append(head, meta);
+
+      // 删除对**已用和未用都开着**，但两种的后果不一样，所以文案分开写：
+      // 未用的删掉 = 立刻作废（拿着码的人就注册不了了）；
+      // 已用的删掉 = 只是查不到「这个账号是通过哪个码进来的」，账号不受影响。
+      // 只让删未用的那种做法看着更安全，实际结果是列表永远清不干净。
+      const ops = document.createElement('div');
+      ops.className = 'memory-ops';
+      // 用过的码没复制的意义了，省掉按钮也少一次误点。
+      if (!item.used) {
+        const copy = document.createElement('button');
+        copy.className = 'memory-op';
+        copy.type = 'button';
+        copy.textContent = '复制';
+        copy.onclick = () => copyInvite(item.code, copy);
+        ops.appendChild(copy);
+      }
+      const remove = document.createElement('button');
+      remove.className = 'memory-op danger';
+      remove.type = 'button';
+      remove.textContent = '删除';
+      remove.onclick = () => deleteInvite(item, remove);
+      ops.appendChild(remove);
+      row.appendChild(ops);
+      return row;
+    }
+
+    async function deleteInvite(item, button) {
+      const tip = item.used
+        ? `删除邀请码 ${item.code}？\n\n这个码已经被用掉了。删除后「是谁用它注册的」就查不到了，但那个账号本身不受影响。`
+        : `删除邀请码 ${item.code}？\n\n它还没被用过，删掉就立刻失效——拿着这个码的人将无法注册。`;
+      if (!window.confirm(tip)) return;
+      button.disabled = true;
+      try {
+        const response = await apiFetch(
+          `/api/invites/${encodeURIComponent(item.code)}`,
+          { method: 'DELETE' },
+        );
+        if (response.status === 404) {
+          // 别处（另一个标签页）已经删过了。照样刷新，列表才对得上。
+          inviteNote_(`${item.code} 已经不在了。`);
+          await loadInvites();
+          return;
+        }
+        if (!response.ok) {
+          inviteNote_(`删除失败：${await readError(response, '删除失败')}`);
+          button.disabled = false;
+          return;
+        }
+        inviteNote_(`已删除 ${item.code}。`);
+        await loadInvites();
+      } catch (error) {
+        inviteNote_('连不上服务，稍后再试。');
+        button.disabled = false;
+      }
+    }
+
+    // 剪贴板 API 在三种情况下没有：无痕/隐私模式、非 https 的页面、老浏览器。
+    // **先判断再调，不要靠 catch 兜住 TypeError**——那样会把「根本没有这个 API」
+    // 和「用户拒绝了授权」混成同一种情况，出问题时分不清是哪一种。
+    function canCopy() {
+      return typeof navigator !== 'undefined'
+        && navigator.clipboard
+        && typeof navigator.clipboard.writeText === 'function';
+    }
+
+    async function copyInvite(code, button) {
+      if (!canCopy()) {
+        inviteNote_(`复制不了，手动抄一下：${code}`);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(code);
+        const original = button.textContent;
+        button.textContent = '已复制';
+        window.setTimeout(() => { button.textContent = original; }, 1400);
+        inviteNote_('');
+      } catch (error) {
+        // 浏览器明确拒绝（权限、非安全上下文）。同样把码写出来让人手抄。
+        inviteNote_(`复制不了，手动抄一下：${code}`);
+      }
+    }
+
+    async function makeInvite() {
+      if (inviteBusy) return;
+      inviteBusy = true;
+      inviteMake.disabled = true;
+      inviteNote_('');
+      try {
+        const response = await apiFetch('/api/invites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // 备注可以空着；空着传 null 而不是空字符串，免得库里存一堆 ''。
+          body: JSON.stringify({ note: inviteNote.value.trim() || null })
+        });
+        if (response.status === 403) { inviteNote_('这个账号不能发邀请码。'); return; }
+        if (!response.ok) {
+          inviteNote_(`生成失败：${await readError(response, '生成失败')}`);
+          return;
+        }
+        const created = await response.json();
+        inviteNote.value = '';
+        await loadInvites();
+        // 生成完顺手复制：这一步几乎总是紧接着「发给同学」，省掉再点一次。
+        // 复制失败也只是提示，不影响「码已经生成」这个事实。
+        if (canCopy()) {
+          try {
+            await navigator.clipboard.writeText(created.code);
+            inviteNote_(`已生成并复制：${created.code}`);
+          } catch (error) {
+            inviteNote_(`已生成：${created.code}（复制不了，手动抄一下）`);
+          }
+        } else {
+          inviteNote_(`已生成：${created.code}（复制不了，手动抄一下）`);
+        }
+      } catch (error) {
+        inviteNote_('连不上服务，稍后再试。');
+      } finally {
+        inviteBusy = false;
+        inviteMake.disabled = false;
+      }
+    }
+
+    $('#inviteOpen').onclick = openInvite;
+    $('#inviteClose').onclick = closeInvite;
+    inviteMake.onclick = makeInvite;
+    inviteNote.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); makeInvite(); }
+    });
+    inviteModal.addEventListener('click', (event) => {
+      if (event.target === inviteModal) closeInvite();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !inviteModal.hidden) closeInvite();
+    });
+
     $('#newChat').onclick = newConversation;
     document.querySelectorAll('.suggestion').forEach((button) => { button.onclick = () => { input.value = button.dataset.prompt; input.focus(); }; });
     renderLocateButton();
     restoreLocation();
+    restoreToggles();
+    bindToggle('#toggleReasoning', 'reasoning');
+    bindToggle('#toggleWeb', 'web_search');
+    paintToggles();
     // **先问服务端「我是谁」，再按身份拉列表**。顺序反了会先按游客拉一次
     // （本地有令牌时那次请求还是会带上令牌，但界面上会先闪一下游客态）。
     (async () => {
       await refreshIdentity();
       await loadConversations();
+      await loadCapabilities();
     })();
   </script>
 </body>
