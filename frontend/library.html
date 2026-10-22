@@ -312,6 +312,9 @@
 
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css" />
+  <script src="/static/vendor/katex/katex.min.js"></script>
+  <script src="/static/vendor/katex/auto-render.min.js"></script>
   <script>
     // --- 移动端抽屉分类栏：与聊天页同一套交互 ---
     {
@@ -889,6 +892,16 @@
       await showPreview(canRender ? 'render' : 'raw');
     }
 
+    // 数学段先抽离成占位符（marked 会把 \( \[ 当转义吃掉反斜杠），渲染完放回交 KaTeX 处理
+    let mathStash = [];
+    function maskMath(text) {
+      mathStash = [];
+      return String(text ?? '').replace(
+        /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g,
+        (match) => { mathStash.push(match); return `@@MATH${mathStash.length - 1}@@`; },
+      );
+    }
+
     async function showPreview(mode) {
       if (!previewDoc) return;
       tabRender.classList.toggle('active', mode === 'render');
@@ -913,7 +926,20 @@
         }
       }
       if (mode === 'render') {
-        previewBody.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+        previewBody.innerHTML = DOMPurify.sanitize(marked.parse(maskMath(text), { breaks: true, gfm: true }))
+          .replace(/@@MATH(\d+)@@/g, (_, index) => escapeHtml(mathStash[Number(index)] ?? ''));
+        // 教材解析里的 $$..$$ / \(..\) 公式在 sanitize 之后渲染（KaTeX 产物不再过 sanitize）
+        if (window.renderMathInElement) {
+          renderMathInElement(previewBody, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '\\[', right: '\\]', display: true },
+              { left: '\\(', right: '\\)', display: false },
+            ],
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            throwOnError: false,
+          });
+        }
         // 图挂了别只留一个空洞：告诉人是哪张图、为什么看不了。
         previewBody.querySelectorAll('img').forEach((img) => {
           img.onerror = () => {

@@ -389,6 +389,9 @@
   </div>
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css" />
+  <script src="/static/vendor/katex/katex.min.js"></script>
+  <script src="/static/vendor/katex/auto-render.min.js"></script>
   <script>
     const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '', scope: null, scopeName: '' };
     // 「进入某本书的对话」：从知识库分类点进来时 URL 带 scope（分类 id）与 scope_name。
@@ -725,7 +728,16 @@
       if (!window.marked || !window.DOMPurify) {
         return escapeHtml(text).replace(/\n/g, '<br>');
       }
-      return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+      // 数学段先抽离成占位符：marked 会把 \( 和 \[ 当转义吃掉反斜杠，
+      // KaTeX 就找不到定界符了。占位符是纯文本，能原样穿过 sanitize，
+      // 渲染完再把原文（HTML 转义后）放回，交给 renderMathInElement 处理。
+      const stash = [];
+      const masked = text.replace(
+        /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g,
+        (match) => { stash.push(match); return `@@MATH${stash.length - 1}@@`; },
+      );
+      const html = DOMPurify.sanitize(marked.parse(masked, { breaks: true, gfm: true }));
+      return html.replace(/@@MATH(\d+)@@/g, (_, index) => escapeHtml(stash[Number(index)] ?? ''));
     }
 
     // ---------- 引用溯源（C 域） ----------
@@ -1105,6 +1117,22 @@
       updateScrollBottomButton();
     }, { passive: true });
 
+    // LaTeX 公式渲染：教材与模型的回答里大量 $$..$$ / \(..\)。
+    // 单个 $ 不启用（会把「花了 $5」之类误伤成公式）。在 DOMPurify 之后调用，
+    // KaTeX 生成的节点不再过 sanitize。
+    function beautifyMath(el) {
+      if (!window.renderMathInElement) return;
+      renderMathInElement(el, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+        ],
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        throwOnError: false,
+      });
+    }
+
     function addMessage(role, content, activity = false, operations = [], turn = null, citations = null) {
       const shouldFollow = state.autoFollow;
       const item = document.createElement('article');
@@ -1123,6 +1151,7 @@
       contentNode.innerHTML = role === 'assistant'
         ? renderAnswer(content, urlMap)
         : renderMarkdown(content);
+      beautifyMath(contentNode);
       contentNode.trace = item.querySelector('.trace');
       contentNode.traceList = item.querySelector('.trace-list');
       operations.forEach((operation) => {
@@ -1545,6 +1574,7 @@
               assetMap = buildAssetMap(event.items);
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               if (assistantText) assistantNode.innerHTML = renderAnswer(assistantText, assetMap);
+              beautifyMath(assistantNode);
               buildCiteIndex(assistantNode, event.items || []);
             } else if (event.type === 'error') {
               if (!assistantNode) assistantNode = addMessage('assistant', '');
@@ -1555,6 +1585,8 @@
           }
         }
         await loadConversations();
+        // 无引用的回答没有 citations 事件可借力，收尾时统一补一次公式渲染
+        if (assistantNode) beautifyMath(assistantNode);
         if (streamFailed) setBusy(false); else setStatus('');
       } catch (error) {
         addMessage('assistant', `请求失败：${error.message}`);
