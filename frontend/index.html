@@ -280,17 +280,13 @@
       <button class="new-chat" id="newChat">＋ 新建会话</button>
       <div class="section-label">Conversations · 右键管理</div>
       <div class="conversation-list" id="conversationList"></div>
-      <!-- 教材的增删改查搬到独立页面（/library）了，这里只留一个入口。
-           原因：分类、上传、入库、删除都要横向空间，塞进 292px 的侧栏时
-           每行只够放书名，状态和分类全靠悬浮提示，上传一本书要来回开关几次。
-           这一行占的高度和原来「教材库」那段标题一样，所以左下角回到
-           加这个功能之前的紧凑样子。 -->
+      
       <a class="library-entry" id="libraryEntry" href="/library">知识库 · 教材与分类 →</a>
-      <!-- 游客藏起来（无记忆可看），登录后才出现。见 syncMemoryEntry。 -->
+      
       <div class="memory-entry" id="memoryEntry" hidden>
         <button class="memory-open" id="memoryOpen" type="button">查看 AI 记住了什么</button>
       </div>
-      <!-- 只有站点主人（最早注册的账号）看得到。见 syncInviteEntry。 -->
+      
       <div class="memory-entry" id="inviteEntry" hidden>
         <button class="memory-open" id="inviteOpen" type="button">邀请同学加入</button>
       </div>
@@ -320,8 +316,7 @@
             <textarea id="input" rows="1" placeholder=""></textarea>
             <button class="send" id="send" title="发送" aria-label="发送">↑</button>
           </div>
-          <!-- 两个开关。默认都是开的，和没这两个按钮时的行为一致。
-               服务端说某项不可用时会置灰，见 loadCapabilities。 -->
+          
           <div class="composer-toggles">
             <button class="toggle" id="toggleReasoning" type="button" aria-pressed="true"><span class="dot"></span>深度思考</button>
             <button class="toggle" id="toggleWeb" type="button" aria-pressed="true"><span class="dot"></span>联网搜索</button>
@@ -341,9 +336,7 @@
       <form id="authForm">
         <label class="field"><span>账号</span><input id="authAccount" type="text" autocomplete="username" placeholder="用户名 / 手机号 / 邮箱" /></label>
         <label class="field"><span>密码</span><input id="authPassword" type="password" autocomplete="current-password" placeholder="你的密码" /></label>
-        <!-- 邀请码只在「站里已经有人」且正在注册时出现。
-             显不显示由服务端说了算（/api/auth/registration-policy），
-             前端不能自己猜库里几个人。 -->
+        
         <label class="field" id="authInviteField" hidden>
           <span>邀请码</span>
           <input id="authInvite" type="text" autocomplete="off" placeholder="AW-XXXX-XXXX" />
@@ -357,8 +350,7 @@
     <button type="button" class="context-menu-item" role="menuitem" data-action="rename">重命名</button>
     <button type="button" class="context-menu-item danger" role="menuitem" data-action="delete">删除会话</button>
   </div>
-  <!-- 记忆面板。列表由 loadMemories 每次打开时重新拉——
-       开着的时候用户也可能在另一个标签页改过，缓存会骗人。 -->
+  
   <div class="modal" id="memoryModal" hidden>
     <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="memoryTitle">
       <button class="modal-close" id="memoryClose" type="button" aria-label="关闭">×</button>
@@ -368,7 +360,7 @@
       <div class="memory-err" id="memoryError" role="alert"></div>
     </div>
   </div>
-  <!-- 邀请码面板：只有主人能开。一个码只能注册一个人，用过就作废。 -->
+  
   <div class="modal" id="inviteModal" hidden>
     <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="inviteTitle">
       <button class="modal-close" id="inviteClose" type="button" aria-label="关闭">×</button>
@@ -419,21 +411,12 @@
     const toggles = { reasoning: true, web_search: true };
 
     // ---------- 身份 ----------
-    //
-    // 令牌是服务端签发的、放在 localStorage 里的唯一凭证。**前端不再自己声称
-    // 「我是谁」**：以前聊天请求里带一个写死的 user_id，任何人都能改成别人的。
-    // 现在服务端只认令牌，请求体里的 user_id 会被忽略。
-    //
-    // `identity` 是 /api/auth/me 的返回，用来决定界面怎么显示；它只是**展示用**，
-    // 真正的权限判断在服务端。别拿它当安全边界。
+    // 令牌是服务端签发、存在 localStorage 的唯一凭证，前端不自己声称「我是谁」。
+    // `identity` 只用于界面展示，权限判断在服务端，别拿它当安全边界。
     let token = readToken();
     let identity = null;
     let authMode = 'login';
-    // 注册要不要邀请码。`null` = 还没问过服务端。
-    //
-    // **不能让前端自己猜**：猜「第一个用户不用填」就得先知道库里有几个人，
-    // 那是服务端的事实，猜错了要么让第一个用户去填一个不存在的码，
-    // 要么该拦的时候没拦。
+    // 注册要不要邀请码。`null` = 还没问过服务端——这是服务端的事实，前端猜不出来。
     let needsInvite = null;
     // 401 只处理一次：一次页面操作可能并发打好几个请求，全都 401 的话
     // 会重复清状态、重复弹提示。处理期间把它挡住。
@@ -497,11 +480,8 @@
     }
 
     // 所有接口都走这里：统一带令牌、统一处理 401。
-    //
-    // 401 的含义是「这个令牌不认了」（过期或被撤销）。这时候必须清掉本地令牌、
-    // 退回游客态——不然界面一直显示已登录，而每个请求都失败，用户完全不知道
-    // 发生了什么。后端**不会**在令牌失效时静默降级成游客，就是为了让这里能
-    // 明确地分辨出「该重新登录了」。
+    // 401 = 令牌不认了（过期或被撤销）：必须清掉本地令牌、退回游客态，否则界面显示
+    // 已登录而每个请求都失败。后端不静默降级成游客，就是为了让这里分辨出「该重新登录了」。
     async function apiFetch(url, options = {}) {
       const headers = Object.assign({}, options.headers || {});
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -758,9 +738,8 @@
     }
 
     // ---------- 引用小窗 ----------
-    // 点正文里的 [cN] 角标弹出。全局只存在一个（重复点击同一个角标 = 关闭）。
-    // 定位用视口坐标 + position: fixed，所以聊天区一滚动就必须关掉，否则会
-    // 悬空在错位的地方。
+    // 点正文里的 [cN] 角标弹出，全局只存在一个。定位用视口坐标 + position: fixed，
+    // 所以聊天区一滚动就必须关掉，否则会悬空在错位的地方。
     function hideCitePopover() {
       const old = document.getElementById('citePopover');
       if (old) old.remove();
@@ -860,13 +839,8 @@
     }
 
     // ---------- 位置：浏览器授权优先，失败降级为用户手选 ----------
-    //
-    // 位置只由前端提供，服务端**不会**用 IP 去猜：IP 定位收的是请求来源地址，
-    // 多用户部署下会把所有人都定位到服务器所在地，模型会据此向用户断言错误的城市。
-    // 拿不到就如实说拿不到，不编一个。
-    //
-    // 「手选城市」优先于「授权坐标」——手选是用户明确确认过的，坐标可能来自 VPN
-    // 或粗粒度 Wi-Fi 定位，可靠性反而更低。这个优先级由后端 service 统一裁决。
+    // 位置只由前端提供，服务端不用 IP 猜（多用户部署会把所有人定位到服务器所在地）。
+    // 手选城市优先于授权坐标（坐标可能来自 VPN 或粗粒度定位），优先级由 service 裁决。
 
     function loadStoredLocation() {
       try {
@@ -976,8 +950,8 @@
     // ------------------------------------------------------------------
     // 深度思考 / 联网搜索 两个开关
     // ------------------------------------------------------------------
-    // 选择存在浏览器里，每次发消息时随请求带上。服务端不记——它是「这一轮
-    // 想要怎么用」，不是对话状态，写进会话会让回退把开关也一起回退。
+    // 选择存在浏览器里，每次发消息带上。服务端不记——它是「这一轮怎么用」，
+    // 不是对话状态，写进会话会让回退把开关也一起回退。
     function restoreToggles() {
       try {
         const saved = JSON.parse(localStorage.getItem(TOGGLE_KEY) || '{}');
@@ -1155,16 +1129,9 @@
       node.traceList.appendChild(event);
     }
 
-    // 工具成功和失败必须长得不一样。
-    // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
-    // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
-    // 一个界面在无声地说反话，比不显示更糟。
-    // 工具成功和失败必须长得不一样。
-    // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
-    // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
-    // 一个界面在无声地说反话，比不显示更糟。
-    // content 是工具返回的原文（后端已截断）：做成可折叠块，默认收起——
-    // 教材检索一返回就是几千字，平铺会把回答挤到看不见。
+    // 工具成功和失败必须长得不一样：后端在 tool_result 里发了 status，丢了它就会把
+    // 「工具失败」渲染成「工具完成」。
+    // content 是返回原文（已截断），做成默认收起的折叠块——教材检索一返回就是几千字。
     function addToolResult(node, tool, status, content = '') {
       const failed = status === 'error';
       const text = String(content || '').trim();
@@ -1185,10 +1152,8 @@
       node.traceList.appendChild(box);
     }
 
-    // 思维链做成可折叠块，而不是像工具调用那样平铺一行。
-    // 理由：它比正文长一个量级（实测一次提问：思维链 317 字 / 正文 80 字，
-    // 分片数 166 / 47）。平铺会把工具调用挤到看不见。折叠起来、summary 上带
-    // 实时字数，既能看出「它正在想」，又不占地方。
+    // 思维链做成折叠块而不是平铺一行：它比正文长一个量级，平铺会把工具调用挤到看不见。
+    // summary 上带实时字数，既能看出「它正在想」，又不占地方。
     function addReasoning(node, text = '') {
       if (!node?.traceList) return null;
       node.trace.hidden = false;
@@ -1367,10 +1332,7 @@
     };
 
     // 左键点别处、滚轮、Esc、改窗口大小、失焦，都把菜单收起来。
-    // 这里刻意不用 scroll：scroll 事件是异步派发的，右键之前那次滚动的 scroll
-    // 可能在菜单打开之后才到达，会把刚打开的菜单立刻关掉（点击可滚动区域时
-    // 浏览器的 scrollIntoView 就会稳定触发这个竞态）。wheel / mousedown 是
-    // 同步的用户意图，不会误伤。
+    // 不用 scroll：它是异步派发的，打开菜单之前那次滚动的 scroll 可能晚到、把菜单立刻关掉。
     document.addEventListener('mousedown', (event) => {
       if (!event.target.closest('#conversationMenu')) closeConversationMenu();
     }, true);
@@ -1563,14 +1525,9 @@
     // ------------------------------------------------------------------
     // 记忆面板（E6）：AI 记住了什么——能看、能改、能删
     // ------------------------------------------------------------------
-    // 三件事决定了这里的写法：
-    //
-    // 1. **每次打开都重新拉**。这个列表的写入方是模型，用户可能在另一个标签页
-    //    刚聊完，那边存了新记忆。缓存只会骗人。
-    // 2. **id 是稳定编号，不是原文**。所以「改完接着删」不会失手——存储层
-    //    保证了改措辞不换号（见 memories.py 开头那个坑）。
-    // 3. **错误写在弹窗底部，不跳 alert**。alert 会把用户刚敲的那行输入掀掉，
-    //    改重了（409）本来正是要接着改的时候。
+    // 每次打开都重新拉（写入方是模型，另一个标签页可能刚存了新记忆，缓存只会骗人）；
+    // id 是稳定编号不是原文，所以「改完接着删」不会失手；
+    // 错误写在弹窗底部、不跳 alert（alert 会掀掉用户刚敲的那行输入）。
     const memoryEntry = $('#memoryEntry');
     const memoryModal = $('#memoryModal');
     const memoryList = $('#memoryList');
@@ -1770,8 +1727,7 @@
     // ------------------------------------------------------------------
     // 邀请码面板（F1）：只有站点主人看得到
     // ------------------------------------------------------------------
-    // 「谁能发码」由服务端判定（`service.create_invite` 会拦），这里只负责
-    // 不给不该用的人显示一个点进去挨 403 的按钮。
+    // 「谁能发码」由服务端判定，这里只是不给不该用的人显示一个点进去挨 403 的按钮。
     const inviteEntry = $('#inviteEntry');
     const inviteModal = $('#inviteModal');
     const inviteList = $('#inviteList');
@@ -1852,10 +1808,8 @@
 
       row.append(head, meta);
 
-      // 删除对**已用和未用都开着**，但两种的后果不一样，所以文案分开写：
-      // 未用的删掉 = 立刻作废（拿着码的人就注册不了了）；
-      // 已用的删掉 = 只是查不到「这个账号是通过哪个码进来的」，账号不受影响。
-      // 只让删未用的那种做法看着更安全，实际结果是列表永远清不干净。
+      // 删除对已用和未用都开着，但后果不同：未用的删掉 = 立刻作废；
+      // 已用的删掉 = 只丢掉「这个账号是用哪个码进来的」。只让删未用的，列表永远清不干净。
       const ops = document.createElement('div');
       ops.className = 'memory-ops';
       // 用过的码没复制的意义了，省掉按钮也少一次误点。

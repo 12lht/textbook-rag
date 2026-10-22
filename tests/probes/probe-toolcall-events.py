@@ -44,7 +44,6 @@ for label, query in SCENARIOS:
     all_ok = all_ok and ok
 
     if label.startswith("B"):
-        # 场景 B 的关键：两次同名调用都得留下，不能被去重键吞掉
         same_name_twice = Counter(calls).most_common(1)[0][1] >= 2 if calls else False
         print(f"同名工具被报了 2 次（未被误去重）：{'是' if same_name_twice else '否  ← 位置兜底键失效'}")
         all_ok = all_ok and same_name_twice

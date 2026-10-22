@@ -32,7 +32,6 @@ async function run(page, path, label) {
 
   const before = await snapshot(page);
 
-  // 真实鼠标滚轮：把指针放在消息区中间往下滚
   await page.mouse.move(640, 420);
   const steps = [];
   for (let i = 0; i < 5; i += 1) {

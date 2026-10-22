@@ -1,12 +1,3 @@
-// 侧栏「还原」的 DOM 测试：教材管理搬去独立页面之后，聊天页的侧栏应该
-// 回到加这个功能之前的样子。
-//
-// 钉的是三件事，都是**不测就会悄悄退回去**的：
-//   1. 侧栏里那套文档列表/上传按钮真的没了（不是隐藏——隐藏在 DOM 里还留着，
-//      下次谁把它 hidden = false 就又冒出来了）；
-//   2. 留了一个能点到 /library 的入口，否则功能等于被删掉了；
-//   3. 聊天页**不再请求 /api/documents**。这条最要紧：只要还剩一处调用，
-//      每次开聊天页都会白拉一遍全量书单（几十 KB），而且书多了会变慢。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
@@ -42,7 +33,6 @@ window.fetch = (url) => {
     }));
   }
   if (String(url).includes('/api/documents')) {
-    // 拉到了就说明还在调用——返回一份假书单，好让下面那条断言说得清楚。
     return Promise.resolve(json([{ doc_id: 'd1', title: '不该被拉到的书', status: 'ready' }]));
   }
   return Promise.resolve(json([]));
@@ -81,14 +71,11 @@ check('入口文字说清是干什么的',
 check('入口是链接不是按钮（可直接右键开新标签）',
   entry && entry.tagName.toLowerCase() === 'a', entry ? entry.tagName : '');
 
-// 会话结束后再确认一次：boot 里的 refreshIdentity → loadConversations 是异步的，
-// 上面只等了一个 tick，这里给足时间。
 for (let i = 0; i < 5; i += 1) await tick();
 check('聊天页不再请求 /api/documents',
   !calls.some((url) => url === '/api/documents'),
   calls.join(' '));
 
-// 记忆/邀请入口是 F 域的东西，不该被这次改动连带删掉。
 check('记忆入口还在', Boolean(document.querySelector('#memoryEntry')));
 check('邀请入口还在', Boolean(document.querySelector('#inviteEntry')));
 

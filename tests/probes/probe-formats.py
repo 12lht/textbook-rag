@@ -38,7 +38,6 @@ def build_pptx(path: Path) -> None:
         slide.shapes.title.text = title
         slide.placeholders[1].text = body
         if index == 1:
-            # 造一张纯色 PNG 当插图，验证图片路径
             from PIL import Image  # 可能没装，退化则跳过插图
             buffer = path.with_suffix(".tmp.png")
             Image.new("RGB", (320, 200), (220, 235, 225)).save(buffer)
@@ -75,7 +74,6 @@ def main() -> None:
     documents.UPLOAD_DIR = tmp / "uploads"
     documents.ASSET_DIR = tmp / "assets"
 
-    # --- PPTX ---
     pptx_path = tmp / "chapter3.pptx"
     try:
         build_pptx(pptx_path)
@@ -95,7 +93,6 @@ def main() -> None:
         )
         check("PPTX 章节取幻灯片标题", any(c["chapter"] == "第三章 抽样定理" for c in chunks))
 
-    # --- DOCX ---
     docx_path = tmp / "chapter2.docx"
     try:
         build_docx(docx_path)
@@ -112,7 +109,6 @@ def main() -> None:
         check("DOCX 页数记为 0（Word 拿不到真实页数）", parsed["page_count"] == 0, str(parsed["page_count"]))
         check("DOCX 认出了章标题", any(c["chapter"] == "第 2 章 随机过程" for c in chunks))
 
-    # --- 失败路径要有明确原因 ---
     try:
         documents.create_upload("u1", "note.txt", b"hello")
         check("不支持的类型被拒", False, "居然收下了")
@@ -125,13 +121,11 @@ def main() -> None:
     except documents.DocumentError as exc:
         check("空文件被拒", "空" in str(exc), str(exc))
 
-    # 伪造一个坏 PDF：后缀对、内容是垃圾
     broken = documents.create_upload("u1", "broken.pdf", b"%PDF-1.4 not really a pdf")
     broken_parsed = documents.parse_document(broken["doc_id"])
     check("坏 PDF 落成 failed 而不是抛异常", broken_parsed["status"] == "failed", broken_parsed["status"])
     check("坏 PDF 有原因", bool(broken_parsed["error"]), str(broken_parsed["error"])[:60])
 
-    # --- 崩溃恢复 ---
     zombie = documents.create_upload("u1", "zombie.pptx", pptx_path.read_bytes() if pptx_path.exists() else b"x")
     with documents._connect() as conn:
         conn.execute(

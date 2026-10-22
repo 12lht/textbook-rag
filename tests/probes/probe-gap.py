@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """量一下真实行距：段内行距 vs 段间距，看阈值 0.75 倍字号对不对。"""
 import sys
 sys.path.insert(0, r"D:/agent")

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """让模型当裁判：几组融合权重，逐条判「这段能不能回答这个问题」。
 
 判据为什么不能用「标准答案 = 术语提问的第一条」：
@@ -88,8 +87,6 @@ JUDGE = """下面是教材里的若干段原文，编号 A 开始。
 def judge(model, query: str, chunks: list[str]) -> list[int]:
     body = "\n\n".join(f"{chr(65 + index)}. {text}" for index, text in enumerate(chunks))
     prompt = JUDGE.format(query=query, chunks=body, count=len(chunks))
-    # 智谱的免费模型高峰期会 429（「访问量过大」），不带重试的话 32 次调用
-    # 只要炸一次整个对照就白跑（试过：跑了 11 分钟在半路崩掉）。
     delay = 10
     for attempt in range(4):
         try:

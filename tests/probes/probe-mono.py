@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """等宽字体的分布：它是识别代码块的可靠信号吗？三类样本都查。"""
 import sys
 sys.path.insert(0, r"D:/agent")
@@ -28,7 +27,6 @@ for path, label in PATHS:
                 text = "".join(s.get("text", "") for s in spans)
                 if not text.strip(): continue
                 total_lines += 1
-                # 取该行字符数最多的字体当主字体
                 weights = collections.Counter()
                 for s in spans:
                     weights[s["font"]] += len(s.get("text", ""))

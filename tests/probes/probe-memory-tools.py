@@ -1,7 +1,7 @@
 """探针：验证「模型自己决定什么时候记」这套记忆工具（零模型调用）。
 
 测四件事：
-  1. 后端没注入时不注册工具、系统提示不变（评测环境必须和基线一致）；
+  1. 后端没注入时不注册工具、系统提示不变；
   2. 注入后两个工具挂上，且排在原有 5 个工具之后（不打乱原顺序）；
   3. 模型看到的那张「名片」里没有 runtime / user_id（框架塞的，模型看不见）；
   4. 真的走一遍 ToolNode：user_id 从 Context 上来、replaces 能作废旧条目、
@@ -41,7 +41,6 @@ class StubBackend:
     """假存储：按 user_id 分开存（真实现就是这么做的），并记录被调用的参数。"""
 
     def __init__(self) -> None:
-        # 一个 user_id 一份，故意和 memories.py 的存储形状保持一致
         self.store: dict[str, list[dict]] = {}
         self.writes: list[tuple] = []
         self.forgets: list[tuple] = []
@@ -209,16 +208,11 @@ async def main() -> int:
     enum = next((item["enum"] for item in kind_schema["anyOf"] if "enum" in item), None)
     print(f"   kind 的 enum：{enum}")
     ok &= check("schema 里带上了 4 个合法取值", enum == ["偏好", "身份", "计划", "事实"])
-    # 越界取值必须被**拒掉**，而不是悄悄归成「其他」——悄悄归一等于 kind 白设
     rejected = await call(agent_core.save_memory, {"text": "x", "kind": "禁忌"})
     ok &= check("枚举外的值被拒", "Input should be" in rejected or "未启用" in rejected, f"{rejected[:60]!r}")
 
     print()
     print("== 11. 并发写不丢数据（真存储 + 真线程） ==")
-    # 模型在一条消息里发多个工具调用时，ToolNode 会并发执行它们，而这些工具是
-    # 同步函数、会被丢进线程池 —— 所以写是真会并发的。换 SQLite 之前这里要考
-    # 一把 `threading.Lock`；现在那把锁**已经删了**（原子性由事务保证），
-    # 所以这一节测的是「数据库真的兜住了，没把锁还回来」。
     import threading
     import uuid
 
@@ -241,7 +235,6 @@ async def main() -> int:
         old = memories.DB_PATH
         memories.DB_PATH = db
         if not cold:
-            # 先自己走一遍，把文件建出来、表建好，模拟「跑了一阵子的库」
             memories.remember("warmup", [{"text": "热身"}])
         try:
             barrier = threading.Barrier(count)
@@ -283,8 +276,6 @@ async def main() -> int:
         print(f"      异常样本：{sample}")
     ok &= check("热库并发：一条都没丢、一次都没报错", kept == 8 and failed == 0, f"{kept} 条 / {failed} 次异常")
 
-    # 更狠的一种：8 个线程同时写**同一条**。去重靠唯一约束 + 累加，所以应该是
-    # 1 条落盘、hits 累加到 8 —— 这正是原来那把锁在防的场景，现在靠事务兜。
     dup_kept, hits, dup_failed, samples = race(cold=True, same=True)
     print(f"   冷启动 8 线程并发写**同一条** -> 落盘 {dup_kept} 条，hits={hits}，失败 {dup_failed} 次")
     for sample in samples:
@@ -292,14 +283,12 @@ async def main() -> int:
     ok &= check("去重没被并发冲垮（只留 1 条）", dup_kept == 1, f"{dup_kept} 条")
     ok &= check("每次写都算进 hits", hits == 8 and dup_failed == 0, f"hits={hits} / {dup_failed} 次异常")
 
-    # 反过来确认这把锁没有被偷偷加回来：真存储层里不该再存在写锁。
     ok &= check(
         "写锁没有偷偷加回来（原子性归数据库管）",
         not hasattr(memories, "_write_lock"),
         "memories._write_lock 不存在",
     )
 
-    # 收拾临时库。删不掉也无所谓，只是留几个文件在 tmp 里。
     for db in race.created:  # type: ignore[attr-defined]
         for suffix in ("", "-wal", "-shm"):
             side = Path(str(db) + suffix)
@@ -318,7 +307,6 @@ async def run() -> int:
     try:
         return await main()
     finally:
-        # 收掉 MCP 子进程，否则脚本不会退出
         await agent_core.close_mcp()
         agent_core.set_memory_backend(read=None, write=None, forget=None)
 

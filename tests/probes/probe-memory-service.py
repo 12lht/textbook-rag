@@ -21,17 +21,10 @@ import conversations
 import memories
 import service
 
-# 全部改到临时文件——这个探针会真的建会话、写标题、写记忆
-#
-# **`memories` 的变量名是 `DB_PATH`**（2026-10-10 从 JSON 换 SQLite 时改的名）。
-# 之前这里写的是 `memories.MEMORY_PATH`：赋值不报错、也不生效，只是给模块加了个
-# 没人读的属性，结果探针一直往真实的 data/memories.sqlite3 里写。
-# 换了个存储就悄悄失效——**探针里的「指向临时文件」这两行，改名时要一起改。**
 SUFFIX = uuid.uuid4().hex[:6]
 memories.DB_PATH = Path(__file__).with_name(f"probe-svc-memories-{SUFFIX}.sqlite3")
 conversations.SUMMARY_PATH = Path(__file__).with_name(f"probe-svc-summaries-{SUFFIX}.json")
 conversations.RENAME_PATH = Path(__file__).with_name(f"probe-svc-renames-{SUFFIX}.json")
-# 会话归属（2026-10-10 加登录时新增的第三个文件）。漏了它探针会往真实 data/ 里写。
 conversations.OWNER_PATH = Path(__file__).with_name(f"probe-svc-owners-{SUFFIX}.json")
 
 TMP_FILES = [
@@ -41,7 +34,6 @@ TMP_FILES = [
     conversations.OWNER_PATH,
 ]
 
-# 探针建的会话，收尾时清掉，别把 checkpoint 撑大
 _THREADS: list[str] = []
 
 RESULTS: list[bool] = []
@@ -55,8 +47,6 @@ def check(label: str, condition: bool, detail: str = "") -> bool:
 
 async def main() -> int:
     user_id = f"svc-user-{SUFFIX}"
-    # 建会话、跑图都要显式给身份了（登录改造之后）。
-    # `memory_enabled` 走默认 True，对应「登录用户」那一档。
     created = service.create_conversation(user_id)
     thread_id = created["thread_id"]
     _THREADS.append(thread_id)
@@ -98,7 +88,6 @@ async def run() -> int:
                 pass
         await service.shutdown()
         for path in TMP_FILES:
-            # SQLite 会有 -wal / -shm 边车文件，一起收
             for suffix in ("", "-wal", "-shm"):
                 side = Path(str(path) + suffix)
                 try:

@@ -4,7 +4,6 @@
 接口（`remember` / `memories_of`），不碰内部结构。以后不管换成什么，用同一支
 探针跑一遍，才有资格说「换完变快了」。没 before 数字的改动就是玄学。
 
-## 换存储之前的数字（2026-10-10 实测，留在这里做对比）
 
 JSON 版（`data/memories.json`，读整份 → 改一个用户 → 写回整份）：
 
@@ -39,9 +38,7 @@ RUN = uuid.uuid4().hex[:6]
 TMP = Path(__file__).with_name(f"_memory-scale-{RUN}.sqlite3")
 memories.DB_PATH = TMP
 
-# 每个用户存这么多条 = 「用了一阵子」的典型值。上限是 memories.MAX_PER_USER。
 PER_USER = 30
-# 每个规模重复几次取中位数。单次采样在这个量级上抖得很厉害（冷/热、GC）。
 REPEAT = 5
 
 
@@ -96,8 +93,6 @@ def timed(fn) -> float:
 
 
 def main() -> int:
-    # 一条事实占多少字节：用「一行 JSON」来估，和换存储之前的算法保持一致，
-    # 这样两边的数字才可比。
     one = len(
         json.dumps(
             {
@@ -125,7 +120,6 @@ def main() -> int:
     rows_out = []
     for users in (100, 1000, 5000, 20000):
         size = build(users)
-        # 挑中间那个用户读，别总读第 0 个或最后一个（避免边界效应）
         target = str(users // 2)
 
         read_ms = timed(lambda: memories.memories_of(target))

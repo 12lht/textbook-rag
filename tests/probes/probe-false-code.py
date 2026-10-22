@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """被误判成代码的正文行长什么样？"""
 import sys
 sys.path.insert(0, r"D:/agent")

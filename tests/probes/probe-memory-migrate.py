@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：老记忆库（没有 `id` 列）升级上来会不会丢东西。
 
 `id` 是后加的列，生产库里已经躺着一批老行。SQLite 的
@@ -38,7 +37,6 @@ def check(label: str, condition: bool, extra: str = "") -> None:
         print(f"  FAIL {label}  {extra}")
 
 
-# 老版本的表结构：没有 id 列。
 OLD_SCHEMA = """
 CREATE TABLE memories (
     user_id     TEXT NOT NULL,

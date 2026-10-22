@@ -1,40 +1,19 @@
 """教材库：把 PDF / PPTX / DOCX 变成「可检索的段落」和「可引用的图」。
 
-这是应用层模块，和 `memories.py` / `conversations.py` 同一个位置：只读写
-`data/` 下的文件与 SQLite，**不 import 任何 agent 相关的东西**，因此也能被
-命令行、探针、离线批处理直接调用。
+应用层模块（同 `memories.py` / `conversations.py`）：只读写 `data/` 下的文件与 SQLite，
+不 import 任何 agent 相关的东西，所以命令行、探针、离线批处理都能直接用。
 
-## 这个模块只做三件事
+只做三件事：收文件（算指纹去重、落盘、写 pending）、解析（切段落、抽图、配对图注，
+推到 ready / failed）、存取（列表、删除、按用户取段落）。检索、排序、引用编号在
+`retrieval.py`——守住这条边界，否则删书、换切分策略、做离线评测都要穿过检索逻辑。
 
-1. **收文件**：算内容指纹去重、落盘、写一行 `pending`（A1/A5）。
-2. **解析**：切段落、抽图、配对图注，写完把状态推到 `ready` 或 `failed`（A2/A6/A7）。
-3. **存取**：列表、删除、按用户取段落（A3/A4）。
+收文件和解析分开：300 页 PDF 解析要几十秒，`create_upload()` 只落盘 + 写 pending，
+毫秒级返回，重活由应用层丢线程池。代价是可能出现「写着 pending 但没人解析」的僵尸行，
+`reconcile_pending()` 在启动时把超时未完成的置为 failed。
 
-检索、排序、引用编号**不在这里**——那是 `retrieval.py` 的事。这条边界要守住：
-一旦把「哪个段落更相关」写进来，删书、换切分策略、做离线评测就都得穿过检索逻辑。
-
-## 为什么解析和收文件要分开
-
-一次 300 页 PDF 的解析要几十秒。如果放在上传请求里同步做完，浏览器会卡在
-一个转圈的框上，而且中间崩了什么都没留下。所以：
-
-- `create_upload()` 只做落盘 + 写 `pending`，**毫秒级返回**；
-- `parse_document()` 是重活，由应用层丢进线程池（`asyncio.to_thread`）。
-
-代价是可能出现「写着 pending 但没人解析」的僵尸行（进程恰好在这时重启）。
-`reconcile_pending()` 就是为此存在的：启动时把超时未完成的置为 `failed`，
-**不让它永远停在「解析中」**——这是 A2 的验收标准里唯一需要主动兜底的一条。
-
-## 切分的目标不是「切得均匀」，是「切出来能引用」
-
-一条 chunk 要能独立回答一个问题，所以：
-
-- **不跨章合并**：翻章处强制断开，否则「第 3 章的抽样定理」会带上第 4 章的开头；
-- **允许跨页合并**：教材的段落本来就跨页，硬按页断会把一句话切成两半；
-- **图注和图是同一条**：图注单独成 chunk 没有意义（谁也不知道那张图长什么样），
-  所以图注 + 截图合成一条 `kind='figure'` 的 chunk，图注文本就是它的 content。
-
-页码记 `page_start` / `page_end` 两个，因为跨页 chunk 只记一个页码必然是错的。
+切分的目标不是切得均匀，是切出来能引用：不跨章合并、允许跨页合并、图注和截图合成
+一条 `kind='figure'` 的 chunk（图注单独成 chunk 没有意义）。页码记 page_start /
+page_end 两个，跨页 chunk 只记一个必然错。
 """
 from __future__ import annotations
 
@@ -53,8 +32,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
-# 挂在 api.py 配置的 "agent" 下面：这一层不自己配 handler，
-# 只往上冒泡（`agent` 已经有 handler 且 propagate=False，不会重复打印）。
 _log = logging.getLogger("agent.documents")
 
 DATA_DIR = Path(__file__).with_name("data")
@@ -63,73 +40,38 @@ DB_PATH = DATA_DIR / "documents.sqlite3"
 UPLOAD_DIR = DATA_DIR / "uploads"
 ASSET_DIR = DATA_DIR / "assets"
 
-# 单本教材的大小上限。教材扫描版 PDF 常见 50-200MB。
-#
-# 原来卡在 80MB，实测 Hello-Agents（720 页、97.9MB）**直接被拒**——而它正是
-# 这个项目最想支持的那类书。上限的成本不在磁盘，在内存：`create_upload` 会把
-# 整个文件读进来算指纹，250MB 的文件峰值大约多占 250MB 内存，可以接受。
-# 150→250（2026-10-21）：概率论教材 225MB 被挡在门外，这种大书是图片多不是页数多，
-# PyMuPDF 按页流式处理，内存峰值可控。
 MAX_FILE_BYTES = 250 * 1024 * 1024
 
-# 允许的扩展名。**只认这三个**，不做「猜格式」：猜错会得到一堆乱码段落，
-# 比直接拒绝难排查得多。
 SUPPORTED_SUFFIXES = {".pdf", ".pptx", ".docx"}
 
-# 解析状态。`pending` 是「已收、未解析」，`parsing` 是「正在解析」。
-# 分成两个不是为了好看：`parsing` 才代表「有进程正在干这件事」，
-# 崩溃恢复时只有 `parsing` 才是可疑的（`pending` 可能只是排在队列里）。
 STATUS_PENDING = "pending"
 STATUS_PARSING = "parsing"
 STATUS_READY = "ready"
 STATUS_FAILED = "failed"
 
-# 超过这么久还停在 parsing，就认为那次解析随进程一起死了。
 STALE_PARSING_MINUTES = 30
 
-# 切分参数（字数，按字符数算，中文一个字算一个）。
-#
-# TARGET 是「差不多该断了」，MAX 是「必须断了」——两者分开是为了尽量在句号处断，
-# 而不是在任意位置硬切。MIN 以下不与下一段分开（几个字的残段没有检索价值）。
-#
-# 250 的依据（2026-10-21 对照实验，probe-chunksize.py）：500→250 后纯向量有用段
-# 13→26、top1 4→9——病根是长尾混话题长段稀释了段向量；实际均值只从 265 降到 207。
-# 代价对策：喂模型前做短块邻居扩展（retrieval._expand_neighbors），检索粒度和
-# 喂模型粒度分开——这是 WeKnora「检索碎、合并厚」的同款设计。
 TARGET_CHARS = 250
 MAX_CHARS = 900
 MIN_CHARS = 80
 
-# 图注识别。**只认独占一行的题注**：正文里「如图 3-4 所示」这种不是题注，
-# 拿它去截图只会截到一句话。
-#
-# 编号分隔符要收全：教材排版里 `2-5` 的连字符经常不是 ASCII 的 `-`，
-# 而是 U+2011（不换行连字符）或 U+2013 / U+2014。只写 `-` 会把「图 2-5」
-# 拆成编号 `2` 和题注 `-5 尾递归过程`——现象是图全对、编号全错，
-# 而编号错了引用就没法按「图 2-5」对上书里的图。
 _CAPTION_RE = re.compile(
     r"^\s*(图|表|Figure|Fig\.?|Table)\s*[（(]?\s*"
     r"([0-9]+(?:\s*[-－.．–—‑]\s*[0-9]+)*|[A-Z]\s*[-－.．–—‑]\s*[0-9]+)"
     r"\s*[)）]?\s*[:：.．、]?\s*(.*)$",
     re.IGNORECASE,
 )
-# 题注以这些词开头时，它是**正文在引用图**，不是题注本身。
-# 「图 2-7 展示了以上三个算法的时间复杂度。」——这一行本来就在正文里，
-# 当成题注会去截一张不存在的图（截到隔壁的图），并且编号还会重复。
 _CAPTION_VERBS = (
     "所示", "中", "为", "是", "表示", "展示", "给出", "描述", "说明", "显示",
     "列出", "对比", "描绘", "列举", "呈现", "可见", "反映了", "是一种",
 )
-# 公式编号行：整行只剩下「(3-12)」「（3.12）」这种。
 _FORMULA_NO_RE = re.compile(r"^\s*[（(]\s*([0-9]+(?:\s*[-－.．–—‑]\s*[0-9]+)+)\s*[)）]\s*$")
-# 章节标题的正则兜底（PDF 没有书签目录时才用）。
 _HEADING_RE = re.compile(
     r"^\s*(第\s*[0-9一二三四五六七八九十百]+\s*[章节篇部]"
     r"|[0-9]+(\.[0-9]+){1,2}\s*[、.．]?\s*\S"
     r"|Chapter\s+[0-9]+)",
     re.IGNORECASE,
 )
-# 页码：`12`、`- 12 -`、`第 12 页`、`12 / 300`。
 _PAGE_NO_RE = re.compile(r"^\s*[-—–]?\s*[0-9]{1,4}\s*[-—–]?\s*$|^\s*第\s*[0-9]{1,4}\s*页\s*$|^\s*[0-9]{1,4}\s*/\s*[0-9]{1,4}\s*$")
 
 
@@ -200,26 +142,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name ON categories(user_id, nam
 CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id, created_at);
 """
 
-# 初始化锁。理由与 `memories.py` 相同：数据操作的原子性由 SQLite 保证，
-# 但「建文件 + 建表」这个动作不是原子的，两个线程同时进来会撞。
 _init_lock = threading.Lock()
 
 
-# --------------------------------------------------------------------------
-# 基础设施
-# --------------------------------------------------------------------------
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
 def _schema_ready(conn: sqlite3.Connection) -> bool:
-    """四张表都在才算就绪。
-
-    **加了新表就必须把它加进来**：建表只在「不就绪」时跑，只判 `documents` 的话，
-    一个已有的老库永远进不了建表分支，`categories` 建不出来，
-    然后每次点「分类」都报 `no such table`。和 `memories` 补 `id` 列、
-    `users` 补 `invites` 表是同一个坑，这已经是第三次踩，所以这次一次判全。
+    """四张表都在才算就绪。加新表必须同步加进来：建表只在「不就绪」时跑，只判一部分的话
+    老库永远进不了建表分支（同样的坑踩过三次）。
     """
     expected = {"documents", "chunks", "assets", "categories"}
     found = {
@@ -234,11 +167,8 @@ def _schema_ready(conn: sqlite3.Connection) -> bool:
 
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
-    """拿一个连接。建库建表在一次加锁里完成，之后的读写各自一个新连接。
-
-    每个调用一个新连接而不是共享一个：SQLite 的连接不是线程安全的，而这个模块
-    会被 `asyncio.to_thread` 在线程池里调用——线程池的线程是复用的，共享连接
-    迟早撞上「另一个线程正在用」。连接本身很便宜（微秒级）。
+    """拿一个连接。每个调用一个新连接：SQLite 连接不是线程安全的，而本模块在线程池里跑
+    （线程是复用的），共享连接迟早撞上「另一个线程正在用」。连接本身很便宜。
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -255,24 +185,15 @@ def _connect() -> Iterator[sqlite3.Connection]:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """给老库补新列。
-
-    `CREATE TABLE IF NOT EXISTS` 只在**没有这张表**时生效，已经存在的库不会自己
-    长出 `markdown` 列。项目的库里已经躺过真实数据（虽然现在清空了），删库重来
-    不是选项，所以每次连接都检查一次——`PRAGMA table_info` 是微秒级的。
-
-    这也是这个项目第一次真正需要迁移：以前加表都是新表，`IF NOT EXISTS` 就够了。
+    """给老库补新列。`CREATE TABLE IF NOT EXISTS` 只管「没有这张表」，已存在的库不会自己
+    长出 `markdown` 列，所以每次连接都 `PRAGMA table_info` 查一次（微秒级）。
     """
     columns = {row[1] for row in conn.execute("PRAGMA table_info(documents)")}
     if "markdown" not in columns:
         conn.execute("ALTER TABLE documents ADD COLUMN markdown TEXT")
     if "warning" not in columns:
-        # 「解析完成但有瑕疵」需要一个和 error 分开的家：error 在 ready 行上恒为空，
-        # 把提示写进 error 会让「有错」和「能用但要注意」这两件事混成一件。
         conn.execute("ALTER TABLE documents ADD COLUMN warning TEXT")
     if "category_id" not in columns:
-        # 可空 = 未分类。老库里的书全部落到未分类，这是**正确**的默认：
-        # 我们没有任何依据替用户决定这本书属于哪一科。
         conn.execute("ALTER TABLE documents ADD COLUMN category_id TEXT")
     conn.commit()
 
@@ -304,19 +225,12 @@ class DocumentError(Exception):
     """
 
 
-# --------------------------------------------------------------------------
-# 收文件（A1 / A5 / A2）
-# --------------------------------------------------------------------------
 
 def create_upload(user_id: str, filename: str, data: bytes) -> dict[str, object]:
     """收下一个文件，落盘并写一行 `pending`。返回这条记录（含是否重复）。
 
-    **去重按内容指纹，不按文件名**：同一个 PDF 改名再传一次不该变成两本；
-    反过来，两个不同文件同名也必须都收下。
-
-    重复上传时**不覆盖原记录**：原来已经解析好了，重新解析一遍纯属浪费，
-    而且会让这期间产生的引用（chunk_id）全部失配。所以直接返回老记录，
-    带 `duplicated=True` 让上层决定怎么提示。
+    去重按内容指纹，不按文件名。重复上传不覆盖原记录——已经解析好了，重解析一遍纯属浪费，
+    还会让这期间的引用（chunk_id）全部失配；直接返回老记录并带 `duplicated=True`。
     """
     name = os.path.basename(str(filename or "").strip()) or "未命名"
     suffix = Path(name).suffix.lower()
@@ -339,7 +253,6 @@ def create_upload(user_id: str, filename: str, data: bytes) -> dict[str, object]
         doc_id = _new_doc_id(conn)
         doc_dir = UPLOAD_DIR / doc_id
         doc_dir.mkdir(parents=True, exist_ok=True)
-        # 存原始文件的用途是「重新解析」：切分策略改了之后不用让用户再传一遍。
         file_path = doc_dir / f"source{suffix}"
         file_path.write_bytes(data)
 
@@ -381,9 +294,6 @@ def _new_doc_id(conn: sqlite3.Connection) -> str:
     raise DocumentError("生成教材编号失败，请重试。")
 
 
-# --------------------------------------------------------------------------
-# 解析（A2 / A6 / A7）
-# --------------------------------------------------------------------------
 
 @dataclass
 class _Element:
@@ -400,7 +310,6 @@ class _Element:
     asset_id: str | None = None
     label: str | None = None
     chapter: str | None = None
-    # 这一条占的版面范围（PDF 坐标），只有图和公式用得上，用于判断谁在上谁在下。
     bbox: tuple[float, float, float, float] | None = None
 
 
@@ -410,31 +319,16 @@ class _Parsed:
     elements: list[_Element] = field(default_factory=list)
     assets: list[dict] = field(default_factory=list)
     toc: list[list] = field(default_factory=list)
-    # 解析完成、但结果有已知瑕疵时的提示（例如「检测到双栏，按单栏解析」）。
-    # 和 `error` 分开：`error` 意味着这本书用不了，`warning` 意味着能用但要知道。
     warning: str | None = None
-    # 一页一个主题（幻灯片）。为真时切分**按页硬断**，不允许跨页合并——
-    # 两页 PPT 合成一条 chunk 会让「这页讲的是什么」变成「这两页混起来讲什么」。
-    # 不能只看后缀：老师给的课件常常是 .pdf（PPT 导出/打印），后缀判断不出来。
     section_per_page: bool = False
 
 
 def parse_document(doc_id: str) -> dict[str, object]:
-    """把一本 `pending` 的书解析完，返回最终记录。
+    """把一本 pending 的书解析完，返回最终记录。
 
-    **这个函数是阻塞的**（CPU + 磁盘，可能几十秒），调用方必须丢线程池。
-    失败时把原因写进 `documents.error` 并置 `failed`——不抛异常出去，
-    因为调用它的是一条后台任务，抛出没人接。
-
-    产出**两份**东西，一份存一份用：
-    - `documents.markdown`：带页码/章节锚点的全文，落库。它是**中间态**，
-      也是给用户看的原文、给导出用的底稿；
-    - `chunks`：从那份 Markdown 切出来的检索单元。
-
-    **切分只读 Markdown，不读解析器**——这是这次重构的全部意义。之前切分只能
-    紧跟在解析后面跑（段落、页码、图号都在内存的元素流里，程序结束就没了），
-    所以哪怕只想调一下「目标长度 500 还是 300」，也得把整本 PDF 重解析一遍。
-    现在 `rechunk()` 只在文本上跑一遍正则，一个 300 页的书不到一秒。
+    阻塞（CPU + 磁盘），调用方必须丢线程池。失败时写 `documents.error` 并置 failed，不抛异常
+    （调用它的后台任务没人接）。产出 `documents.markdown` + 从它切出的 chunks——**切分只读
+    Markdown**，所以调切分参数不用重新解析整本 PDF。
     """
     with _connect() as conn:
         row = conn.execute("SELECT * FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
@@ -459,9 +353,6 @@ def parse_document(doc_id: str) -> dict[str, object]:
             raise DocumentError(f"未知格式：{kind}")
 
         markdown = render_markdown(parsed.elements)
-        # 一页一个主题就按页断开（PPT，以及 PPT 导出的 PDF）；连续文本允许跨页合并。
-        # 判据由解析器给（`parsed.section_per_page`），不看后缀：
-        # 老师的课件常常是 .pdf，光看扩展名永远判不成幻灯片。
         chunks = cut_chunks(
             markdown, doc_id, section_per_page=(kind == "pptx" or parsed.section_per_page)
         )
@@ -469,14 +360,6 @@ def parse_document(doc_id: str) -> dict[str, object]:
     except DocumentError as exc:
         _fail(doc_id, str(exc))
     except Exception as exc:  # noqa: BLE001 - 解析器内部的任何意外都要落成 failed
-        # 这里刻意 catch 宽泛：第三方解析库对畸形 PDF 抛的异常五花八门，
-        # 一旦漏出去，这本书就永远停在 parsing。
-        #
-        # 存的是「原因」，不带「解析失败」四个字——前端已经有那个标签了，
-        # 带上会显示成「解析失败 · 解析失败：FileDataError: 损坏」。
-        #
-        # 同时落一条日志：状态里只有一行摘要（给用户看的），排查需要 traceback
-        # （给维护者看的）。这两件事受众不同，别指望一个字符串同时满足。
         _log.exception("解析失败 doc=%s", doc_id)
         _fail(doc_id, f"{type(exc).__name__}: {exc}")
 
@@ -486,13 +369,9 @@ def parse_document(doc_id: str) -> dict[str, object]:
 
 
 def rechunk(doc_id: str) -> dict[str, object]:
-    """只重切，不重解析。用于调整切分参数后批量重跑。
-
-    **这是 Markdown 中间态带来的那个能力**，也是它唯一不可替代的价值：
-    解析 PDF 要几十秒还要原文件，重切只要读一列文本 + 一遍正则。
-
-    不碰 `assets`：图是解析产物，重切不该动它（重切只改变「怎么分段」，
-    不改变「书上有哪些图」）。
+    """只重切、不重解析，用于调完切分参数后批量重跑。这是 Markdown 中间态带来的能力：
+    解析要几十秒还要原文件，重切只要读一列文本 + 一遍正则。不碰 `assets`（图是解析产物，
+    重切只改「怎么分段」）。
     """
     with _connect() as conn:
         row = conn.execute(
@@ -615,11 +494,8 @@ def _store(doc_id: str, parsed: _Parsed, markdown: str, chunks: list[dict]) -> N
 
 
 def reconcile_pending() -> int:
-    """启动时把「解析中」但明显已经死掉的行置为失败。返回处理条数。
-
-    判据只有一条：`status='parsing'` 且 `updated_at` 超过 `STALE_PARSING_MINUTES`。
-    刻意**不动 `pending`**——它可能只是排着队还没轮到；而 `parsing` 意味着
-    确实有进程在跑，进程死了才会一直停在这里。
+    """启动时把「解析中」但明显已经死掉的行置为失败，返回处理条数。
+    判据：`status='parsing'` 且 `updated_at` 超时。刻意不动 `pending`——它可能只是排着队。
     """
     cutoff = (datetime.now() - timedelta(minutes=STALE_PARSING_MINUTES)).isoformat(timespec="seconds")
     with _connect() as conn:
@@ -632,9 +508,6 @@ def reconcile_pending() -> int:
         return cursor.rowcount
 
 
-# --------------------------------------------------------------------------
-# 查询与删除（A3 / A4）
-# --------------------------------------------------------------------------
 
 def list_documents(user_id: str) -> list[dict[str, object]]:
     with _connect() as conn:
@@ -645,16 +518,7 @@ def list_documents(user_id: str) -> list[dict[str, object]]:
     return [_row_to_doc(row) for row in rows]
 
 
-# --------------------------------------------------------------------------
-# 分类（知识库管理页）
-# --------------------------------------------------------------------------
-#
-# 一本书最多属于一个分类（`documents.category_id`），为空就是未分类。
-# 不用多对多：用户说的是「把一个学科的几个 PDF 归到一个分类下」，
-# 一本书同时属于两个学科是少数情况；而多对多会带来「删分类时书还有别的家吗」
-# 这类判据，界面上也要处理「这本书在两个分类里都出现」。先做简单的。
 
-# 分类名上限。够写「信号与系统（2024 秋）」这种，又不至于把侧栏撑爆。
 MAX_CATEGORY_NAME = 40
 
 
@@ -674,11 +538,9 @@ def _clean_category_name(name: object) -> str:
 
 
 def list_categories(user_id: str) -> list[dict[str, object]]:
-    """这个人的全部分类，带上每类有几本书。按创建先后排，新的在后。
-
-    用 `LEFT JOIN` 而不是「先查分类再逐个查书数」：后者是 N+1 次查询，
-    分类一多就明显（虽然现在只有十几个）。`d.user_id = c.user_id` 那个条件
-    不能少——它保证只数**这个人自己的**书，否则一本异常数据会让别人的计数串过来。
+    """这个人的全部分类，带上每类有几本书，按创建先后排。
+    用 `LEFT JOIN` 而不是先查分类再逐个查书数（N+1）；`d.user_id = c.user_id` 不能少，
+    否则别人的书会让这个人的计数串过来。
     """
     with _connect() as conn:
         rows = conn.execute(
@@ -751,11 +613,9 @@ def rename_category(category_id: str, user_id: str, name: object) -> str:
 
 
 def delete_category(category_id: str, user_id: str) -> bool:
-    """删分类，**类下的书退回未分类，不跟着删**。返回它此前是否存在。
-
-    这个取舍是刻意的：书是几十 MB 解析出来的贵重资产，而分类只是一个标签。
-    「删掉一个标签顺手删掉 8 本书」是那种点错了就没法挽回的操作。
-    真要删书，在书自己身上点删除——那里删什么是明确的。
+    """删分类，类下的书退回未分类、不跟着删，返回它此前是否存在。
+    书是几十 MB 解析出来的贵重资产，分类只是标签——「删掉一个标签顺手删掉 8 本书」
+    点错了就没法挽回。
     """
     with _connect() as conn:
         row = conn.execute(
@@ -777,12 +637,8 @@ def delete_category(category_id: str, user_id: str) -> bool:
 
 
 def assign_category(doc_id: str, user_id: str, category_id: str | None) -> str:
-    """把一本书挪到某个分类（`None` = 挪回未分类）。
-
-    返回 `"ok"` / `"missing"`（没这本书）/ `"no_category"`（目标分类不存在或不是他的）。
-
-    **两个 id 都要按 `user_id` 验一遍**：只验书不验分类的话，别人可以把自己的书
-    挂到我的分类 id 上（虽然界面看不出来，但计数会乱）。
+    """把一本书挪到某个分类（`None` = 挪回未分类）。返回 ok / missing / no_category。
+    书和分类两个 id 都要按 `user_id` 验一遍：只验书的话，别人可以把他的书挂到我的分类 id 上。
     """
     target = None if category_id is None else str(category_id)
     with _connect() as conn:
@@ -821,11 +677,8 @@ def get_document(doc_id: str, user_id: str) -> dict[str, object] | None:
 
 
 def delete_document(doc_id: str, user_id: str) -> bool:
-    """删书：数据库行 + 原文件目录 + 图目录，一起删。返回它此前是否存在。
-
-    先删数据库再删文件：反过来的话，文件删成功、数据库删失败，会留下一条
-    「状态 ready 但文件不存在」的记录，之后每次检索都要处理这种悬空引用。
-    留着孤儿文件（数据库已删、磁盘还在）只是浪费空间，不会让逻辑出错。
+    """删书：数据库行 + 原文件目录 + 图目录一起删，返回此前是否存在。
+    先删库再删文件：反过来会留下「ready 但文件不存在」的悬空记录，之后每次检索都要处理。
     """
     with _connect() as conn:
         row = conn.execute(
@@ -902,63 +755,23 @@ def asset_of(asset_id: str, user_id: str) -> dict[str, object] | None:
     return dict(row) if row else None
 
 
-# --------------------------------------------------------------------------
-# Markdown 中间态：解析产物与切分之间的唯一接口
-# --------------------------------------------------------------------------
-#
-# 这一层存在的理由只有一条：**切分不该依赖解析器**。
-#
-# 解析 PDF 要原文件、要 pymupdf、要几十秒；切分只是「把长文本分成 500 字的段」。
-# 之前两件事焊在一起（元素流只在解析过程中存在），所以调一个切分参数就得整本重解析。
-#
-# 现在解析的终点是一份 Markdown，切分的起点也是它。中间的信息（页码、章节、
-# 图号）靠 HTML 注释锚点传递：
-#
-#     <!-- page:41 -->
-#     <!-- chapter:3.2 低通抽样 -->
-#
-#     正文段落……
-#
 #     ![图 3-4 抽样过程的示意](as_77.png)
-#
-# 用注释而不是自定义标记（`{{page:41}}`）有两个好处：任何 Markdown 渲染器都会
-# 把注释隐藏掉，所以这份文本可以直接给用户看、给导出用；而机器抓它只需要一条
-# 行级正则。
-#
-# **锚点格式是存储契约**：已经入库的书按这个格式存着，改格式就得写迁移。
 
 _PAGE_ANCHOR_RE = re.compile(r"^<!--\s*page:(\d+)\s*-->\s*$")
 _CHAPTER_ANCHOR_RE = re.compile(r"^<!--\s*chapter:(.+?)\s*-->\s*$")
 _IMAGE_LINE_RE = re.compile(r"^!\[(.*?)\]\(([^)]+)\)\s*$")
 
-# 图引用的「可替换片段」。**公开**（不带下划线），因为把它换成可访问的 URL 是
-# 应用层的事（要签名），而认哪个片段属于这一层——两处各写一份正则迟早对不上，
-# 表现是「有的图能显示、有的不能」。
-#
-# 只匹配本模块自己生成的形态 `as_xxxx.png`：绝对路径、`http(s)://` 一律不碰，
-# 免得把正文里本来就有的外链图当成自家 asset。
-#
-# 分三组，**第二组是 asset_id 本身**（`.png` 后缀固定，不跟进去）：替换方只要
-# 拼「前缀 + 新 URL + 后缀」，不必关心扩展名怎么处理。
 ASSET_REF_RE = re.compile(r"(!\[.*?\]\()(as_[0-9a-f]{4,})\.png(\))")
 
-# 条目符号的字符集。两处共用：解析时认「这一行新起一条」，渲染时换成统一的 `- `。
-#
-# 私用区 U+F000–U+F8FF 是 Wingdings 字形：字体里没有对应字，用户看到的是一串
-# 方块，模型读到的也是一个没有意义的码位。所以**必须**在渲染时换掉，而不是
-# 原样存进 Markdown。名单是照着真实课件补出来的，不是抄「常见项目符号表」。
 _BULLET_GLYPHS = "\uf000-\uf8ff➢➤►▶▸◆◇▪▫●○•·❖"
 
-# 行首条目符（含其后可能有的空格/全角空格），渲染时整体换成 `- `。
 _BULLET_LINE_RE = re.compile("^[ \t\u200b]*[" + _BULLET_GLYPHS + "][ \t\u3000]*")
 
 
 def normalize_bullets(text: str) -> str:
-    """把行首的条目符换成 Markdown 的 `- `。
-
-    一条要点在 chunk 里长什么样，决定了它能不能被检索到：`➢要求稳定可靠` 里的
-    箭头既占字符又干扰分词，私用区那几个干脆是方块。统一成 `- ` 之后，正文书里的
-    无序列表和幻灯片的要点在存储里是同一种形态，下游（检索、引用、导出）只认一种。
+    """把行首条目符换成 Markdown 的 `- `。
+    私用区那几个是方块、箭头占字符还干扰分词；统一之后正文列表和幻灯片要点在存储里是同一种
+    形态，下游（检索 / 引用 / 导出）只认一种。
     """
     if not any(ch in text for ch in "➢➤►▶▸◆◇▪▫●○•·❖") and not any(
         "\uf000" <= ch <= "\uf8ff" for ch in text
@@ -972,11 +785,8 @@ def normalize_bullets(text: str) -> str:
 
 
 def render_markdown(elements: list[_Element]) -> str:
-    """元素流 → 带锚点的 Markdown。这是解析的**唯一出口**。
-
-    页码锚点在每页第一个元素前打一次；章节锚点只在章节变化时打一次。
-    两者都不针对每个元素重复——一份 300 页的书如果有 3000 个元素，
-    每段都带锚点会让文本里一半是注释。
+    """元素流 → 带锚点的 Markdown，解析的唯一出口。
+    页码锚点每页打一次、章节锚点只在变化时打一次——每个元素都带会让文本一半是注释。
     """
     parts: list[str] = []
     last_page: int | None = None
@@ -989,12 +799,9 @@ def render_markdown(elements: list[_Element]) -> str:
             parts.append(f"<!-- page:{element.page} -->")
             last_page = element.page
         if element.kind in {"figure", "formula"} and element.asset_id:
-            # 图片用「asset_id.png」而不是绝对路径：这份 Markdown 会跟着 doc_id
-            # 目录一起搬（备份、迁移），绝对路径一搬就断。
             parts.append(f"![{element.content}]({element.asset_id}.png)")
             continue
         if element.kind == "code":
-            # **不能用 strip()**：代码的缩进是语义的一部分，只去掉尾部的空行。
             parts.append(f"```{element.label or ''}\n{element.content.rstrip()}\n```")
             continue
         body = normalize_bullets(element.content.strip())
@@ -1004,11 +811,8 @@ def render_markdown(elements: list[_Element]) -> str:
 
 
 def markdown_elements(markdown: str) -> list[_Element]:
-    """Markdown → 元素流。`render_markdown` 的逆过程。
-
-    这一遍解析刻意**不做任何智能判断**：不猜标题、不合并段落，只把注释读成
-    「当前位置」、把空行读成「换个元素」。所有关于「怎么切」的思考都留给
-    `chunk_elements`，这样两个步骤各自可测。
+    """Markdown → 元素流，`render_markdown` 的逆过程。
+    刻意不做任何智能判断（不猜标题、不合并段落），「怎么切」全留给 `cut_chunks`，两步各自可测。
     """
     elements: list[_Element] = []
     page = 0
@@ -1030,8 +834,6 @@ def markdown_elements(markdown: str) -> list[_Element]:
     in_code = False
     code_lang = ""
     for raw in markdown.splitlines():
-        # 代码围栏优先：围栏内部是**原样文本**，空行、`|` 开头、缩进都不能
-        # 触发别的规则。所以这一支必须在所有分支之前。
         stripped = raw.lstrip()
         if stripped.startswith("```"):
             if in_code:
@@ -1090,7 +892,6 @@ def markdown_elements(markdown: str) -> list[_Element]:
             continue
 
         if line.startswith("|"):
-            # 表格是一整块：中间的空行、`| --- |` 分隔行都属于它。
             if buffer_kind != "table":
                 flush()
                 buffer_kind = "table"
@@ -1101,7 +902,6 @@ def markdown_elements(markdown: str) -> list[_Element]:
             flush()
         buffer.append(line)
     if in_code and buffer:
-        # 围栏没闭合（正常解析产出的 Markdown 不会出现，防的是手改过的文件）
         text = "\n".join(buffer)
         if text.strip():
             elements.append(
@@ -1118,18 +918,11 @@ def markdown_elements(markdown: str) -> list[_Element]:
     return elements
 
 
-# --------------------------------------------------------------------------
-# 切分：元素流 → chunk
-# --------------------------------------------------------------------------
 
 def cut_chunks(markdown: str, doc_id: str, *, section_per_page: bool = False) -> list[dict]:
-    """Markdown → 段落列表。**只读文本，不碰解析器**。
-
-    `section_per_page` 是「每页必须断开」，只有 PPT 用。
-    它原来是 `_Element` 上的一个标志，重构后**必须挪到这里**：标志存在元素上时，
-    经过 `render_markdown` 就丢了（Markdown 里没有这个字段），于是 PPT 的三页
-    又被合并成一条。而「页面之间要不要断」本来就是切分策略，不是元素的属性，
-    放在这里才是它该在的地方。
+    """Markdown → 段落列表，只读文本、不碰解析器。
+    `section_per_page`（每页必须断开，只有 PPT 用）是切分策略而不是元素属性——挂在元素上
+    过一遍 `render_markdown` 就丢了，PPT 的三页又会被合并成一条。
     """
     return _cut_chunks(markdown_elements(markdown), doc_id, section_per_page=section_per_page)
 
@@ -1137,32 +930,20 @@ def cut_chunks(markdown: str, doc_id: str, *, section_per_page: bool = False) ->
 def _cut_chunks(
     elements: list[_Element], doc_id: str, *, section_per_page: bool = False
 ) -> list[dict]:
-    """元素流 → 段落列表。
+    """元素流 → 段落列表。单遍扫描，三条规则按顺序生效：
 
-    单遍扫描，三条规则按顺序生效：
+    1. 图/公式独占一条（自带 asset 引用，混进正文会让引用位置失真）；
+    2. 长度够了（60% TARGET）之后章变了才断——不能章一变就断，否则短小节被切成一堆
+       没有上下文的碎块；
+    3. 到 TARGET 且刚好在句末就断，到 MAX 无条件断（尽量在句号处断，别给半句话）。
 
-    1. 图/公式**独占一条**（它自带 asset 引用，混进正文会让引用位置失真）；
-    2. 长度够了（60% TARGET）之后，章变了就断；
-    3. 长度到 TARGET 且刚好处在句末就断；到 MAX 无条件断。
-
-    规则 2 里的「长度够了」不能省。第一版是「章变了就断」，实现在 Hello-Algo
-    上跑出 94 条正文、平均 213 字——因为每一小节（2.3.1、2.3.2……）都会断一次，
-    400 字的 TARGET 形同虚设。这正是「切得均匀」和「切得能引用」的冲突：
-    短小节强行断开只会得到一堆没有上下文的小块，而小块检索命中后给不出答案。
-
-    规则 3 的两个阈值分开，是为了「尽量在句号处断」——否则模型拿到的段落
-    开头是半句话，答案也就跟着断章取义。
-
-    表格是**原子块**：它不能被 `_split_long` 按句子切开（markdown 表格被拦腰
-    截断就成了乱码），所以走单独一条分支——放得下就并进当前 chunk，放不下
-    或者紧接着就 flush（不让表格吞掉后面的正文）。
+    表格是原子块：不能被 _split_long 切开（markdown 表格拦腰截断就是乱码），放不下就 flush。
     """
     chunks: list[dict] = []
     buffer: list[_Element] = []
     buffer_len = 0
     current_chapter: str | None = None
     current_page = 0
-    # 章节可以断章的最低长度。低于它时换章只更新标记、不断开。
     chapter_cut = int(TARGET_CHARS * 0.6)
 
     def flush() -> None:
@@ -1171,7 +952,6 @@ def _cut_chunks(
             return
         text = _join_elements(buffer)
         if text.strip():
-            # 整条都是表格时标成 table，下游可以据此决定要不要原样展示
             kind = "table" if all(item.kind == "table" for item in buffer) else "text"
             chunks.append(_make_chunk(doc_id, chunks, buffer, text, kind=kind))
         buffer = []
@@ -1186,9 +966,6 @@ def _cut_chunks(
             continue
 
         if element.kind == "table":
-            # 表格和图片一样**独占一条**：它是自包含的信息单元（有表头、有行列），
-            # 混进正文会被切分规则拦腰截断（markdown 表格断在一半就是乱码），
-            # 而且引用「第 58 页表 3-1」会指向一大段混合文本。
             flush()
             chunks.append(
                 _make_chunk(doc_id, chunks, [element], element.content, kind="table")
@@ -1196,15 +973,12 @@ def _cut_chunks(
             continue
 
         if element.kind == "code":
-            # 代码同理，而且更严重：截在中间就是语法错误，模型读了会照着错的学习。
             flush()
             chunks.append(
                 _make_chunk(doc_id, chunks, [element], element.content, kind="code")
             )
             continue
 
-        # 每页硬断（PPT）：和「章变了」不同，这个不看长度。一页幻灯片是一个主题，
-        # 两页合并会让一条 chunk 里同时装着「抽样定理」和「量化」。
         if section_per_page and element.page != current_page and buffer:
             flush()
             current_page = element.page
@@ -1215,7 +989,6 @@ def _cut_chunks(
                 flush()
             current_chapter = element.chapter
 
-        # 超长段落先按句切，避免单条 chunk 撑爆上下文
         for piece in _split_long(element.content):
             piece_element = _Element(
                 kind="text",
@@ -1235,12 +1008,8 @@ def _cut_chunks(
 
 def _merge_short(chunks: list[dict]) -> list[dict]:
     """把过短的正文片段并进前一条，然后重排序号。
-
-    短片段来自两处：图前面的最后一句（图必须独占一条，只能把它挤出来）、
-    以及章尾的几行。它们单独成条时检索能命中但答不出东西，还会白占引用编号。
-
-    **只合并正文，不动图/公式**：图的 chunk 里 content 是题注，并进正文反而
-    会让 asset 引用出现在一段无关的文字里。跨章不合并——那正是要防的事。
+    短片段（图前最后一句、章尾几行）单独成条时检索能命中但答不出东西，还白占引用编号。
+    只合并正文：图的 content 是题注，并进正文会让 asset 引用出现在一段无关的文字里；跨章不合并。
     """
     merged: list[dict] = []
     for chunk in chunks:
@@ -1258,7 +1027,6 @@ def _merge_short(chunks: list[dict]) -> list[dict]:
             continue
         merged.append(chunk)
 
-    # 合并之后 seq 出现了空洞，而 chunk_id 是拿 seq 拼的，所以统一重排。
     for index, chunk in enumerate(merged):
         chunk["seq"] = index
         chunk["chunk_id"] = chunk["chunk_id"].rsplit("-", 1)[0] + f"-{index:04d}"
@@ -1275,9 +1043,6 @@ def _make_chunk(
 ) -> dict:
     seq = len(existing)
     return {
-        # chunk_id 里带 doc_id：它是**全局唯一**的引用锚点，不依赖「本次检索的第几条」。
-        # 短编号 c1/c2 是每轮对话的临时映射，由检索层负责，不落库——落库的话，
-        # 同一段话在不同轮次会有不同 id，历史消息里的引用就再也对不上了。
         "chunk_id": f"{doc_id}-{seq:04d}",
         "seq": seq,
         "kind": kind,
@@ -1316,9 +1081,6 @@ def _split_long(text: str) -> list[str]:
     return pieces
 
 
-# --------------------------------------------------------------------------
-# PDF 解析
-# --------------------------------------------------------------------------
 
 def _require(module: str, hint: str):
     """延迟 import 第三方解析库。缺了给出**能照做的**提示，而不是 ModuleNotFoundError。"""
@@ -1329,15 +1091,10 @@ def _require(module: str, hint: str):
 
 
 def _looks_two_column(blocks: list, width: float) -> bool:
-    """这一页是不是双栏排版。
+    """这一页是不是双栏：看文字块左边缘有没有明显分界缝，不看「有没有两列文字」。
 
-    判据不看「有没有两列文字」，而是**文字块左边缘有没有一条明显的分界缝**：
-    单栏时所有块的 x0 挤在一起（同一页边距），双栏时会出现两组，中间空一大块。
-
-    三个门槛缺一不可：
-    - 块数 ≥ 6：太少时一两个居中图注就能造出「间隙」；
-    - 间隙 > 页宽 15%：普通缩进/列表不会拉这么开；
-    - 左边贴着页边距、右边落在页面右半：排除「居中大标题 + 正文」这种伪双栏。
+    门槛缺一不可：块数 ≥ 6（太少时居中图注就能造出间隙）、间隙 > 页宽 15%、
+    左边贴页边距且右边落在右半页（排除「居中大标题 + 正文」）。
     """
     if len(blocks) < 6:
         return False
@@ -1355,16 +1112,10 @@ def _looks_two_column(blocks: list, width: float) -> bool:
 
 
 def _pdf_preflight(pdf, pymupdf) -> dict[str, object]:
-    """解析前的体检：先判断这本 PDF 属不属于「我们能解析的那类」。
+    """解析前体检，返回 text_ratio（有文字层的页占比）和 columns（1 或 2）。
 
-    探 5 页（跳过封面两页，之后均匀取），算两个数：
-
-    - `text_ratio`：有文字层的页占比。接近 0 就是扫描版（整页是图）；
-    - `columns`：1 或 2，按文字块左边缘的分布判断。
-
-    **为什么必须先探再解析**：这两个条件不成立时，解析器不会报错——它会安安静静
-    产出一份读不通的文本，状态还是 `ready`。实测 3 页纯图 PDF 得到的是
-    「已就绪 · 0 段」，用户只能猜是哪里坏了。宁可拒绝，也别给一份假成品。
+    必须先探再解析：这两个条件不成立时解析器不报错，会安安静静产出一份读不通的文本、
+    状态还是 ready（3 页纯图 PDF 得到「已就绪 · 0 段」）。宁可拒绝，也别给一份假成品。
     """
     pages = int(pdf.page_count)
     if pages <= 0:
@@ -1386,9 +1137,6 @@ def _pdf_preflight(pdf, pymupdf) -> dict[str, object]:
         if _looks_two_column(blocks, page.rect.width):
             two_column += 1
 
-    # 幻灯片：横版 + 每页内容少。两者缺一不可——横版的教材（大开本）字数不会低。
-    # 实测：PPT 导出的课件是 720x540（比例 1.33）、每页 256 字；
-    # 两本教材是竖版（比例 0.77）、每页 1132 / 636 字，分界很宽。
     slides = False
     if pages >= 3:
         rect = pdf[0].rect
@@ -1415,7 +1163,6 @@ def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
         junk = _pdf_junk_lines(pdf)
         parsed = _Parsed(page_count=page_count, toc=toc)
 
-        # 体检不过就直接拒绝，别产出一份「已就绪但读不通」的文本。
         preflight = _pdf_preflight(pdf, pymupdf)
         if float(preflight["text_ratio"]) < 0.2:
             raise DocumentError(
@@ -1431,19 +1178,11 @@ def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
                 "正文仍可检索，但引用时请核对原文"
             )
 
-        # 有书签目录就信目录；没有就只能靠字号猜（`_looks_heading`）。
-        # 两条路的优先级不能反：字号猜出来的「标题」经常是封面上的书名、
-        # 或者加粗的强调句，而目录是编辑器里人工维护的结构。
         has_toc = any(len(entry) >= 3 and isinstance(entry[2], int) for entry in toc)
-        # 正文字号**总是**要算：代码块判定的第三条判据（代码字号常比正文小）
-        # 要用它。而标题猜测只在没有目录时才允许，所以另给一个 `heading_size`。
         body_size = _pdf_body_size(pdf)
         heading_size = 0.0 if has_toc else body_size
         body_left = _pdf_body_left(pdf)
         chapter: str | None = None
-        # 母版图只在幻灯片上才是问题（书里的图重复出现往往是真的重复引用，
-        # 而且书的图靠题注配对，走不到这条路径）。全本扫一遍 xref 也不便宜，
-        # 所以按需算。
         template_images = (
             frozenset(_pdf_template_images(pdf)) if parsed.section_per_page else frozenset()
         )
@@ -1454,8 +1193,6 @@ def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
             lines = _pdf_page_lines(page, junk, tight_cross_block=parsed.section_per_page)
             if has_toc:
                 from_toc = _chapter_at(toc, page_no)
-                # 目录只标章首页的页码，两章之间的页要沿用上一页的章名，
-                # 所以拿不到时**不要**把 chapter 清成 None。
                 if from_toc:
                     chapter = from_toc
 
@@ -1472,8 +1209,6 @@ def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
                 skip_images=template_images,
             )
             parsed.elements.extend(elements)
-        # 目录只留下 `(级别, 标题, 页码)` 三元组。畸形 PDF 的书签可能是二元组
-        # （没有页码），那种条目算不出章节归属，留着只会让 `_chapter_at` 多一条分支。
         parsed.toc = [
             [int(entry[0]), str(entry[1]), int(entry[2])]
             for entry in toc
@@ -1485,12 +1220,9 @@ def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
 
 
 def _pdf_template_images(pdf, ratio: float = 0.3) -> set[int]:
-    """反复出现在**大多数页**上的位图：母版背景、校徽、装饰条。
-
-    幻灯片每一页都盖着同一层母版图。把它当插图抽出来，等于每页凭空多一张
-    没有信息的图——marker 的 32 页输出里就有 32 张一模一样的 `Picture_0`。
-    真正的内容图（新闻截图、示意图）通常只出现在一两页，所以按「出现页数
-    占全本的比例」就能分开，不需要认图。
+    """反复出现在大多数页上的位图：母版背景、校徽、装饰条。
+    当成插图抽出来等于每页凭空多一张没有信息的图。真正的内容图只出现在一两页，
+    按「出现页数占全本的比例」就能分开，不需要认图。
     """
     counts: Counter[int] = Counter()
     for page_index in range(pdf.page_count):
@@ -1524,12 +1256,8 @@ def _pdf_body_size(pdf, sample_pages: int = 40) -> float:
 
 
 def _pdf_body_left(pdf, sample_pages: int = 40) -> float:
-    """正文左边缘：抽若干页，取出现次数最多的行左边缘。
-
-    和 `_pdf_body_size` 同一个思路——一本书的正文列是全局一致的。
-    这个值用来把**代码块**和「正文里的行内代码」分开：代码块整体比正文右移
-    一个容器的内边距（Hello-Agents 13pt、Hello-Algo 20pt），而行内代码
-    就贴在正文列上。
+    """正文左边缘：抽若干页取出现次数最多的行左边缘（一本书的正文列全局一致）。
+    用来分开代码块和行内代码：代码块整体比正文右移一个内边距，行内代码就贴在正文列上。
     """
     counter: Counter[float] = Counter()
     for page_index in range(min(sample_pages, pdf.page_count)):
@@ -1541,8 +1269,6 @@ def _pdf_body_left(pdf, sample_pages: int = 40) -> float:
     return counter.most_common(1)[0][0]
 
 
-# 等宽字体的家族关键词。命中的行可能是代码，但**行内代码**也命中，
-# 所以还要配合左边缘判断（见 `_pdf_page_elements`）。
 _MONO_HINTS = (
     "menlo", "mono", "consol", "courier", "code", "hack", "fira",
     "jetbrains", "cascadia", "sarasa", "inconsolata", "sourcecodepro",
@@ -1551,11 +1277,8 @@ _MONO_HINTS = (
 
 def _mono_share(line: dict) -> float:
     """一行里等宽字体占的字符比例。
-
-    **不能按「主字体」判断**：两本书的正文恰好相反——
-    Hello-Agents 用 Type3（每个字形一个字体名，碎得离谱），等宽字体反而
-    在「单字体名字符数」上胜出；Hello-Algo 用 NotoSansSC（一整块覆中文），
-    含中文注释的代码行反被判成正文。按比例算就不会两个方向都踩。
+    不能按「主字体」判断：两本书的正文恰好相反（一个 Type3 碎字体、一个 NotoSansSC 整块覆
+    中文），按比例算才不会两个方向都踩。
     """
     mono = total = 0
     for span in line.get("spans", []):
@@ -1566,11 +1289,7 @@ def _mono_share(line: dict) -> float:
     return (mono / total) if total else 0.0
 
 
-# 括号/引号没闭合 → 上一行是「话没说完」，下一行是它的物理折行（PDF 页宽不够）。
-# 判据要**同时**满足「本行不更靠右」，否则多行字典 `x = {` 的下一层缩进会被误合并。
 _OPEN_BRACKETS = "([{"
-# 折行判断用的括号配对。抽成模块常量，免得函数里再套一层元组——那层括号
-# 写错时语法报错会指向上一行，很难找。
 _BRACKET_PAIRS = (("(", ")"), ("[", "]"), ("{", "}"))
 
 
@@ -1581,16 +1300,12 @@ def _unbalanced(code: str) -> bool:
     return text.count('"') % 2 == 1
 
 
-# 章节标题的**强**线索：编号形式。「第 3 章」「2.3.1」「Chapter 4」这类。
-# 教材的小节几乎都带编号，而正文里的列表项、公式、表注、提示框标签不带，
-# 所以这条比「字号大」可靠得多。
 _HEADING_STRONG_RE = re.compile(
     r"^\s*(第\s*[0-9一二三四五六七八九十百]+\s*[章篇部]"
     r"|\d+\s*\.\s*\d+"
     r"|Chapter\s+\d+)",
     re.IGNORECASE,
 )
-# 提示框标签 / 摘要这类英文短词，字号常常和标题一样大。
 _PANEL_LABEL_RE = re.compile(
     r"^\s*(Tip|Note|Question|Warning|Abstract|Summary|Example|Attention)\b", re.IGNORECASE
 )
@@ -1599,19 +1314,9 @@ _PANEL_LABEL_RE = re.compile(
 def _looks_heading(text: str, size: float, body_size: float) -> bool:
     """没有目录时判断一行是不是章节标题。
 
-    **只认编号形式的标题**，不靠「字号大 + 行短」硬猜。第一版就是靠字号猜的，
-    在一个 12 页的样本里造出 26 个「章节」，其中一半是假标题：
-
-        Tip / Question                   提示框的标签
-        表2-1 迭代与递归特点对比          表注
-        1 + 1 + 10 + (1 + 5) × 𝑛= 6𝑛+ 12  公式行
-        1. 第一步：统计操作数量           编号列表项
-
-    假标题的危害不是「名字不好听」，是**它后面的正文全归到它名下**——引用时
-    「出自哪一节」整段错掉，而 C2 的验收标准就是页码章节要和书一致。
-
-    所以判据反过来：先看有没有编号（强线索），没有编号的必须字号明显更大
-    且极短（弱线索，用来兜住「尾递归」这种不带编号的二级标题）。
+    只认编号形式（「第 3 章」「2.3.1」）。靠字号猜会造出大量假标题（提示框标签、表注、
+    公式行、编号列表项），危害是它后面的正文全归到它名下，引用时「出自哪一节」整段错。
+    无编号的必须字号明显更大且极短才收（兜住「尾递归」这类二级标题）。
     """
     if body_size <= 0 or size < body_size * 1.12:
         return False
@@ -1620,15 +1325,12 @@ def _looks_heading(text: str, size: float, body_size: float) -> bool:
         return False
     if "，" in stripped or "。" in stripped:
         return False
-    # 以标点收尾的也不是标题——「那契数列的第𝑛个数字：」这种正文引导句，
-    # 字号碰巧大一点就会被认成章节。
     if stripped.endswith(("。", "！", "？", "，", "、", "；", "：", ":", ")", "）")):
         return False
     if _PANEL_LABEL_RE.match(stripped):
         return False
     if _match_caption(stripped) is not None:
         return False
-    # 公式行：含等号/比较符且基本没有中文（教材里没编号的标题不会长这样）
     if re.search(r"[=<>≤≥]", stripped) and not re.search(r"[\u4e00-\u9fff]{2,}", stripped):
         return False
     if re.match(r"^[‧·•●○▪◆\-—*=+]", stripped):
@@ -1637,9 +1339,6 @@ def _looks_heading(text: str, size: float, body_size: float) -> bool:
         return False
     if _HEADING_STRONG_RE.match(stripped):
         return True
-    # 弱线索：不带编号、字号大得多、短。**但「1. 常数阶」这种单级编号的列表项
-    # 不算**——教材常把并列内容写成「1. 常数阶 / 2. 线性阶」，它们字号也大，
-    # 认成章节会让目录里冒出五六个假节点。
     if re.match(r"^\d+\s*[.、)]", stripped):
         return False
     return size >= body_size * 1.3 and len(stripped) <= 16
@@ -1675,11 +1374,8 @@ def _pdf_junk_lines(pdf) -> set[str]:
 
 def _sanitize_surrogates(text: str) -> str:
     """修复 PDF ToUnicode CMap 缺页产生的孤立 UTF-16 代理对。
-
-    数学字母区（U+1D400-U+1D7FF，𝐀𝑥 这类）在坏映射下会被拆成高低两个孤立
-    代理码点，str 里合法、一旦 encode 成 UTF-8 就炸（UnicodeEncodeError:
-    surrogates not allowed），整本书解析失败。修法：能配上对的重新合成一个
-    真字符，配不上的丢弃——数学装饰符号丢了不影响检索，整本炸了才要命。
+    数学字母（U+1D400-U+1D7FF）在坏映射下被拆成高低两个孤立代理码点，str 里合法、
+    encode 成 UTF-8 就 UnicodeEncodeError，整本书解析失败。能配对的重新合成，配不上的丢弃。
     """
     if not any(0xD800 <= ord(c) <= 0xDFFF for c in text):
         return text
@@ -1717,8 +1413,6 @@ def _pdf_raw_lines(page) -> list[tuple[float, float, float, float, str, float]]:
             continue
         for line in block.get("lines", []):
             text = "".join(span.get("text", "") for span in line.get("spans", []))
-            # 零宽空格是排版占位符（上下标的位置标记），不是内容。留着会让
-            # 「S_t」变成带着不可见字符的「St」，检索时按词切分对不上。
             text = text.replace("\u200b", "").replace("\ufeff", "")
             if not text.strip():
                 continue
@@ -1729,11 +1423,9 @@ def _pdf_raw_lines(page) -> list[tuple[float, float, float, float, str, float]]:
 
 
 def _dominant_size(line: dict) -> float:
-    """一行的主字号：**按字符数**取最多的那个 span 的字号。
-
-    不能用 `max(span.size)`：正文里夹一个公式字符（数学字体通常比正文大一号），
-    整行的字号就被抬上去了。段落合并要靠字号相同来判「这两行是一段」，
-    一抬高就和相邻行对不上，一句话会被切成两段（「…时间复杂度为常数」＋「阶」）。
+    """一行的主字号：按字符数取最多的那个 span 的字号。
+    不能用 `max()`：正文夹一个公式字符就把整行字号抬上去，而段落合并靠字号相同判「同一段」，
+    一抬高就和相邻行对不上，一句话被切成两段。
     """
     counter: Counter[float] = Counter()
     for span in line.get("spans", []):
@@ -1741,40 +1433,17 @@ def _dominant_size(line: dict) -> float:
     return counter.most_common(1)[0][0] if counter else 0.0
 
 
-# 上标的内容只能是这些字符。刻意**不含 `[` `]`**：参考文献角标 `[1]` 和数学
-# 上标在版面上没法区分（字号都是 0.83 倍、都抬高 4pt、都紧贴前一个字），
-# 唯一的差别就是方括号。宁可漏掉「方括号当上标」的极少数排版，也不能把
-# 全书的引用角标改成 `^[1]`。
-#
-# 长度上限 4：指数里见过最长的是 `−308`（浮点数量级）和 `2i/d`（位置编码）。
-# 放宽到 5 会吃进表格里错位的 `10000`——那是原 PDF 排版里的一段碎片，
-# 不是谁的指数，转出来是假信息。
 _SCRIPT_TEXT_RE = re.compile(r"[0-9A-Za-z+\-−=/.]{1,4}")
 
-# 上标前面必须是能当底数的字符：字母（含希腊字母和数学斜体）、数字、右括号。
-# 句末、逗号后面的小字号数字更可能是编号，不动。
-#
-# 数学斜体（`𝑛` U+1D45B、`𝑂` U+1D442）必须用 `\U` 八位写。写成 `\u1d7ff`
-# 会被 Python 截成 `\u1d7f` 再加一个字面量 `f`——范围顶只剩 U+1D7F，
-# 半数数学变量（包括 `𝑛`）都漏在外面，上标前面是变量时一律认不出。
 _SCRIPT_BASE_RE = re.compile(r"[0-9A-Za-z\u0370-\u03ff\U0001D400-\U0001D7FF)]")
 
 
 def _is_superscript(span: dict, previous: dict, baseline: float, base_size: float) -> bool:
-    """这个 span 是不是前一个字符的上标。
+    """这个 span 是不是前一个字符的上标。三条几何特征同时成立：
 
-    PDF 里上标没有任何语义标记，只有三条几何特征，必须同时成立：
-
-    | 特征 | 实测值（Hello-Algo `𝑂(𝑛²)`） | 阈值 |
-    |---|---|---|
-    | 字号比前一个 span 小 | 8.32 / 11.88 = 0.70 | ≤ 0.85 |
-    | 基线比本行主基线高 | 4.3pt / 主字号 9.96 = 0.43 | ≥ 0.25 |
-    | 与前一个 span 水平紧贴 | 间隙 0.0 | ≤ 0.15 × 主字号 |
-
-    比值 0.85 定得比较松，因为正文里数学字体本来就比中文字体大一号，
-    上标要和**前一个 span**比（11.88），不能和行主字号（9.96）比——后者
-    算出来是 0.835，几乎贴着阈值，稍一漂移就漏。反过来也不能更松：
-    再松就会把「正文里偶尔出现的小字号脚注」也算进来。
+    - 字号比前一个 span 小：比值 ≤ 0.85（和前一个 span 比，不能和行主字号比）；
+    - 基线比本行主基线高：≥ 0.25 × 主字号；
+    - 与前一个 span 水平紧贴：间隙 ≤ 0.15 × 主字号。
     """
     text = span.get("text", "").strip()
     if not text or not _SCRIPT_TEXT_RE.fullmatch(text):
@@ -1799,11 +1468,8 @@ def _is_superscript(span: dict, previous: dict, baseline: float, base_size: floa
 
 def _line_text(line: dict) -> str:
     """一行的文本：span 按顺序拼接，上标还原成 `^x`。
-
-    `O(n2)` 和 `O(n²)` 在原 PDF 里只差一个基线偏移，提取出来都是 `O(n2)`，
-    读的人（和检索、和模型）没法知道那是平方还是变量名。还原成 `O(n^2)`
-    —— 单字符不加括号，多字符用 `^(2i/d)` 括起来，避免 `10000^2i/d` 这种
-    到底谁是上标的歧义。
+    `O(n2)` 和 `O(n²)` 提取出来都是 `O(n2)`，读的人、检索、模型都分不出。单字符不加括号，
+    多字符用 `^(2i/d)` 括起来，避免 `10000^2i/d` 这种「谁是上标」的歧义。
     """
     spans = line.get("spans", [])
     if not spans:
@@ -1834,11 +1500,9 @@ def _line_text(line: dict) -> str:
 def _pdf_page_lines(
     page, junk: set[str], tight_cross_block: bool = False
 ) -> list[tuple[float, float, float, float, str, float, int, bool]]:
-    """过滤页眉页脚和纯页码，并给每行带上 block 序号与「是否等宽字体」。
-
-    同一基线上的多段会先合并成一行。这一步不能省：行尾注释在 PDF 里是
-    两个独立的 line 对象（`self._front = node` 和 `# 更新头节点` 的 y 相同、
-    只有 x 不同），不合并就会按 x 算出几十个空格的缩进。
+    """过滤页眉页脚和纯页码，给每行带上 block 序号与「是否等宽字体」。
+    同一基线上的多段要先合并成一行：行尾注释在 PDF 里是两个独立 line 对象（y 相同、x 不同），
+    不合并会按 x 算出几十个空格的缩进。
     """
     height = page.rect.height
     data = _sanitize_page_dict(page.get_text("dict"))
@@ -1848,8 +1512,6 @@ def _pdf_page_lines(
             continue
         for line in block.get("lines", []):
             text = _line_text(line)
-            # 零宽空格是排版占位符（上下标的位置标记），不是内容。留着会让
-            # 「S_t」变成带着不可见字符的「St」，检索时按词切分对不上。
             text = text.replace("\u200b", "").replace("\ufeff", "")
             if not text.strip():
                 continue
@@ -1865,26 +1527,6 @@ def _pdf_page_lines(
 
     lines.sort(key=lambda item: (round(item[1], 1), item[0]))
 
-    # 同一「视觉行」的片段先归组，组内**按 x 重新排序**再拼接。
-    #
-    # 直接顺序追加是错的。一行里夹着数学变量时，PDF 会把它切成很多独立的
-    # line 对象，而且它们的 y0 并不相同（变量本身大一号、下标更低）：
-    #
-    #     (79.6,555.5) '3. 环境接收到行动 '
-    #     (162.1,556.3) 'A'          ← 大一号，y0 高 0.8
-    #     (171.0,561.1) 't'          ← 下标，y0 低 5.6
-    #     (174.6,555.5) ' 后，会转移到一个新的状态 '
-    #     (297.0,556.3) 'S'
-    #     (304.2,559.6) 't+1'
-    #     (318.4,555.5) '。'
-    #
-    # 按 y 排序再追加，`A`/`S` 会跑到句尾、`t`/`t+1` 会掉成独立行，
-    # 整句话就成了「…新的状态 A S 。」＋「t+1」＋「t」。
-    # 分两步：先按 y 粗分成「行带」，**组内全部排好序再**按 x 切成视觉行。
-    #
-    # 顺序不能反。直接在扫描时同时判 x 会出错：右边那段先被处理，此时中间的
-    # 下标（y0 更靠下、排在后面）还没进组，两段之间的间隙就显得太大，
-    # 一行被劈成两半（「（新状态」＋「St+1 和奖励 Rt+1）」）。
     bands: list[list[list]] = []
     for item in lines:
         if bands and _same_band(bands[-1], item):
@@ -1911,21 +1553,11 @@ def _same_band(band: list[list], item: list) -> bool:
 
 
 def _split_by_gap(band: list[list], tight_cross_block: bool = False) -> list[list[list]]:
-    """行带内按 x 切成视觉行：间隙超过阈值就断开。
+    """行带内按 x 切成视觉行：间隙超过阈值就断开（默认 2 倍字号）。
 
-    默认 2 倍字号，两头都够用：一段文字里给上下标留的空位大约 1.4 倍
-    （正文 9.8 字号时 14pt）得接上；而左右并排的东西间隙是几倍甚至几十倍
-    ——幻灯片上「Play」按钮离图题注 278pt，靠这条分开，否则题注不再以
-    「图 1-4」开头，配图直接失败。双栏的左右栏也是靠它分开的。
-
-    `tight_cross_block` 只给**幻灯片**用，把跨文本框的阈值收到 0.35 倍：
-    幻灯片上的图内标注（`发话器`、`A`、`f1`）和正文挤在同一条基线上，
-    间隔只有 14pt（24 号字约 0.6 倍），按 2 倍会被吞进句子里，读出来是
-    「即任一方讲话时，发话器可以听到对方的话音」。
-
-    不能对正文书也收紧：Word 的行内公式是独立文本框，两侧各留一个空格，
-    实测间隙 0.5~1 倍字号（「分数除以一个缩放因子 dk（dk是K向量的维度）」），
-    收了就把句子劈成两半——Agents 一本书 900 多行都受影响。
+    2 倍够用：上下标留的空位约 1.4 倍要接上，并排元素的间隙是几倍到几十倍。
+    tight_cross_block 只给幻灯片用，阈值收到 0.35 倍——图内标注和正文挤在同一基线，
+    2 倍会把它吞进句子；正文书不能收，Word 的行内公式两侧各留 0.5~1 倍，收了句子就断。
     """
     band.sort(key=lambda entry: (entry[0], entry[1]))
     groups: list[list[list]] = [[band[0]]] if band else []
@@ -1949,8 +1581,6 @@ def _merge_row(row: list[list]) -> tuple:
     for entry in row:
         if previous_end is not None:
             gap = entry[0] - previous_end
-            # 片段之间有明显空白就补一个空格，否则「行动」和「后」会粘成
-            # 「行动后」——原文那里本来就有一个空格，只是被切到两个片段里了。
             if gap > 0.6 * max(entry[5], 1.0) and parts and not parts[-1].endswith(
                 (" ", "\u3000")
             ):
@@ -1958,8 +1588,6 @@ def _merge_row(row: list[list]) -> tuple:
         parts.append(entry[4])
         previous_end = entry[2] if previous_end is None else max(previous_end, entry[2])
 
-    # 字号和等宽占比都按**字符数**加权：变量那一段字号大，但只有一两个字符，
-    # 不该代表整行。段落的「字号是否相同」全靠这个值。
     weights: Counter[float] = Counter()
     mono_total = 0
     char_total = 0
@@ -1998,18 +1626,11 @@ def _pdf_page_elements(
     skip_images: frozenset = frozenset(),
 ) -> tuple[list[_Element], str | None]:
     """一页 → 元素流（正文段落 + 表格 + 图 + 公式编号），按版面从上到下。
-
-    图和公式要**插回它们在版面上的位置**，不能统一堆到页尾：回答里「如图 3-4」
-    出现的位置应该就是书上那张图的位置，否则读起来是脱节的。
-
-    返回 `(元素, 本页最后的章节名)`：章节是**跨页连续**的状态，翻到下一页、
-    甚至翻到下一章的正文时都要沿用，所以不能按页各算各的。
+    图和公式要插回版面上的位置，不能统一堆到页尾——回答里「如图 3-4」的位置就该是那张图的
+    位置。返回 (元素, 本页最后的章节名)：章节是跨页连续的状态，不能按页各算各的。
     """
     elements: list[_Element] = []
 
-    # 0) 表格：pymupdf 的 find_tables 靠线条和文字对齐找表格，能找到就给 markdown。
-    #    **必须最先做**，因为表格里的文字在文本层里也在，不排除就会既进表格、
-    #    又进正文，检索时同一句话命中两次。
     table_rects: list[tuple[float, float, float, float]] = []
     for markdown_table, bbox in _pdf_tables(page):
         table_rects.append(bbox)
@@ -2023,10 +1644,6 @@ def _pdf_page_elements(
             )
         )
 
-    # 1) 图注配对：找到独占一行的题注，去它附近找图。
-    #    **必须排在正文聚合前面**，因为配对成功的题注行要从正文里剔除——
-    #    否则同一句「图 2-5 尾递归过程」会既是一条 figure chunk、又躺在正文 chunk 里，
-    #    检索命中两次、引用指向两处，其中一处还是没图的纯文字。
     figure_rects = _pdf_graphic_rects(page)
     consumed: set[tuple[float, float, str]] = set()
     for line in lines:
@@ -2036,7 +1653,6 @@ def _pdf_page_elements(
             continue
         label, caption_text = caption
         if label.startswith("表"):
-            # 表格内容本身就在正文文本里，截图只会截到一堆线和字。表注留着当文本用。
             continue
         rect = (
             _slide_figure_rect(figure_rects, (x0, y0, x1, y1), page)
@@ -2044,8 +1660,6 @@ def _pdf_page_elements(
             else _nearest_graphic_above(figure_rects, (x0, y0, x1, y1))
         )
         if rect is None:
-            # 没配上图的题注**留在正文**：至少证明「书上有图 3-7」，
-            # 比让它凭空消失好（读者会问「你刚才说图 3-7 呢」）。
             continue
         asset = _save_clip(page, rect, asset_dir, parsed, label, caption_text, page_no, "figure")
         if asset is None:
@@ -2065,18 +1679,6 @@ def _pdf_page_elements(
         )
         figure_rects = _drop_inside(figure_rects, rect)
 
-    # 2) 代码块与正文段落。**代码要先切**：代码行之间行距紧、没有句末标点，
-    #    先做段落合并会把 `import os` / `from tavily import ...` 粘成一行
-    #    （实测拼出过 `import osfrom tavily import TavilyClient`）。
-    #
-    #    代码行的判据是「含等宽字体 **且** 左边缘超出正文列」：
-    #    只用字体不行，正文里夹着的行内代码（`get_attraction`）也含等宽；
-    #    而代码块整体比正文右移一个容器的内边距（13~20pt），行内代码贴在正文列上。
-    #    幻灯片还有一类「正文」是**图内部的标注**：A / B / T / R / f1 / f2 /
-    #    发射机 / 受话器 / 天线共用器。它们在图里是图的一部分，在文本层里却是
-    #    普通文字，照单全收的话第 27 页会吐出 25 个互不相干的词。判据只有一条：
-    #    **落在我们刚截下来的那张图里面**（图里已经有这些字，再当正文重复一遍
-    #    只会把句子读断）。
     figure_boxes = [item.bbox for item in elements if item.kind == "figure" and item.bbox]
     body_lines = [
         line
@@ -2091,8 +1693,6 @@ def _pdf_page_elements(
     ]
 
     def is_code(line) -> bool:
-        # `body_left` 和 `body_size` 都为 0 时宁可不认代码块：判据会退化成
-        # 「几乎全部满足」，整本书的等宽行都会被包进围栏，比不识别更糟。
         if body_left <= 0 and body_size <= 0:
             return False
         return _is_code_line(line, body_left, body_size)
@@ -2108,11 +1708,6 @@ def _pdf_page_elements(
         while cursor < len(body_lines) and is_code(body_lines[cursor]):
             block.append(body_lines[cursor])
             cursor += 1
-        # 行级判据会把**缩进排版的正文**也认成代码：思考题、列表续行常常整体
-        # 右移，又夹着几个行内代码（`GRASP`、`Sublayer(x)`），两条都满足。
-        # 到块一级才分得开——正文是「每行都有中文句读」，代码只有注释行才有。
-        # 否决掉的必须**退回正文**，不能丢：这些行已经被 `is_code` 排除了，
-        # 不显式收回来就会整句消失。
         if not _looks_like_code(block, body_size):
             rejected.extend(block)
             continue
@@ -2129,11 +1724,6 @@ def _pdf_page_elements(
                 )
             )
 
-    # 剩下的正文行按**几何**合并成段，不按 block 序号：浏览器打印出来的 PDF
-    # 有 93% 的行各自一个 block，按 block 聚合等于一行一段（Hello-Agents 整本
-    # 21879 个「段落」、中位 27 字）。
-    #
-    # PPT 反过来——幻灯片一页就是几个文本框，必须按 block 聚合（见 `_ppt_paragraphs`）。
     prose_lines = sorted(
         [line for line in body_lines if not is_code(line)] + rejected,
         key=lambda item: (round(item[1], 1), item[0]),
@@ -2156,11 +1746,6 @@ def _pdf_page_elements(
         )
     elements.extend(ordered)
 
-    # 2.5) PPT 的大图页：整页几乎都是矢量图、文字只剩几个散标签时，逐行输出
-    #      那些标签等于交给读者一堆「管」「端」「云」「应用」，谁也看不懂原图
-    #      长什么样。这时把这一页整体截下来，比输出零散文字有用得多。
-    #      两条判据取并：图形占满半页，或者「字没几个、图形几十条」。
-    #      已经配到题注的页跳过——那种页的图已经单独抽过了，再来一张整页就重复。
     if (
         parsed.section_per_page
         and not any(item.kind == "figure" for item in elements)
@@ -2190,11 +1775,6 @@ def _pdf_page_elements(
                 )
             )
 
-    # 2.6) PPT 的位图：幻灯片上的照片、截图、示意图是**嵌进去的位图**，不是
-    #      矢量图形，2.5) 那套「看图形覆盖面积」的判据完全碰不到它们——
-    #      结果是整本课件只剩零星几张带「图 1-1」题注的图，其余全丢。
-    #      按面积门槛逐张抽，并跳过每一页都盖着的那层母版（`skip_images`）。
-    #      已经出过整页图的页不再抽：整页里就包含这些小图。
     if (
         parsed.section_per_page
         and skip_images is not None
@@ -2232,7 +1812,6 @@ def _pdf_page_elements(
                 )
                 break
 
-    # 3) 公式编号：（3-12）单独一行时，把编号所在行连同上方一小块截下来
     for line in lines:
         x0, y0, x1, y1, text, _size, _block, _mono = line
         match = _FORMULA_NO_RE.match(text)
@@ -2256,17 +1835,11 @@ def _pdf_page_elements(
             )
         )
 
-    # PPT 不能按 y 全局重排：正文刚按「先左栏后右栏」排好，而 y 在两栏之间
-    # 是来回跳的，一重排又串回交错。图和式按「上方有几段正文」插进去。
     if parsed.section_per_page:
         elements = _ppt_page_order(elements)
     else:
         elements.sort(key=lambda item: item.y)
 
-    # 图和表格的 chapter 是**在正文聚合之前**取的（那时还不知道本页有几个标题），
-    # 所以页首的图会顶着「上一节」的名字，排序后就出现
-    # 「2.3.1 → 2.3 → 2.3.1」这种抖动，目录里同一节出现两次。
-    # 这里按版面位置回填：取**它上方最近的那个文字块**的章节。
     anchors = [
         (item.y, item.chapter) for item in elements if item.kind == "text" and item.chapter
     ]
@@ -2279,21 +1852,17 @@ def _pdf_page_elements(
 
     return elements, chapter
 
-# 中文句读。用来在**块一级**把「缩进排版的正文」和「代码」分开：
-# 正文几乎每行都有，代码只有中文注释行才有。
 _PROSE_PUNCT_RE = re.compile(r"[，。？！；：]")
 
 
 def _is_code_line(line, body_left: float, body_size: float) -> bool:
-    """单行是不是代码。三个条件**任一**成立即可，各自对着一种排版：
+    """单行是不是代码。三个条件任一成立即可，各对着一种排版：
 
-    - **左边缘缩进**：代码块整体在内边距里（Hello-Agents 84.8 vs 正文 72）；
-    - **几乎全是等宽字体**：顶格的代码行（Hello-Algo 的 `def` 就顶在正文列上，
-      光看缩进会漏掉它，连带着整块的缩进基准都算错）；
-    - **字号明显小于正文**：代码常用小一号字（Hello-Algo 8.4 vs 正文 10）。
+    - 左边缘缩进超过正文列；
+    - 几乎全是等宽字体（顶格的代码行只能靠它）；
+    - 字号明显小于正文。
 
-    三个都要，缺一个就有一类书解不出来。反过来，正文里夹的行内代码
-    （`GRASP`、`Sublayer(x)`）三样都不满足。
+    正文里夹的行内代码三样都不满足。三个都要，缺一个就有一类书解不出来。
     """
     share = line[7]
     if share <= 0.05:
@@ -2307,15 +1876,8 @@ def _is_code_line(line, body_left: float, body_size: float) -> bool:
 
 
 def _looks_like_code(block: list, body_size: float = 0.0) -> bool:
-    """一组候选行到底是不是代码块（行级判据只保证「像」，这里确认）。
-
-    单行块没有上下文可比。优先级是**字号**：字号明显小于正文的行，即使
-    整句都是中文也是代码里的注释（`# 暂存数据（常量，一般用大写字母表示）`
-    就是这样，它含中文逗号，只按句读判断会被误判回正文）。
-    字号和正文一样时才退回看句读——那时单行正文多是以 `？`／`。` 收尾的
-    思考题、图注引导句。
-
-    多行块看过半数的行：代码块里注释占少数，正文块里句读是常态。
+    """一组候选行到底是不是代码块。优先级是字号：明显小于正文的行即使全是中文也是代码
+    注释；字号相同才看句读（单行正文多是以「？」「。」收尾的思考题）。多行块看过半数的行。
     """
     if len(block) == 1:
         item = block[0]
@@ -2326,8 +1888,6 @@ def _looks_like_code(block: list, body_size: float = 0.0) -> bool:
     return prose_rows * 2 <= len(block)
 
 
-# 代码块里夹带的文件名标记（Hello-Algo 每段代码第一行都有）。
-# 拿它当围栏的语言标注，比按内容猜 `import`/`def` 可靠。
 _FILE_HINT_RE = re.compile(r"\^\^=\s*File:\s*(\S+?)\s*\^\^=")
 
 _LANG_BY_EXT = {
@@ -2350,18 +1910,11 @@ def _code_language(code: str) -> str:
 
 
 def _code_block_text(block: list) -> str:
-    """一组连续的代码行 → 带原始缩进的多行代码。
+    """一组代码行 → 带原始缩进的多行代码。
 
-    两件事容易做错：
-
-    1. **缩进要还原**。PDF 里没有「空格字符」，缩进只体现在左边缘上，
-       所以要拿 x0 减掉本块的基准列，再除以字符宽度折回空格数。
-       字符宽度按等宽字体的经验值 `0.6 × 字号`，字号取**这一行自己的**
-       （代码字号常比正文小：Hello-Algo 代码 8.4、正文 10）。
-
-    2. **折行要接回去，多行结构不能接**。PDF 页宽不够时一行代码会被折成两行，
-       但字典字面量 `x = {` 的下一层本来就该换行。判据是「上一行括号/引号没闭合
-       **且** 本行不更靠右」——只判括号会把多行字典误合并。
+    缩进要还原：PDF 没有空格字符，缩进体现在左边缘，所以用 x0 减本块基准列、再按
+    0.6 × 本行字号折回空格数。折行要接回去但多行结构不能接：判据是「上一行括号/引号
+    没闭合 **且** 本行不更靠右」——只判括号会把多行字典误合并。
     """
     base = min(item[0] for item in block)
     char_width = max(block[0][5] * 0.6, 1.0)
@@ -2380,36 +1933,18 @@ def _code_block_text(block: list) -> str:
     return "\n".join(lines).rstrip()
 
 
-# 句末标点：上一行以此收尾，说明它把一句话说完了，下一行是新段。
 _SENTENCE_END = "。！？；：.!?;:"
 
-# 列表符号 / 编号。这些行各自成段，不能跟前一行合并——合并后
-# 「1. 采样 2. 量化 3. 编码」会变成一句话。
 _BULLET_RE = re.compile(r"^\s*([-*•·▪◦‣]|\d+[.)、]\s?|[（(]\d+[)）]|[a-z][.)]\s)")
 
 
-# PPT 分栏的判据：两个文本框中心 x 相差超过这个值，就算「换了一栏」。
 _PPT_COLUMN_GAP = 48.0
 
-# PPT 的条目符号。一级是 Wingdings 字形，落在私用区（U+F070，普通字体里
-# 根本画不出来），二级是 ➢。它们是「这一行新起一条」的唯一信号——一旦
-# 丢了，四条并列的要点就会被拼成一句没有标点的长句。
-#
-# ❖（U+2756）是同一批课件里的第三种条目符（「❖低空智联网 / ❖海洋通感一体化」）。
-# 它不在原来的字符集里，于是那几页的要点全被拼进了一段——条目符的名单只能靠
-# 真实课件补齐，不能照着一份「常见项目符号表」写。
 _PPT_BULLET_RE = re.compile(r"^[\s\u200b]*[\uf000-\uf8ff➢➤►▶▸◆◇▪▫●○•·❖]")
 
-# PPT 里「这一页其实是一张图」的判据：最大一块图形占到页面的这个比例、
-# 且整页文字少于此数，就整页截图。实测这批课件：p13 84%、p19 81%、
-# p29 100%、p30 62% 全是大图，而文字都在 260 字以内；正文页都在 10%。
 _PPT_FIGURE_COVER = 0.5
 _PPT_FIGURE_MAX_CHARS = 320
 
-# 第二类大图页：**文字只剩几个标签、图形却有几十条**。这批课件里 p30 是
-# 「云/管/端/接入网/核心网」的演进图，49 条矢量线互不相连，合并成一个簇
-# 只占页面 13%，覆盖率判据碰不到它——结果输出的是「端 / 管 / 云 / 应用」
-# 七个互不相干的词。25 个字配 49 条线，这只有「整页是一张图」能解释。
 _PPT_FIGURE_MIN_CHARS = 60
 _PPT_FIGURE_MIN_SHAPES = 20
 
@@ -2429,29 +1964,18 @@ def _has_side_by_side(box: list) -> bool:
 
 
 def _ppt_continues(previous: list, box: list) -> bool:
-    """`box` 是不是接着 `previous` 那段话往下写的**另一个文本框**。
+    """box 是不是接着 previous 那段话往下写的另一个文本框（PPT 独有：写到右边界溢出的
+    部分在 PDF 里是另一个 block）。四条同时成立：
 
-    这是 PPT 独有的一种断句：一句话写到框的右边界，溢出的部分在 PDF 里
-    变成**另一个 block**。按 block 分组就会断在半个词上：
-
-        无线信号传输及移动通        ← block 8，写到右边界
-        信系统组网；                ← block 9，「通信」被劈成「通」「信」
-
-    四条同时成立才算续写：
-    1. 上一块最后一行没有句末标点——话没说完；
-    2. 上一块最后一行**是这一块里最宽的一行**——它顶到了右边界才被切断
-       （段落的最后一行通常很短，不会是最宽的）；
-    3. 这一块首行比上一块首行更靠右——续行缩进，不是新起一段；
-    4. 这一块首行不以条目符号开头，且横向落在上一块的范围内——不是
-       隔壁栏的另一个框。
+    1. 上一块最后一行没有句末标点；
+    2. 那一行是本块最宽的一行（顶到右边界才被切断）；
+    3. 本块首行比上一块首行更靠右；
+    4. 本块首行不以条目符号开头，且横向落在上一块范围内。
     """
     tail = previous[-1]
     head = box[0]
     if tail[4].rstrip()[-1:] in _SENTENCE_END:
         return False
-    # 同一个框里同一 y 上有两条以上的行 = 一格格里并排排的表行（表头、表体、
-    # 左右对照），不是「一句话没写完」。接了就成了「频率范围名称对应的
-    # 频率范围」这种看不懂的字符串。
     if _has_side_by_side(box):
         return False
     if tail[2] < max(item[2] for item in previous) - 1.0:
@@ -2459,8 +1983,6 @@ def _ppt_continues(previous: list, box: list) -> bool:
     if _PPT_BULLET_RE.match(head[4]):
         return False
     size = max(head[5], tail[5], 1.0)
-    # 缩进量要按**上一行**算，不能按整段首行算：否则「表格右边一栏在很靠右
-    # 的位置」也算「缩进了一个字」，整张表会被接到标题后面。
     indent = head[0] - tail[0]
     if not 0.2 * size <= indent <= 2.5 * size:
         return False
@@ -2468,21 +1990,14 @@ def _ppt_continues(previous: list, box: list) -> bool:
     high = max(item[2] for item in previous) + size
     if not low <= head[0] <= high:
         return False
-    # 中间隔了空行就不是续写，是另起一块。
     return -0.5 * size <= head[1] - tail[3] <= 1.5 * size
 
 
 def _ppt_columns(ranges: list[tuple[float, float]]) -> list[int]:
-    """给每个文本框判栏号：先按中心 x 的间隔粗分，再把「嵌在栏里的窄框」并回去。
+    """给每个文本框判栏号：先按中心 x 的间隔粗分（48pt），再把「嵌在栏里的窄框」并回去。
 
-    第一遍只看中心 x：同一栏内文本框的左右抖动只有几个点（内边距），
-    两栏之间在 100pt 以上，48pt 足够分开。
-
-    第二遍是因为实测有一类版面过不去——右栏很宽（318~725），中间嵌着一个
-    只占左半边的窄框（「性能评价」282~407）。它的中心 x 和右栏差 128，
-    第一遍会把它判成独立的一栏，读起来就成了「左栏 → 性能评价 → 右栏」，
-    可它其实是右栏的第一条。判据换成横向**重叠**：窄框有 70% 落在右栏
-    范围里，就归右栏；而左栏（16~312）和右栏只重叠 30/125，不会被误并。
+    第二遍按横向重叠判：窄框有 70% 落在某栏范围内就归该栏。否则宽右栏里嵌着的小框会被
+    当成独立一栏，读起来就成了「左栏 → 性能评价 → 右栏」。
     """
     centers = sorted({round((low + high) / 2, 0) for low, high in ranges})
     column_of: dict[float, int] = {}
@@ -2520,26 +2035,12 @@ def _ppt_columns(ranges: list[tuple[float, float]]) -> list[int]:
 
 
 def _ppt_paragraphs(lines: list) -> list[list]:
-    """PPT 的段落重建：**按文本框分组**，再按「先左后右、再上到下」排。
+    """PPT 的段落重建：按文本框分组，再按「先左后右、再上到下」排。
 
-    幻灯片和正文书不是一回事。正文书的每一行是连续正文的一段，按几何行合并
-    是对的；而幻灯片的一页常常是几个并列的文本框（左栏一列、右栏一列），
-    按几何行合并会把两栏在同一高度上的行串成一句，读出来是交错的碎片：
+    不能按几何行合并：一页常是几个并列文本框，同高度的行会被串成一句。三步：合并续写框
+    （_ppt_continues）→ 框内按条目符号切段 → 按栏优先排序（_ppt_columns）。
 
-        ➢无线电频谱可以正交分割(时     ← 右栏 y=88
-        ➢无线频谱资源有限稀缺          ← 左栏 y=102
-        间\频率\空间)                 ← 右栏 y=116，被劈成两半
-
-    所以分三步：
-
-    1. **合并续写框**：一句话写到框右边界，溢出部分在 PDF 里是另一个
-       block，按 block 分组会断在半个词上（见 `_ppt_continues`）；
-    2. **框内按条目符号切段**：一个框里常常竖着排了四条 ➢ 要点，全部拼成
-       一行就是「➢要求稳定可靠➢要求携带方便➢要求低功耗」；
-    3. **按栏优先排序**：同一栏里从上到下，换栏才往右走（见 `_ppt_columns`）。
-
-    这一套**只给 PPT 用**。正文书不能按 block 聚合——浏览器打印出来的 PDF
-    有 93% 的行各自一个 block，按 block 聚合等于一行一段。
+    只给 PPT 用：正文书 93% 的行各自一个 block，按 block 聚合等于一行一段。
     """
     boxes: dict[int, list] = {}
     for line in lines:
@@ -2583,14 +2084,10 @@ def _ppt_paragraphs(lines: list) -> list[list]:
 
 
 def _ppt_page_order(elements: list[_Element]) -> list[_Element]:
-    """PPT 一页的元素顺序：正文保持阅读顺序，图和式按位置插进去。
+    """PPT 一页的元素顺序：正文保持 `_ppt_paragraphs` 的阅读顺序，只决定图和式插在哪两段之间
+    （按「它上方有几段正文」定位，页首大图自然排到最前面）。
 
-    书页按 y 排序是对的——一页只有一栏，y 天然单调。幻灯片不是：正文刚由
-    `_ppt_paragraphs` 排成「左栏说完再说右栏」，右栏的 y 比左栏末段还小，
-    再按 y 排一遍就把两栏重新串成一条。
-
-    所以正文一块都不动，只决定图和式插在哪两段之间——按「它上方有几段
-    正文」定位，这跟页首的大图（y 取整页上边界）能自然排到最前面。
+    不能按 y 重排：右栏的 y 比左栏末段还小，重排会把两栏又串成一条。
     """
     body = [item for item in elements if item.kind in {"text", "code"}]
     if not body:
@@ -2636,14 +2133,11 @@ def _pdf_graphic_cover(page) -> float:
 
 
 def _pdf_paragraphs(lines: list) -> list[list]:
-    """把版面上一行行的文字合并成段落，**不看 block 序号**。
+    """把版面上一行行的文字合并成段落，不看 block 序号。
 
-    为什么不能按 block 聚合：不同工具链切 block 的方式完全相反。
-    浏览器打印（Skia）出来的 PDF 有 93% 的行各自一个 block，按 block 聚合
-    等于一行一段；LaTeX 出来的书一个 block 里能装 7 行。同一份代码在两类书上
-    表现相反，说明 block 边界根本不是「段落边界」，只是生成器的内部选择。
-
-    能跨工具链通用的只有几何：**行距 + 字号 + 标点 + 左边缘**。
+    不同工具链切 block 的方式完全相反：浏览器打印的 PDF 93% 是一行一个 block，LaTeX 一个
+    block 能装 7 行——block 边界只是生成器的内部选择。能跨工具链通用的只有几何：
+    行距 + 字号 + 标点 + 左边缘。
     """
     groups: list[list] = []
     current: list = []
@@ -2655,10 +2149,8 @@ def _pdf_paragraphs(lines: list) -> list[list]:
         size = max(previous[5], 1.0)
         gap = item[1] - previous[3]
         same_size = abs(item[5] - previous[5]) < 0.6
-        # 行内间距通常不超过 0.75 倍字号；段间距在 1 倍以上。
         tight = -0.3 * size <= gap <= 0.75 * size
         open_tail = previous[4].rstrip()[-1:] not in _SENTENCE_END
-        # 下一行比本行更靠右一个缩进宽度 → 它是新段的首行（中文首行缩进 2 字）。
         indented = item[0] - previous[0] > 1.5 * size
         starts_list = bool(_BULLET_RE.match(item[4]))
         if same_size and tight and open_tail and not indented and not starts_list:
@@ -2672,11 +2164,8 @@ def _pdf_paragraphs(lines: list) -> list[list]:
 
 
 def _join_lines(parts: list[str]) -> str:
-    """把同一段里的多行拼成一行。
-
-    三种拼法：西文断词（行尾 `-`）去掉连字符直接接；西文句子之间补空格；
-    中文直接接。**中文不补空格**是硬要求——补了会得到「抽样 定理」这种
-    每个字之间带空格的文本，检索时按词匹配会全部失配。
+    """把同一段里的多行拼成一行：西文断词去掉连字符直接接，西文句子之间补空格，中文直接接。
+    **中文不补空格**是硬要求——补了会得到「抽样 定理」，检索按词匹配会全部失配。
     """
     text = ""
     for part in parts:
@@ -2696,16 +2185,10 @@ def _join_lines(parts: list[str]) -> str:
 
 
 def _match_caption(text: str) -> tuple[str, str] | None:
-    """判断一行是不是「图 3-4 xxx」这种独占题注。返回 `(label, caption)`。
+    """一行是不是「图 3-4 xxx」这种独占题注，返回 (label, caption)。三道过滤：
 
-    三道过滤，缺一不可：
-    1. 整行太长 → 是正文里的一句话，不是题注；
-    2. 题注文字以句末标点收尾 → 是正文句子（题注很少带句号）；
-    3. 题注文字以「展示了 / 反映了」这类动词开头 → 正文在引用这张图。
-
-    第 3 条是实测出来的：Hello-Algo 里「图 2-7 展示了以上三个算法函数的时间复杂度。」
-    被当成题注后，程序真的去上一块区域截图，把正上方那张**属于图 2-6 的图**
-    又截了一遍。现象是「图比书里多一倍，编号还重号」。
+    整行太长（是正文句子）；题注以句末标点收尾；题注以「展示了 / 反映了」这类动词
+    开头（正文在引用图）。缺了第 3 条会去截隔壁那张图，编号还会重号。
     """
     stripped = text.strip()
     if len(stripped) > 120:
@@ -2716,18 +2199,10 @@ def _match_caption(text: str) -> tuple[str, str] | None:
     kind, number, caption = match.group(1), match.group(2), match.group(3).strip()
     if caption.endswith(("。", "！", "？", ".")) and len(caption) > 12:
         return None
-    # 题注是「名字」，一个字的题注不存在。实测 Hello-Agents 里正文有断行后留下
-    # 「图2.10）？」这种残句，`_CAPTION_RE` 会把 `？` 当题注文字收下——它会让
-    # 程序去截一张不存在的图，也污染图注召回的分母。
     if len(caption) <= 1:
         return None
     if caption.startswith(_CAPTION_VERBS):
         return None
-    # 题注是「名字」，不是「句子」：超过 45 字基本可以断定是正文行被断行后
-    # 恰好以「图 2-11」开头的那种（实测：「图 2-11 和以下代码模拟了细胞分裂的过程…」）。
-    #
-    # 这里刻意**不按「以虚词开头」判断**：试过加一条「以 和/对/在 开头即否决」，
-    # 「图 2-12 对数阶的时间复杂度」当场被误杀（首字是「对」），图就少了一张。
     if len(caption) > 45:
         return None
     prefix = "图" if kind.lower().startswith(("图", "fig")) else "表"
@@ -2742,17 +2217,10 @@ def _center_in(bbox: tuple[float, float, float, float], rects: list) -> bool:
 
 
 def _pdf_tables(page) -> list[tuple[str, tuple[float, float, float, float]]]:
-    """找出这一页的表格，返回 `(markdown 表格, bbox)`。
+    """找出这一页的表格，返回 (markdown 表格, bbox)。用 find_tables()，靠线条和对齐找
+    网格，无边框表格会漏（不致命，文字仍会作为正文进去，只是失去行列对齐）。
 
-    用 pymupdf 的 `find_tables()`：它靠**线条和文字对齐**找网格，对带边框的
-    表格很准，对无边框表格会漏（漏了不致命——那些文字仍然会作为正文进去，
-    只是失去了行列对齐）。
-
-    三种结果直接丢掉：
-    - 少于 2 列或 2 行：那不是表格，是一段被误判的文字；
-    - 面积超过整页 75%：通常是双栏正文被整体框成了一个「表格」，
-      真的表格不会占满整页；
-    - 清洗后不足 2 行。
+    丢掉三种：少于 2 列或 2 行；面积超整页 75%（双栏正文被框成「表格」）；清洗后不足 2 行。
     """
     try:
         found = page.find_tables()
@@ -2781,26 +2249,15 @@ def _pdf_tables(page) -> list[tuple[str, tuple[float, float, float, float]]]:
 
 
 def _clean_table(rows: list[list[str | None]]) -> list[list[str]]:
-    """把 `extract()` 的原始网格清洗成能写进 markdown 的表格。
+    """把 extract() 的原始网格清洗成 markdown 表格。治三个毛病：
 
-    原始结果有三个毛病，都要治：
+    单元格内换行被拆成新行（超过一半格子为空 → 是上一行的续行，拼回去）；
+    合并单元格无值（第一列空而上一行有值 → 继承）；自动列名 Col1 / Col3 是噪音。
 
-    1. **单元格内的换行被拆成了新行**。教材表格的行高常常是两三行文字，
-       按 y 坐标切就变成「实现方」和「式」两行、「时间效」和「率」两行。
-       判据：一整行里超过一半格子是空的 → 它是上一行的续行，拼回去。
-    2. **合并单元格没有值**。表 3-1 第一列「整数」跨三行，后面两行第一列是空的。
-       判据：第一列空而上一行第一列有值 → 继承上一行的。
-    3. **自动列名**。没识别出来的表头会被叫成 `Col1`、`Col3`，这些是噪音。
-
-    清洗是**有损**的：`−2⁷` 这种上标在文本层里是独立字形，拼出来是 `−27`。
-    这没法从文本层恢复（要视觉模型），所以表格里的数学式子可能会串位——
-    这一点在引用时用「原书第 58 页」兜底，让人能自己回原文核对。
+    清洗是有损的（−2⁷ 会拼成 −27），引用时用「原书第 N 页」让人能回原文核对。
     """
     grid: list[list[str]] = []
     for row in rows:
-        # find_tables 的 extract() 有自己独立的文本提取路径，不过 get_text("dict")
-        # 的清洗——孤立代理对（𝐀 这类数学字母被坏 CMap 拆成半截）要从这里再挡一道，
-        # 否则 encode 成 UTF-8 时整本解析失败（2026-10-21 基因组学课件踩过）。
         cells = [_sanitize_surrogates((cell or "")).strip() for cell in row]
         cells = [re.sub(r"^Col\d+$", "", cell) for cell in cells]
         grid.append(cells)
@@ -2853,20 +2310,11 @@ def _rows_to_markdown(rows: list[list[str]]) -> str:
 
 
 def _is_layout_frame(rect, page_rect, text_rects: list) -> bool:
-    """这个矩形是**页面排版框**（边距框/背景框），不是插图。
+    """这个矩形是不是页面排版框（边距框 / 背景框），不是插图。
 
-    判据两条同时成立：
-    - 大到能装下正文（宽高都 ≥ 页面 60%）；
-    - 它真的把**半数以上**的文字块框在里面（90% 面积都在它里面才算框住）。
-
-    为什么必须排掉：Hello-Agents 每页都有一个 `[72,30,540,760]` 的矢量矩形
-    （页面 612x792），是排版框。它一旦进了图形列表，`_merge_clusters` 会把它
-    和真正的插图合并成**一个整页大簇**，而 `_nearest_graphic_above` 要求
-    「图注顶 − 簇底 ∈ [0, 340]」——整页簇的底边在题注下方（760 > 540），
-    gap 是负的，于是被排除，结果是**整本书一张图都配不上**。
-
-    这条过滤放在收集阶段而不是合并之后：合并是「把邻近的碎片粘成一张图」，
-    一旦被它粘进去就分不出来了。
+    两条同时成立：宽高都 ≥ 页面 60%，且半数以上文字块（90% 面积）落在它里面。
+    必须排掉：它一旦进图形列表，会把真正的插图合并成整页大簇，导致全书一张图都配不上。
+    放在收集阶段过滤，合并之后就分不出来了。
     """
     if rect.width < page_rect.width * 0.6 or rect.height < page_rect.height * 0.6:
         return False
@@ -2876,20 +2324,14 @@ def _is_layout_frame(rect, page_rect, text_rects: list) -> bool:
     return inside >= max(3, len(text_rects) // 2)
 
 
-# 幻灯片里内嵌视频的「播放」按钮，文本层里就是一个 `Play` 单词，夹在句子
-# 中间读起来莫名其妙（第 26、27 页各一处）。
 _SLIDE_ICON_TEXTS = {"play"}
 
 
 def _is_slide_label(line, boxes: list) -> bool:
-    """这一行是不是幻灯片上的**图内标注**（`A`、`T`、`f1`、`发射机`、`天线共用器`）。
+    """这一行是不是幻灯片上的**图内标注**（`A`、`f1`、`发射机`）。四条同时成立：
+    落在某张图的截图范围里、短（≤ 20 字）、不是一句话、不是条目（`➢` 开头的是真要点）。
 
-    四条同时成立：落在某张图的截图范围里、短（≤ 20 字）、不是一句话
-    （没有句末标点）、不是条目（`➢` 开头的是真要点，压在图上也照留）。
-
-    只认「我们真的截下来的那张图」，不认「图形簇」——图形簇在排版宽松的
-    幻灯片上会长得很大，把正文一起圈进去，第 12、17、24 页的正文就是这么被
-    误伤的（「无线通信的速率」「频率相近的组合频率」都落在簇里）。
+    只认「真的截下来的那张图」，不认图形簇——簇在排版宽松的页上会长得很大，把正文圈进去。
     """
     text = line[4].strip()
     if text.lower() in _SLIDE_ICON_TEXTS:
@@ -2908,15 +2350,10 @@ def _is_slide_label(line, boxes: list) -> bool:
 
 
 def _pdf_graphic_rects(page) -> list:
-    """一页里所有「可能是插图」的版面矩形。
+    """一页里所有「可能是插图」的版面矩形，位图和矢量图两路都收。
 
-    两路都收：
-    - **位图**（`get_images`）：绝大多数导出型教材的图都是内嵌图片，位置精确；
-    - **矢量图**（`get_drawings`）：扫描/重排过的教材里图是线条画出来的，
-      `get_images` 对它们**返回空**——这是踩过的坑，只做位图会一张图都抽不到。
-
-    两者都过滤掉装饰性元素：太小的（图标、公式里的分数线）、贯穿整页的
-    细横线（页眉下的分隔线）。
+    只做位图会一张图都抽不到：扫描 / 重排过的教材图是线条画出来的，get_images 返回空。
+    两路都过滤装饰元素：太小的（图标、分数线）、贯穿整页的细横线（页眉分隔线）。
     """
     pymupdf = _require("pymupdf", "pip install pymupdf")
     rects = []
@@ -2980,11 +2417,8 @@ def _merge_clusters(rects: list, gap: float = 24.0) -> list:
 
 
 def _drop_inside(rects: list, box) -> list:
-    """候选里已经被截进 `box` 的簇全部去掉。
-
-    数据集的图注配图截的是**一个簇**，直接按相等剔除就够；幻灯片截的是
-    若干簇的并集，得按「有没有一半落在里面」判断，否则同一页的第二个题注
-    会把第一张图再截一遍。
+    """候选里已经被截进 `box` 的簇全部去掉。书页截的是一个簇，按相等剔除就够；幻灯片截的是
+    若干簇的并集，得按「有没有一半落在里面」判，否则同页第二个题注会把第一张图再截一遍。
     """
     kept = []
     for rect in rects:
@@ -2999,18 +2433,11 @@ def _drop_inside(rects: list, box) -> list:
 
 
 def _slide_figure_rect(rects: list, caption_bbox: tuple[float, float, float, float], page):
-    """幻灯片上「题注上方」的截图范围：从题注往上**逐段生长**再求并集。
+    """幻灯片上「题注上方」的截图范围：从题注往上逐段生长，再求并集。
 
-    教材里图注独占一行、图是一整块，`_nearest_graphic_above` 找最近的簇就够。
-    幻灯片不行：图注是混在文本框里的，图上方的连线、箭头、虚框各自成簇，
-    最近的那一簇常常只有 30×30pt——截出来是一个谁也看不懂的小色块
-    （实测「图 1-3」「图 1-4」都是 57×71 像素的一小块）。
-
-    所以从题注往上长：先收底部贴近题注的簇，再收底部贴近刚才那批的簇，
-    最后取并集。间隔 60pt 是「图里相邻部件」和「图与上一块文字」的分界。
-
-    窗口下界是 **-30 而不是 0**：幻灯片的图往往把题注**包在自己里面**
-    （图的外框一直画到题注下方），按「必须在题注上方」过滤会把整张图漏掉。
+    幻灯片不能只取最近的簇：连线、箭头、虚框各自成簇，最近的常只有 30×30pt。
+    间隔 60pt 是「图里相邻部件」和「图与上一块文字」的分界。窗口下界取 -30 而不是 0，
+    因为幻灯片的图常把题注包在自己里面。
     """
     picked = [
         rect
@@ -3019,10 +2446,6 @@ def _slide_figure_rect(rects: list, caption_bbox: tuple[float, float, float, flo
     ]
     cursor = min((rect.y0 for rect in picked), default=caption_bbox[1])
     while picked:
-        # 横向基准是**已选簇的并集**而不是题注：幻灯片上的图常常比题注宽
-        # （右侧突出的框、图例、跨栏的注释），一直拿题注做基准，宽图会被
-        # 左右裁边（实测图 2.13 的「测量」框被切掉一半、题注整条丢失）。
-        # 第一轮 picked 才用题注约束（防吸进隔壁栏），之后跟着图的并集走。
         box = None
         for rect in picked:
             box = rect if box is None else box | rect
@@ -3042,7 +2465,6 @@ def _slide_figure_rect(rects: list, caption_bbox: tuple[float, float, float, flo
     box = picked[0]
     for rect in picked[1:]:
         box = box | rect
-    # 并集只有一小块，说明收到的是几个装饰碎屑而不是图，宁可不截。
     if box.width * box.height < 0.15 * page.rect.width * page.rect.height:
         return None
     return box
@@ -3067,7 +2489,6 @@ def _nearest_graphic_above(rects: list, caption_bbox: tuple[float, float, float,
         gap = caption_top - rect.y1
         if gap < -4 or gap > best_gap:
             continue
-        # 横向要有重叠，否则可能是隔壁栏的图
         if rect.x1 < caption_left - 30 or rect.x0 > caption_right + 30:
             continue
         if rect.height < 20:
@@ -3077,11 +2498,8 @@ def _nearest_graphic_above(rects: list, caption_bbox: tuple[float, float, float,
 
 
 def _formula_rect(page, line_bbox: tuple[float, float, float, float]):
-    """公式的截图范围：编号所在行往上扩一块。
-
-    不做公式识别（书上是什么样就显示什么样）。经验做法是往上扩 46pt——
-    公式主体通常在编号的上方或与编号同行，但高度差得很远，所以宁可多截一点
-    带上下文，也别截掉上半截式子。
+    """公式的截图范围：编号所在行往上扩 46pt。不做公式识别（书上什么样就显示什么样），
+    宁可多截一点带上下文，也别截掉上半截式子。
     """
     pymupdf = _require("pymupdf", "pip install pymupdf")
     x0, y0, x1, y1 = line_bbox
@@ -3133,21 +2551,17 @@ def _save_clip(
 
 
 def _figure_chunk_text(label: str, caption: str) -> str:
-    """图对应的 chunk 内容 = 编号 + 题注。
-
-    只有编号没有题注的图（很多教材图注就是「图 3-4」四个字）仍然保留——
-    「第 3 章有图 3-4」这个事实本身能让检索说清「书上有这张图」，
-    比假装它不存在好。
+    """图对应的 chunk 内容 = 编号 + 题注。只有编号没有题注的图也保留——「第 3 章有图 3-4」
+    这个事实能让检索说清「书上有这张图」。
     """
     return f"{label} {caption}".strip()
 
 
 def _chapter_at(toc: list, page_no: int) -> str | None:
-    """按书签目录算出某一页属于哪一章。取**最深一级**的标题。
+    """按书签目录算某一页属于哪一章，取最深一级的标题。
 
-    PDF 目录的页码是 1-based，和 `page_no` 同口径，所以直接比，不需要 ±1。
-    没有目录（`toc` 为空）时返回 None——宁可不标章节，也不用字号猜一个错的，
-    因为 C2 的验收标准里「页码和章节要和书一致」。
+    目录页码与 `page_no` 同口径（都 1-based），直接比即可。没有目录返回 None——宁可不标，
+    也不用字号猜一个错的（C2 要求页码章节与书一致）。
     """
     best: tuple[int, str] | None = None
     for entry in toc:
@@ -3160,18 +2574,12 @@ def _chapter_at(toc: list, page_no: int) -> str | None:
     return best[1] if best else None
 
 
-# --------------------------------------------------------------------------
-# PPTX 解析
-# --------------------------------------------------------------------------
 
 def _parse_pptx(data: bytes, asset_dir: Path) -> _Parsed:
-    """一套课件 → 元素流。**一张幻灯片一条 chunk**（或按长度切成几条）。
+    """一套课件 → 元素流。**一张幻灯片一条 chunk**（或按长度切几条）。
 
-    PPT 是「一页一个主题」，跨页合并会得到一堆互不相干的短句拼在一起，
-    这和 PDF 的「段落跨页要合并」正好相反。所以这里不做跨页合并。
-
-    图片按 `shape.image.blob` 取出原始字节存盘（PPT 里的图是独立对象，
-    不需要像 PDF 那样渲染区域）。公式是 OMML，抽不出来，v1 只做页级引用。
+    PPT 是「一页一个主题」，跨页合并会把互不相干的短句拼在一起，和 PDF 的「段落跨页要合并」
+    正好相反。图片按 `shape.image.blob` 取原始字节存盘；公式是 OMML，v1 只做页级引用。
     """
     pptx = _require("pptx", "pip install python-pptx")
     from io import BytesIO
@@ -3187,7 +2595,6 @@ def _parse_pptx(data: bytes, asset_dir: Path) -> _Parsed:
                 value = shape.text_frame.text.strip()
                 if not value:
                     continue
-                # 标题占位符单独记下来当章节名（PPT 的「章」就是它的标题）
                 if shape == getattr(slide.shapes, "title", None):
                     title = value.splitlines()[0][:80]
                 texts.append(value)
@@ -3229,19 +2636,13 @@ def _parse_pptx(data: bytes, asset_dir: Path) -> _Parsed:
     return parsed
 
 
-# --------------------------------------------------------------------------
-# DOCX 解析
-# --------------------------------------------------------------------------
 
 def _parse_docx(data: bytes, asset_dir: Path) -> _Parsed:
     """一份 Word 教材 → 元素流。
 
-    页数是「不知道」——Word 的页数取决于渲染时的字体和纸张，`python-docx`
-    根本不提供。所以 `page_count` 记 0，前端显示成「—」，而不是编一个数字。
-    引用时页码也就只能给到章节，这一点在引用格式里体现（有章节没页码）。
-
-    表格按行转成 `a | b | c` 的纯文本进正文：表格内容不转成文本就会整块丢失，
-    而 v1 不做「表格 → 结构化数据」。
+    页数「不知道」：Word 的页数取决于渲染时的字体和纸张，python-docx 不提供。`page_count` 记 0、
+    前端显示「—」，不编一个数字；引用只能给到章节。表格按行转成 `a | b | c` 纯文本进正文
+    （不转就整块丢失）。
     """
     docx = _require("docx", "pip install python-docx")
     from io import BytesIO
@@ -3254,7 +2655,6 @@ def _parse_docx(data: bytes, asset_dir: Path) -> _Parsed:
     for block in _iter_docx_blocks(document):
         kind, payload = block
         if kind == "paragraph":
-            # `payload` 是 `Paragraph` 对象，不是字符串——文本在 `.text` 上。
             text = (payload.text or "").strip()
             if not text:
                 continue
@@ -3331,11 +2731,8 @@ def _parse_docx(data: bytes, asset_dir: Path) -> _Parsed:
 
 
 def _iter_docx_blocks(document):
-    """按**文档顺序**遍历段落和表格。
-
-    `python-docx` 的 `document.paragraphs` 和 `document.tables` 是两个独立列表，
-    分开遍历会把顺序打乱（表格全部跑到正文后面）。所以走底层 XML，
-    按 body 里子元素的出现顺序还原。
+    """按文档顺序遍历段落和表格。`document.paragraphs` 和 `document.tables` 是两个独立列表，
+    分开遍历会把表格全排到正文后面，所以走底层 XML 按 body 子元素顺序还原。
     """
     from docx.table import Table
     from docx.text.paragraph import Paragraph
@@ -3347,12 +2744,8 @@ def _iter_docx_blocks(document):
         elif tag == "tbl":
             yield "table", Table(child, document)
         elif tag == "sectPr":
-            # 节属性里可能挂着图片（页眉/水印），不作为正文插图
             continue
 
-    # 内嵌图片按关系表顺序取。**拿不到它在正文里的位置**——图片在 XML 里是
-    # 一个 run 里的 drawing 节点，要精确配对得解析 r:embed 和题注的相对位置，
-    # 收益不大（Word 教材用图少，且图注都在图下方），所以只保留「有这张图」。
     for rel in document.part.rels.values():
         if "image" not in rel.reltype:
             continue

@@ -27,6 +27,9 @@ textbook/
 # 解析产物：随时能从 textbook/ 重新生成，和 data/ 同理。
 out/
 
+# bench 基准输出：每次跑都生成新报告，历史结果留在本机即可。
+tests/bench/runs/
+
 # 编辑器与系统文件
 .vscode/
 .idea/

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：限制的 HTTP 层——状态码、`Retry-After`、以及「额度没了就别跑模型」。
 
 **这个探针不调模型**：额度判定在开流之前，所以「打满了」的请求会在
@@ -20,7 +19,6 @@ import memories  # noqa: E402
 import users  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="probe-limits-api-"))
-# 各模块各自的库文件，理由见 `probe-memory-api.py` 里那段。
 users.DATA_DIR = tmp
 users.DB_PATH = tmp / "users.sqlite3"
 memories.DATA_DIR = tmp
@@ -87,8 +85,6 @@ def main() -> None:
         uid = r.json()["user"]["user_id"]
 
         print("\n=== 注册也限流 ===")
-        # 从这一刻起注册都要邀请码了，所以这 10 次都会是 400——但限流计数照样记，
-        # 第 11 次就该是 429。被挡的应该是「打得太多」，不是「缺邀请码」。
         limits.reset_rate_limits()
         for _ in range(limits.LOGIN_ATTEMPTS_PER_MINUTE):
             client.post("/api/auth/register", json={"account": "spam", "password": "12345678"})

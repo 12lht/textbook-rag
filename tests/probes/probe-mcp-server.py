@@ -1,8 +1,7 @@
-"""独立验证 mcp_server.py：工具名 / 参数 schema / 描述是否与改造前一致。
+"""独立验证 mcp_server.py 暴露的工具名 / 参数 schema / 描述。
 
-对比基准是改造前用 langchain tool_call_schema 导出的
-.workbuddy/tmp/schema-inprocess.json。如果这里不一致，
-后面 agent_core 的 A/B 对比就不公平——模型看到的接口变了。
+基准是 langchain tool_call_schema 导出的 `.workbuddy/tmp/schema-inprocess.json`；
+两边不一致就说明模型看到的接口变了。
 """
 import asyncio
 import json
@@ -13,9 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-# 关键：agent_core 在 import 时会 load_dotenv()，所以它传给 MCP 子进程的
-# os.environ 里带着 API key。这个探针必须做同样的事，否则子进程拿不到
-# AMAP_API_KEY，工具会静默退化成一堆「服务未配置」。
 from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
@@ -25,7 +21,6 @@ from mcp.client.stdio import stdio_client
 
 BASELINE = ROOT / ".workbuddy" / "tmp" / "schema-inprocess.json"
 
-# 改造前 langchain 的函数名 -> 基线里的顺序
 BEFORE_ORDER = [
     "get_weather_for_location",
     "get_user_location",
@@ -85,7 +80,6 @@ async def main() -> int:
                 if a_desc != b_desc:
                     print(f"  !! 描述被改动，改造前是：{b_desc[:80]}")
 
-            # 真跑一次工具，确认 stdio 通道能把结果带回来（含中文）
             print("\n=== 实调 get_current_time ===")
             call = await session.call_tool("get_current_time", {})
             text = call.content[0].text if call.content else "(空)"

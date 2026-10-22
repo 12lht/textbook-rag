@@ -42,7 +42,6 @@ def _stats(samples: list[float]) -> str:
 async def main() -> None:
     print(f"每个路径采样 {N} 次，工具 = get_current_time（确定性输出）\n")
 
-    # --- A. 直接进程内调用 ---
     for _ in range(3):  # 预热
         tools.get_current_time()
     direct: list[float] = []
@@ -51,13 +50,11 @@ async def main() -> None:
         tools.get_current_time()
         direct.append((time.perf_counter() - start) * 1000)
 
-    # 触发 MCP 会话建立（第一次会 spawn 子进程，单独计时，不计入样本）
     load_start = time.perf_counter()
     mcp_tools = await agent_core.load_tools()
     cold = (time.perf_counter() - load_start) * 1000
     by_name = {t.name: t for t in mcp_tools}
 
-    # --- B. langchain 适配器 -> MCP（agent 实际路径）---
     for _ in range(3):
         await by_name["get_current_time"].ainvoke({})
     via_adapter: list[float] = []
@@ -66,7 +63,6 @@ async def main() -> None:
         await by_name["get_current_time"].ainvoke({})
         via_adapter.append((time.perf_counter() - start) * 1000)
 
-    # --- C. 原始 mcp session.call_tool（纯边界）---
     raw: list[float] = []
     async with agent_core._mcp_client.session(agent_core.MCP_SERVER_NAME) as session:
         for _ in range(3):

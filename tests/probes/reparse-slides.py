@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """重解析全部幻灯片版式的书：让「邻近图取全」的修复落到已入库的书上。
 
 改动前切出来的图左右被题注范围裁边（图 2.13 的「测量」框被切一半），
@@ -30,7 +29,6 @@ async def main():
     doc_ids = slide_doc_ids()
     print(f"待重解析 {len(doc_ids)} 本", flush=True)
     conn = sqlite3.connect("D:/agent/data/documents.sqlite3")
-    # 复用原文件重解析：置 pending 再逐本跑（与上传后的后台解析同一条链路）
     conn.executemany(
         "UPDATE documents SET status='pending', error=NULL WHERE doc_id=?",
         [(d,) for d in doc_ids],

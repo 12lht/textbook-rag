@@ -18,9 +18,6 @@ import tools
 
 server = FastMCP("agent-tools")
 
-# 直接用函数名注册：FastMCP 拿函数名当工具名、拿 docstring 当工具描述，
-# 这样暴露给模型的 name 和 description 与改造前（langchain @tool）逐字一致，
-# 金标集里的 expect_tools 才不会因为改名而失效。
 for _tool_function in tools.ALL_TOOLS:
     server.tool()(_tool_function)
 

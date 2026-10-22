@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """钉死因果链：Skia 渲染出来的矢量矩形里，有多少被判定成排版框。
 如果 Hello-Agents 的框远多于 Hello-Algo，就说明『排版框是网页打印的产物』。"""
 import pymupdf

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """检索层探针：BM25 单用 vs BM25 + 向量 的对照。
 
 两部分：
@@ -24,7 +23,6 @@ load_dotenv(r"D:/agent/.env")
 import documents
 import retrieval
 
-# 术语提问：预期两版都该对，用来确认「向量没有把 BM25 的结果挤掉」
 TERM_QUERIES = [
     ("尾递归和普通递归的区别", "尾递归"),
     ("递归的空间复杂度怎么算", "空间复杂度"),
@@ -39,7 +37,6 @@ TERM_QUERIES = [
     ("思维链", "思维链"),
 ]
 
-# 换个说法：字面几乎不重合（这些是 BM25 的盲区）
 PARAPHRASE = [
     ("算法跑得快不快", "时间复杂度"),
     ("程序为什么越跑越慢", "时间复杂度"),
@@ -49,7 +46,6 @@ PARAPHRASE = [
     ("这课学完能干什么", "教学目标"),
 ]
 
-# 书里没有的（时事/别的话题）——都该判 confident=False
 OUT_BOOK = [
     "今天北京天气怎么样",
     "帮我写一首关于秋天的诗",
@@ -127,7 +123,6 @@ def main() -> None:
         f"{0 if index.matrix is None else len(index.vector_positions)} 条"
     )
 
-    # --- 纯 BM25：把矩阵摘掉 ---
     matrix = index.matrix
     index.matrix = None
     evaluate("BM25 单用 · 术语提问", TERM_QUERIES)
@@ -138,7 +133,6 @@ def main() -> None:
         print("\n没有向量，结束。")
         return
 
-    # --- 融合 ---
     index.matrix = matrix
     evaluate("BM25 + 向量 · 术语提问", TERM_QUERIES)
     evaluate("BM25 + 向量 · 换个说法", PARAPHRASE)

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：记忆面板的 HTTP 层——注册 → 列表 → 改 → 删 → 游客 401。
 
 用临时库跑整个应用（不改 `data/`），所以能连鉴权和 404/409 一起验。
@@ -22,9 +21,6 @@ import memories  # noqa: E402
 import users  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="probe-memory-api-"))
-# 每个模块**各自的库文件**。共用一个 `db.sqlite3` 也能跑（各查各的表），
-# 但那是靠「表名恰好不一样」侥幸成立的——哪天某个模块改了初始化判据
-# （比如开始数全库的表），就会莫名互相干扰。
 users.DATA_DIR = tmp
 users.DB_PATH = tmp / "users.sqlite3"
 memories.DATA_DIR = tmp
@@ -114,8 +110,6 @@ def main() -> None:
         check("409 clash", r.status_code == 409, r.text[:100])
 
         print("\n=== 用**改之前**拿到的 id 删（回归）===")
-        # 前端典型动作序列：拉列表 → 改措辞 → 删。中间不会重新拉列表，
-        # 所以它手里只有改之前的 id。要是那个 id 会随内容变，这一步就是 404。
         r = client.delete(f"/api/memories/{old_id}", headers=headers)
         check("DELETE 200", r.status_code == 200, r.text[:100])
         items = client.get("/api/memories", headers=headers).json()
@@ -127,8 +121,6 @@ def main() -> None:
         check("404（不存在）", r.status_code == 404, r.text[:100])
 
         print("\n=== 换一个账号看不到别人的 ===")
-        # 站点已有用户之后注册必须持邀请码（F1），所以让 t1（主人）先发一个。
-        # 顺带把「主人能发码」这条也验了。
         r = client.post("/api/invites", json={"note": "探针用"}, headers=headers)
         check("主人能发邀请码", r.status_code == 200, r.text[:100])
         invite = r.json()["code"]

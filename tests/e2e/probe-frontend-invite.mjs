@@ -1,9 +1,3 @@
-// 邀请制注册的前端 DOM 测试：注册表单里那个邀请码框什么时候出现、内容对不对，
-// 以及「邀请同学加入」入口只对主人显示。
-//
-// 关键在第二条：**框显不显示由服务端说**。如果前端自己猜「第一个用户不用填」，
-// 那它就得先知道库里几个人——猜错的两个方向都很难受：不该填的时候逼着填，
-// 该填的时候根本没框。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
@@ -48,15 +42,12 @@ async function boot({
   };
 
   const timers = [];
-  // 复制成功后的「已复制」提示靠 setTimeout 还原，这里只记录、不执行回调。
   window.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
   window.clearTimeout = () => {};
   window.requestAnimationFrame = () => 0;
   window.confirm = () => true;
   window.getSelection = () => null;
   window.location = { origin: 'http://127.0.0.1:8000', href: 'http://127.0.0.1:8000/' };
-  // 剪贴板：记下被复制的文本，好断言「生成完真的复制了」。
-  // linkedom 把 navigator 定义成只读 getter，直接赋值会抛，得用 defineProperty 覆盖。
   const copied = [];
   Object.defineProperty(window, 'navigator', {
     value: { clipboard: { writeText: async (text) => { copied.push(text); } } },
@@ -102,8 +93,6 @@ async function boot({
       invites = [fresh, ...invites];
       return json(fresh);
     }
-    // DELETE /api/invites/{code} —— 真的从假数据里删掉，这样「删完列表少一行」
-    // 才能被验：如果桩只返回 200 却不改数据，重新拉列表还是原来那几行。
     if (String(url).startsWith('/api/invites/') && method === 'DELETE') {
       const code = decodeURIComponent(String(url).slice('/api/invites/'.length));
       const before = invites.length;
@@ -129,7 +118,6 @@ const flush = async () => {
   for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
 };
 
-// --- 游客：注册框要码；邀请码入口不显示 ---
 {
   const { document } = await boot({ loggedIn: false, needsInvite: true });
   check('游客看不到邀请码入口', document.querySelector('#inviteEntry').hidden === true);
@@ -147,7 +135,6 @@ const flush = async () => {
     document.querySelector('#authInvite').placeholder);
 }
 
-// --- 空站（第一个用户）：不显示框，提交也不带 ---
 {
   const { document, calls } = await boot({ loggedIn: false, needsInvite: false });
   document.querySelector('#accountAction').onclick();
@@ -172,7 +159,6 @@ const flush = async () => {
     reg[0] && reg[0].body);
 }
 
-// --- 需要码：填了才带上 ---
 {
   const { document, calls } = await boot({ loggedIn: false, needsInvite: true });
   document.querySelector('#accountAction').onclick();
@@ -191,7 +177,6 @@ const flush = async () => {
     reg[0] && reg[0].body);
 }
 
-// --- 服务端说「需要邀请码」但前端没显示框 → 补显示 ---
 {
   const { document } = await boot({
     loggedIn: false,
@@ -216,7 +201,6 @@ const flush = async () => {
     document.querySelector('#authError').textContent);
 }
 
-// --- 主人：入口出现，能发码 ---
 {
   const { document, calls, copied } = await boot({ loggedIn: true, isOwner: true, needsInvite: true });
   check('主人看得到邀请码入口', document.querySelector('#inviteEntry').hidden === false);
@@ -238,7 +222,6 @@ const flush = async () => {
   check('没用的标「还没人用」', states[1] === '还没人用', states[1]);
 
   check('已用的那行整体压暗', rows[0].className.includes('used'), rows[0].className);
-  // 已用的码不能复制（复制也没意义），但**能删**——否则列表永远清不干净。
   const usedOps = [...rows[0].querySelectorAll('.memory-op')].map((n) => n.textContent);
   check('已用的只有删除，没有复制', usedOps.join('/') === '删除', usedOps.join('/'));
   const freshOps = [...rows[1].querySelectorAll('.memory-op')].map((n) => n.textContent);
@@ -247,7 +230,6 @@ const flush = async () => {
   const note = document.querySelectorAll('#inviteList .memory-text')[0].textContent;
   check('备注显示出来', note.includes('给室友小李'), note);
 
-  // 生成一个新码
   document.querySelector('#inviteNote').value = '给老张';
   await document.querySelector('#inviteMake').onclick();
   await flush();
@@ -260,9 +242,6 @@ const flush = async () => {
   check('新码排在第一个',
     document.querySelectorAll('#inviteList .invite-code')[0].textContent === 'AW-FRESH-NEW1',
     document.querySelector('#inviteList .invite-code').textContent);
-  // 这个环境没有 navigator.clipboard（vm 里 navigator 被 Node 内置对象遮蔽，
-  // 也没有真剪贴板）。生产代码在这里该走「兜底提示」那条路——把码写出来让人手抄，
-  // 而不是抛一个 TypeError 就完事。真浏览器里的复制成功分支靠人工验一次。
   check('没有剪贴板时不硬调（canCopy 判断生效）', copied.length === 0, JSON.stringify(copied));
   check('底部把码写出来让人手抄',
     document.querySelector('#inviteError').textContent.includes('AW-FRESH-NEW1')
@@ -270,7 +249,6 @@ const flush = async () => {
     document.querySelector('#inviteError').textContent);  check('备注输入框清空了', document.querySelector('#inviteNote').value === '');
 }
 
-// --- 备注留空：传 null 而不是空字符串 ---
 {
   const { document, calls } = await boot({ loggedIn: true, isOwner: true });
   document.querySelector('#inviteOpen').onclick();
@@ -281,13 +259,11 @@ const flush = async () => {
   check('空备注传 null', JSON.parse(post[0].body).note === null, post[0].body);
 }
 
-// --- 普通用户：入口不显示；就算硬开会拿到 403 提示 ---
 {
   const { document } = await boot({ loggedIn: true, isOwner: false, invitesStatus: 403 });
   check('普通用户看不到邀请码入口', document.querySelector('#inviteEntry').hidden === true);
 }
 
-// --- 关闭 ---
 {
   const { window, document } = await boot({ loggedIn: true, isOwner: true });
   const modal = document.querySelector('#inviteModal');
@@ -307,13 +283,11 @@ const flush = async () => {
   check('点卡片内部不关闭', modal.hidden === false, String(modal.hidden));
 }
 
-// --- 删除邀请码 ---
 {
   const { window, document, calls } = await boot({ loggedIn: true, isOwner: true });
   document.querySelector('#inviteOpen').onclick();
   await flush();
 
-  // 取消确认框：不许发请求
   window.confirm = () => false;
   const rowsBefore = document.querySelectorAll('#inviteList .invite-row').length;
   document.querySelectorAll('#inviteList .memory-op.danger')[1].onclick(); // 未用那个
@@ -323,7 +297,6 @@ const flush = async () => {
   check('取消后行数不变',
     document.querySelectorAll('#inviteList .invite-row').length === rowsBefore);
 
-  // 确认删除：未用的码
   let asked = '';
   window.confirm = (message) => { asked = message; return true; };
   document.querySelectorAll('#inviteList .memory-op.danger')[1].onclick();
@@ -346,7 +319,6 @@ const flush = async () => {
     document.querySelector('#inviteError').textContent.includes('AW-MNPQ-2345'),
     document.querySelector('#inviteError').textContent);
 
-  // 已用的码：确认文案要不一样（说明只是查不到来源，账号不受影响）
   asked = '';
   document.querySelectorAll('#inviteList .memory-op.danger')[0].onclick();
   await flush();
@@ -355,12 +327,10 @@ const flush = async () => {
   check('已用的也能删掉', !document.querySelector('#inviteList').textContent.includes('AW-ZJWY-TCV9'));
 }
 
-// --- 删除时码已经不在了（另一个标签页删过）→ 不当成失败 ---
 {
   const { window, document, calls } = await boot({ loggedIn: true, isOwner: true });
   document.querySelector('#inviteOpen').onclick();
   await flush();
-  // 把假数据清空，模拟「列表是旧的，服务端已经没了」
   window.confirm = () => true;
   const original = window.fetch;
   window.fetch = async (url, options = {}) => {

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：界面上那块「AI 记住了什么」——列表 / 删除 / 修改。
 
 对应 PROJECT-PLAN 的 E6（记得的都能看见，可删、可改）。测的是存储层那几个
@@ -70,14 +69,11 @@ def main() -> None:
     check("created_at 没被改成现在", kept["created_at"] == target["created_at"])
 
     print("\n=== 改完编号不变（回归）===")
-    # 这是那个 bug 的核心：编号若从原文算出来，改完就换了号，
-    # 前端手里的旧号立刻失效，下一步「删除」必然 404。
     check("改完 id 和改前一模一样", kept["id"] == target["id"])
     check(
         "拿旧 id 还能删得掉",
         memories.forget_by_id(USER, target["id"]),
     )
-    # 删掉之后重新写一条，把这一节弄脏的数据补回来
     memories.remember(USER, [{"text": "称呼我为涛哥", "kind": "身份"}])
     after = memories.memories_of(USER)
     check("补回来之后仍是 3 条", len(after) == 3)

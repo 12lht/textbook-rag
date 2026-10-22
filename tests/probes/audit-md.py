@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """审计 data/ 里 24 本 ready 书的解析成品质量（markdown + chunks）。
 
 指标：乱码(U+FFFD)、无章节归属、段首像页码、条目符残留、图引用与 asset 失配、
@@ -45,13 +44,10 @@ for d in docs:
         1 for c in chunks for ln in c["content"].splitlines()
         if ln[:1] and ln.lstrip()[:1] in BULLETS
     )
-    # 图引用与 asset 失配
     ref_ids = set(re.findall(r"as_[0-9a-f]+", md))
     asset_ids = {a for a in ref_ids}
-    # 页锚点覆盖
     pages_in_md = sorted({int(m) for m in re.findall(r"<!--\s*page:(\d+)", md)})
     anchor_cov = (len(pages_in_md) / d["page_count"]) if d["page_count"] else 0
-    # 最高频重复行（≥30% 页数出现视为页眉残留嫌疑）
     lines = [ln.strip() for c in text for ln in c["content"].splitlines() if 2 < len(ln.strip()) < 40]
     top = Counter(lines).most_common(1)
     repeated = ""

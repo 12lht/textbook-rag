@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """解析改动后的实际产出：段落长度分布、代码块数量、样例片段。"""
 import sys, statistics, tempfile, re
 sys.path.insert(0, r"D:/agent")

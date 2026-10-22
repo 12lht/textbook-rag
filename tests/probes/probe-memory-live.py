@@ -25,19 +25,11 @@ sys.path.insert(0, str(ROOT))
 import agent_core
 import memories
 
-# 换到临时库，别把真实记忆写坏。
-# **放在项目内而不是系统 temp**：沙箱不允许往 Temp 目录写，实测会抛 PermissionError
-# （这个坑正好顺带暴露了工具层没兜异常的问题，见 agent_core.save_memory）。
-#
-# 注意变量名是 `DB_PATH`（2026-10-10 从 `MEMORY_PATH` 改成 SQLite 后改的名）。
-# 曾经写成 `MEMORY_PATH`，赋值**不报错但毫无作用**（只是给模块加了个没人看的属性），
-# 于是探针悄悄地往真实的 data/memories.sqlite3 里写——「改到临时文件」这句注释变成谎话。
 _TMP = Path(__file__).with_name(f"probe-memories-{uuid.uuid4().hex[:6]}.sqlite3")
 memories.DB_PATH = _TMP
 
 MEMORY_TOOLS = {"save_memory", "recall_memory"}
 
-# 探针自己造的会话 id，收尾时清掉，别留在 checkpoint 里
 _THREADS: list[str] = []
 
 
@@ -69,7 +61,6 @@ def check(label: str, condition: bool, detail: str = "") -> bool:
 async def main() -> int:
     ok = True
 
-    # service 是唯一该注入后端的层——确认它真的注入了，而不是只在探针里手动接上
     import service  # noqa: F401
 
     ok &= check(
@@ -99,7 +90,6 @@ async def main() -> int:
     ok &= check("确实写进去了", len(stored) >= 1)
     ok &= check("记住了猫的名字", any("豆豆" in e["text"] for e in stored))
 
-    # 记下第 1 轮存的那条香菜偏好**原文**，第 2 轮作废之后要按它来比对
     old_spicy = [e["text"] for e in stored if "香菜" in e["text"]]
     print(f"   第 1 轮关于香菜的原文：{old_spicy}")
 
@@ -117,11 +107,6 @@ async def main() -> int:
     print(f"   落盘：{[e['text'] for e in after]}")
     texts = [e["text"] for e in after]
     ok &= check("用了 replaces 作废旧条目", any("replaces" in (c.get("args") or {}) for c in calls if c["name"] == "save_memory"))
-    # **按原文精确比对，不要子串匹配**。踩过：原来写的是
-    # `not any("不吃香菜" in t ...)`，而模型很自然会把新条目写成
-    # 「用户**以前不吃香菜**，2026 年 10 月起已改口」——旧条目确实删干净了，
-    # 却被新条目的措辞误判成「还在」。断言要盯「那一条原文还在不在」，
-    # 不是「这几个字还在不在」。
     ok &= check(
         "第 1 轮那条原文已经作废（精确比对，不是子串）",
         all(t not in texts for t in old_spicy),
@@ -154,14 +139,12 @@ async def run() -> int:
     try:
         return await main()
     finally:
-        # 探针造出来的会话别留在 checkpoint 里
         for thread_id in _THREADS:
             try:
                 await agent_core.delete_checkpoint_thread(thread_id)
             except Exception:
                 pass
         await agent_core.shutdown()
-        # SQLite 还可能留下 -wal / -shm 边车文件，一起收
         for suffix in ("", "-wal", "-shm"):
             side = Path(str(_TMP) + suffix)
             try:

@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
 """验证「深度思考 / 联网搜索」两个开关真的改变了发给模型的东西。
 
 重点不是「代码跑通」，而是三件事：
-  1. **默认必须和加开关之前逐位一致**——否则评测基线会悄悄漂移。
+  1. 默认两个都开，不传参数时行为不变。
   2. 关联网 = 工具表里真的少了那两个，不是留着让模型自觉不用。
   3. 关思考 = 用的是另一个模型实例，且真的带上了关闭推理的参数。
 """
@@ -18,7 +17,6 @@ import agent_core
 
 
 def check(label, condition):
-    # 注意参数顺序：写反了不会报错，只会永远通过（踩过）。
     print(f"{'通过' if condition else '不通过'}  {label}")
     return bool(condition)
 
@@ -52,7 +50,6 @@ async def main():
     ok &= check("关联网后 web_extract 不在表里", "web_extract" not in no_web_names)
     ok &= check("关联网后别的工具一个没少", len(no_web_names) == len(names) - 2)
 
-    # 全开那套必须就是原来那一套（同一个对象），不能是重新 bind 出来的
     default_bound = await agent_core._mcp.bound_model()
     again = await agent_core._mcp.bound_model()
     ok &= check("默认 bound_model 走缓存，两次是同一个对象", default_bound is again)

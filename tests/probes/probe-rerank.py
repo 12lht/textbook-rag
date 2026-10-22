@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """rerank 对照：在 TARGET=250 的语料上，检索候选池 → bge-reranker-v2-m3 重排 → 裁判打分。
 
 候选池 = BM25 前 30 ∪ 向量前 30（并集），rerank 取 top 6。

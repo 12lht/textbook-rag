@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：现有检索 + 通用对话，能不能直接承担「章节摘要」和「自测出题」。
 
 背景：`docs/PROJECT-PLAN.md` 把 D 域（章节摘要 / 出题 / 批改）列在 P1，
@@ -113,7 +112,6 @@ async def main() -> None:
     print(f"书目：{doc['title']}  status={doc['status']}  "
           f"chunks={doc['chunk_count']}  pages={doc['page_count']}")
 
-    # 可以只跑某一题：python probe-chapter-tasks.py 章节摘要
     only = sys.argv[1] if len(sys.argv) > 1 else None
     picked = [q for q in QUESTIONS if only is None or only in q[0]]
 

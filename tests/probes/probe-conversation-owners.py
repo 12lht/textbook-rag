@@ -35,9 +35,6 @@ def header(text: str) -> None:
     print(f"\n== {text} ==")
 
 
-# --------------------------------------------------------------------------
-# 真实数据目录的快照：跑完要核对没变
-# --------------------------------------------------------------------------
 REAL_DIR = ROOT / "data"
 REAL_FILES = ["conversation_summaries.json", "conversation_renames.json",
               "conversation_owners.json"]
@@ -60,10 +57,7 @@ C.OWNER_PATH = TMP / "conversation_owners.json"
 GUEST = users.GUEST_USER_ID
 
 
-# --------------------------------------------------------------------------
 header("1. 老会话没有归属记录 → 落到默认账号")
-# --------------------------------------------------------------------------
-# 手工造出「本次改造之前」的状态：只有标题，没有归属。
 C.save_conversation_summaries({"old-1": "老会话一", "old-2": "老会话二"})
 print("     归属文件存在吗:", C.OWNER_PATH.exists())
 
@@ -75,9 +69,7 @@ check(C.ids_of_user("u-nobody") == set(),
 check(not C.OWNER_PATH.exists(),
       "只是读，不会顺手把归属文件写出来（避免读操作带写副作用）")
 
-# --------------------------------------------------------------------------
 header("2. 新建会话记下归属")
-# --------------------------------------------------------------------------
 t_a = C.create_conversation("u-alice")
 t_b = C.create_conversation("u-bob")
 print("     alice:", t_a, " bob:", t_b)
@@ -94,14 +86,11 @@ check(C.ids_of_user(GUEST) == {"old-1", "old-2"},
 check(not (C.ids_of_user("u-alice") & C.ids_of_user("u-bob")),
       "两个账号的交集为空")
 
-# 老会话 + 新会话同时存在，各自归各自
 check(len(C.ids_of_user(GUEST)) + len(C.ids_of_user("u-alice")) + len(C.ids_of_user("u-bob"))
       == len(C.load_conversation_summaries()),
       "三个账号的会话加起来 = 总数（不重不漏）")
 
-# --------------------------------------------------------------------------
 header("3. belongs_to：存在性 + 归属一起判")
-# --------------------------------------------------------------------------
 check(C.belongs_to(t_a, "u-alice") is True, "自己的会话 → True")
 check(C.belongs_to(t_a, "u-bob") is False, "别人的会话 → False")
 check(C.belongs_to("t-not-exist", "u-alice") is False, "不存在的会话 → False")
@@ -110,9 +99,7 @@ check(C.belongs_to("old-1", GUEST) is True, "老会话对默认账号可见")
 check(C.belongs_to("t-not-exist", GUEST) is False,
       "不存在的会话即使是默认账号也 False（存在性先判）")
 
-# --------------------------------------------------------------------------
 header("4. 删除会话：三份一起清")
-# --------------------------------------------------------------------------
 C.rename_conversation(t_a, "改过名的会话")
 check(C.is_renamed(t_a) is True, "重命名标记已写入")
 check(C.drop_conversation(t_a) is True, "第一次删除返回 True")
@@ -123,9 +110,7 @@ check(C.drop_conversation(t_a) is False, "第二次删除返回 False（幂等�
 check(C.owner_of(t_a) == GUEST, "删掉之后 owner_of 兜底（不再指向 alice）")
 check(C.belongs_to(t_a, "u-alice") is False, "删掉之后 alice 也拿不到了")
 
-# --------------------------------------------------------------------------
 header("5. 归属文件坏掉 / 值为空时不许崩")
-# --------------------------------------------------------------------------
 C.OWNER_PATH.write_text("{ 这不是 json", encoding="utf-8")
 check(C.owner_of(t_b) == GUEST, "损坏的归属文件 → 当没有记录（不抛异常）")
 check(C.ids_of_user(GUEST) == {"old-1", "old-2", t_b},
@@ -138,9 +123,7 @@ C.save_conversation_owners({"whatever": "u-alice"})
 check(C.ids_of_user("u-alice") == set(),
       "只存在于归属文件、会话表里没有的记录被滤掉", sorted(C.ids_of_user("u-alice")))
 
-# --------------------------------------------------------------------------
 header("6. 真实 data/ 目录没有被碰到")
-# --------------------------------------------------------------------------
 after_real = real_snapshot()
 check(before_real == after_real, "三个会话元数据文件的 mtime 未变", str(after_real))
 check(C.OWNER_PATH != REAL_DIR / "conversation_owners.json",

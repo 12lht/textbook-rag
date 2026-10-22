@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """最终验证：mono 主导行 + 区段整体缩进 >= 正文列 + 0.4 字号。"""
 import sys
 sys.path.insert(0, r"D:/agent")

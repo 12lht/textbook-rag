@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """chunk 尺寸对照：TARGET_CHARS 500（现行） vs 250（切半）。
 
 在语料副本上重切（rechunk 只读 Markdown，不碰 PDF）→ 清空向量重嵌 →
@@ -49,7 +48,6 @@ def main() -> None:
         info = documents.rechunk(d["doc_id"])
         print(f"  {d['title'][:16]:<18} {d['chunk_count']} -> {info['chunk_count']} 段")
 
-    # 向量库指向新文件，逐本补算
     print("补算向量……")
     for d in docs:
         stat = retrieval.ensure_vectors("u1")

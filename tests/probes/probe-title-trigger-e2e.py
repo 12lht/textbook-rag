@@ -39,7 +39,6 @@ TMP_FILES = [
 FAILURES = 0
 THREADS: list[str] = []
 
-# ---- 桩 ----
 TITLE_CALLS: list[tuple[list[str], str]] = []
 STREAM_CALLS: list[str] = []
 
@@ -69,8 +68,6 @@ def check(condition: bool, label: str, extra: str = "") -> None:
 
 async def run_turn(seed_turns: int) -> list[str]:
     """把 seed_turns 轮假历史灌进去，再跑「第 seed_turns+1 轮」，返回事件类型序列。"""
-    # 注意 `service.create_conversation` 返回的是 dict（thread_id + summary），
-    # 不是 id 字符串——直接当 id 用会撞在 `is_renamed` 里报 unhashable dict。
     thread_id = service.create_conversation("u-tt")["thread_id"]
     THREADS.append(thread_id)
     graph = await agent_core._ensure_graph()
@@ -92,7 +89,6 @@ async def main() -> int:
     agent_core.stream_agent = fake_stream_agent
     agent_core.generate_title = guard_generate_title
 
-    # 桩是不是真的挂上了（上面那段注释里的教训）
     print("桩的生效检查")
     check(service._build_title is fake_build_title, "service._build_title 已换成桩")
     check(agent_core.stream_agent is fake_stream_agent, "agent_core.stream_agent 已换成桩")
@@ -130,10 +126,8 @@ async def main() -> int:
         )
         if got != expected:
             continue
-        # 顺带把「主模型那条路还在走」也钉住，别因为桩写错而假通过
         if "assistant_delta" not in types:
             check(False, f"第 {turn} 轮主模型事件缺失", str(types))
-        # 不推标题时，标题模型一次都不该被调用
         if not expected:
             check(
                 not TITLE_CALLS,
@@ -158,7 +152,6 @@ async def main() -> int:
     check("title" not in types, "第 1 轮也不覆盖用户手改的名字", str(types))
     check(not TITLE_CALLS, "被手改过就不调标题模型", f"调了 {len(TITLE_CALLS)} 次")
 
-    # ---- 清理 ----
     for tid in THREADS:
         try:
             await agent_core.delete_checkpoint_thread(tid)

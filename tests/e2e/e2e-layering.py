@@ -32,8 +32,6 @@ def call(method, path, body=None):
             return response.status, json.loads(response.read().decode() or "null")
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode() or "null"
-        # 500 时 body 是纯文本（Internal Server Error），不能让测试脚本自己崩掉，
-        # 否则真正的问题会被 JSONDecodeError 盖住。
         try:
             return exc.code, json.loads(raw)
         except json.JSONDecodeError:
@@ -99,7 +97,6 @@ try:
     row = next((item for item in listed if item["thread_id"] == thread_id), None)
     check("标题已还原成默认值", row is not None and row["summary"] == "新会话（暂无消息）", str(row))
 
-    # 标题还原后，自动起标题应该重新生效 → 会多出一个 title 事件
     print("\n--- 再发一条，确认自动起标题恢复、且会话还能用 ---")
     events = stream("/api/chat/stream", {"message": "只回两个字：好的", "thread_id": thread_id})
     kinds = [event["type"] for event in events]

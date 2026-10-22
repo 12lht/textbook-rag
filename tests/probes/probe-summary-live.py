@@ -16,7 +16,6 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import agent_core
 
-# 故意埋进去的「事实」，全是以后可能还用得上的那种
 FACTS = {
     "城市": "深圳",
     "专业": "信息工程",
@@ -24,7 +23,6 @@ FACTS = {
     "婚期": "明年三月",
     "忌口": "不吃香菜",
 }
-# 故意埋进去的「噪声」，摘要里**不该**出现
 NOISE = ["今天天气不错", "嗯嗯", "好的谢谢", "哈哈哈"]
 
 TRANSCRIPT = [

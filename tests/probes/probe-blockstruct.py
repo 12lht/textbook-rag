@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """block 结构指纹：一行是不是一个 block，决定了段落会不会被切碎。
 对比 Skia(网页打印) 与 pypdf(LaTeX) 两类产物的差异。"""
 import statistics

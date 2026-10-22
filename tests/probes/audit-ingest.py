@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """入库质量审计：三本基线书重跑解析 + 切分，输出可量化的脏点。
 
 只用临时目录，不碰 data/documents.sqlite3。
@@ -66,7 +65,6 @@ def audit(path: str, label: str, per_page: bool) -> None:
         )
     print(f"  无章节归属 {no_chapter}/{len(text)}   段首像页码/页眉 {len(head_hits)}")
     print(f"  行首条目符残留 {bullet_lines} 行")
-    # 首尾各看一条，人工核
     if text:
         print(f"  首条 p{text[0]['page_start']}: {text[0]['content'][:90]!r}")
         print(f"  末条 p{text[-1]['page_end']}: {text[-1]['content'][:90]!r}")

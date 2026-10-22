@@ -62,7 +62,6 @@ if some:
     pix = Pixmap(str(some))
     print(f"抽查一张：{some.name} {pix.width}x{pix.height}", flush=True)
 
-# 清理：临时目录里的 97.9MB + 图片不必留着
 import shutil  # noqa: E402
 
 shutil.rmtree(TMP, ignore_errors=True)

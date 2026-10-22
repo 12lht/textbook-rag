@@ -1,6 +1,5 @@
 """把 `data/` 的状态打包成一份可恢复的备份。可以反复跑，不影响正在运行的服务。
 
-## 为什么不能直接 `cp -r data` 或 `tar czf`
 
 1. **正在写的 SQLite 直接拷文件，可能拷到半页。** 恢复时库是坏的，而且只有当
    你真正要用备份那天才发现——那时原始数据已经没了。这里每个库都走
@@ -12,21 +11,15 @@
    历史消息里的插图全部 403（签名再也验不过，只能重新解析教材）；
    `guest_secret.key` 丢了只是访客 cookie 失效，影响小但也别丢。
 
-## 用法
 
 ```bash
-# 全量（含教材插图和上传的原 PDF，约 200MB 量级）
 python scripts/backup.py
 
-# 精简（只备状态，约 60MB）。assets/uploads 能从 textbook/ 重新解析出来，
-# 代价是恢复后要重跑一遍解析。
 python scripts/backup.py --slim
 
-# 只保留最近 5 份
 python scripts/backup.py --keep 5
 ```
 
-## 恢复
 
 **先停服务**。SQLite 文件被进程占着时替换，轻则新版文件被忽略，重则下次启动
 读到不一致的库。
@@ -55,11 +48,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 BACKUP_DIR = ROOT / "backups"
 
-# SQLite 库的扩展名。`documents` 用 `.sqlite3`，`agent_checkpoints` 用 `.sqlite`。
 DB_SUFFIXES = {".sqlite", ".sqlite3"}
-# 边车文件：由 backup API 合并进快照，单独拷没有意义。
 SIDECAR_SUFFIXES = ("-wal", "-shm")
-# 能从 textbook/ 重新生成的东西。`--slim` 时跳过。
 REGENERABLE_DIRS = {"assets", "uploads"}
 
 
@@ -110,7 +100,6 @@ def build_archive(slim: bool) -> Path:
             else:
                 shutil.copy2(item, stage / name)
 
-        # gzip 压不动 PNG，但能压 JSON 和 sqlite 里的文本，仍然值得。
         with tarfile.open(archive, "w:gz") as tar:
             tar.add(stage, arcname="data")
 

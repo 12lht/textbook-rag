@@ -1,0 +1,20 @@
+# 场景定义。每行一个 JSON 对象：
+#   id            场景名（进报告）
+#   title         中文说明
+#   turns         依次发出的用户提问（同一会话内连续，测缓存随轮次爬升）
+#   reasoning     深度思考开关（默认 true）
+#   web_search    联网搜索开关（默认 true）
+#   expect_tools  校验用：这些工具至少要被调到一次，没调到在报告里标红
+#
+# 设计原则：每个场景瞄着一个指标面。
+#   chat-1turn   → 基线：最便宜的一轮长什么样（无工具、无历史）
+#   chat-5turn   → 缓存爬升：同一会话连问 5 轮，看第 2 轮起命中率
+#   tool-*       → 工具税：工具 schema 的固定 token 开销 + 工具执行时延
+#   rag-*        → 检索税：检索结果塞进上下文的 token 开销
+#   no-reasoning → 思考税：关掉深度思考省多少 output token、快多少
+{"id": "chat-1turn", "title": "单轮闲聊（无工具）", "turns": ["用一句话介绍一下什么是缓存。"], "expect_tools": []}
+{"id": "chat-5turn", "title": "同会话连续五轮", "turns": ["用一句话介绍一下什么是缓存。", "那 CPU 缓存和网络缓存有什么区别？", "我们刚才聊到哪了？", "再举一个生活中的例子。", "把上面四轮的要点各用五个字总结。"], "expect_tools": []}
+{"id": "tool-time", "title": "单工具：当前时间", "turns": ["现在几点了？"], "expect_tools": ["get_current_time"]}
+{"id": "tool-weather", "title": "单工具：天气", "turns": ["北京今天天气怎么样？"], "expect_tools": ["get_weather_for_location"]}
+{"id": "rag-textbook", "title": "教材检索问答", "turns": ["RIS 是什么？用教材里的定义回答。"], "expect_tools": ["search_textbook"]}
+{"id": "no-reasoning", "title": "关深度思考对照", "turns": ["用一句话介绍一下什么是缓存。"], "reasoning": false, "expect_tools": []}

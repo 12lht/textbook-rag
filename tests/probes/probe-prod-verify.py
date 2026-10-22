@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """生产改动落地验证：新 TARGET=250 + rerank 复合分 + 邻居扩展，走真实 search() 路径。
 
 步骤：ab-corpus 重切（新切分参数）→ 清向量重嵌 → 16 题裁判（和生产完全同一条代码路径）。
@@ -32,14 +31,12 @@ def main() -> None:
     documents.ASSET_DIR = CORPUS / "assets"
     retrieval.VECTOR_DB = CORPUS / "vectors.sqlite3"
 
-    # 1) 重切（TARGET 现在是 250，生产代码路径）
     docs = documents.list_documents("u1")
     for d in docs:
         info = documents.rechunk(d["doc_id"])
         print(f"重切 {d['title'][:14]:<16} {d['chunk_count']} -> {info['chunk_count']} 段")
     retrieval.clear_cache()
 
-    # 2) 清向量重嵌（chunk_id 全变，旧向量已失配）。切分没变就跳过（省一次全量嵌入）
     import sqlite3
     total = sum(d["chunk_count"] for d in docs)
     vdb = CORPUS / "vectors.sqlite3"
@@ -59,7 +56,6 @@ def main() -> None:
     else:
         print(f"向量已就绪（{have}/{total}），跳过重嵌")
 
-    # 3) rerank 连通性（降级前先确认它在）
     probe = retrieval._rerank_scores("递归什么时候栈溢出", ["递归是函数调用自身。", "冒泡排序每次交换相邻元素。"])
     print("rerank 连通：", "OK" if probe is not None else "!! 失败，将全程走融合降级")
 

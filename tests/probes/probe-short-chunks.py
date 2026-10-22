@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """短正文 chunk 到底是什么？"""
 import sys, tempfile
 sys.path.insert(0, r"D:/agent")

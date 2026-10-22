@@ -68,8 +68,6 @@ def test_register() -> None:
         ("taoge", "大小写不同也算重名"),
         (" TAOGE ", "首尾空白和大小写都归一化"),
     ]:
-        # 站里已经有人了，注册必须持码（F1）。每次发一个新的——失败那次会把码
-        # 一起回滚，所以不能复用同一个。
         code = users.create_invite(user["user_id"])["code"]
         try:
             users.register(bad, "correct-horse", code)
@@ -121,7 +119,6 @@ def test_password_storage() -> None:
     check("同密码不同用户 salt 不同", other_stored != stored)
     check("hash 部分也不同", other_stored.split("$")[3] != digest_b64)
 
-    # 版本前缀的意义：老记录按它自己记的迭代次数验证
     weak = users._hash_password(secret, iterations=1000)
     check("低迭代次数的老记录仍能验证（不强制改密码）", users._verify_password(secret, weak))
     check("存储值被改坏时返回 False 而不是抛异常", users._verify_password(secret, "junk") is False)
@@ -147,7 +144,6 @@ def test_authenticate() -> None:
         except users.InvalidCredentials as exc:
             check(f"{why}时抛 InvalidCredentials", True, str(exc))
 
-    # 三条路的时间要接近，否则「耗时」本身就成了「账号存不存在」的探测器
     def time_of(account: str, password: str) -> float:
         start = time.perf_counter()
         try:
@@ -191,7 +187,6 @@ def test_sessions() -> None:
     check("撤销不存在的令牌返回 False", users.revoke_token("nope") is False)
     check("撤销一个不影响另一个", users.resolve_token(token) is not None)
 
-    # 过期：把 expires_at 改到过去
     with users._db() as conn:
         conn.execute(
             "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
@@ -211,8 +206,6 @@ def test_sessions() -> None:
 def test_concurrent_register() -> None:
     print("== 5. 并发注册同一个账号（唯一约束兜住） ==")
     fresh_db()
-    # 站里先站一个人当主人，之后注册都要码。**每个线程发自己那一个**——
-    # 同一个码只能被一个人用，共用的话这场并发测的就变成「抢码」了。
     owner = users.register("owner", "correct-horse")
     count = 8
     codes = [users.create_invite(owner["user_id"], f"worker-{i}")["code"] for i in range(count)]
@@ -242,8 +235,6 @@ def test_concurrent_register() -> None:
         total = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     check("库里只有两行（主人 + 注册成功的那一个）", total == 2, f"{total} 行")
 
-    # 那 7 次失败的注册各自抢到过一个码，事务回滚之后必须全部退回可用状态。
-    # 漏了这一步的话，一次手滑（账号打错）就白烧一个邀请码。
     unused = [i for i in users.list_invites() if not i["used"]]
     check("失败的注册没烧掉邀请码", len(unused) == count - 1, f"{len(unused)} 个还可用")
     print()

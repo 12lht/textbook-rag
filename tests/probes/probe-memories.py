@@ -25,7 +25,6 @@ sys.path.insert(0, str(ROOT))
 
 import memories
 
-# 全部写到临时库，绝不碰 data/ 下的真东西
 HERE = Path(__file__).with_name
 LEGACY = HERE("probe-legacy-memories.json")
 RUN = uuid.uuid4().hex[:8]  # 每次运行换个随机串
@@ -94,7 +93,6 @@ def test_storage() -> None:
 
     check("用户之间互不串味", memories.memories_of("u2") == [])
 
-    # 顺序是刻意的：去重靠累加，累加是 UPDATE，不该把这一行挪到末尾
     check(
         "读出顺序 = 首次写入顺序（重复的那条没被挪到最后）",
         texts == ["不吃香菜", "我是北邮大三学生", "明年三月结婚"],
@@ -134,9 +132,6 @@ def test_limits() -> None:
 
 def test_concurrent() -> None:
     print("== 3. 并发写（模型一条消息发多个工具调用时会真并发） ==")
-    # 这些工具是同步函数，ToolNode 会并发执行它们，各自落在不同的工作线程里。
-    # 换成 SQLite 之前这里要考一把 `threading.Lock`；现在原子性由数据库保证，
-    # 锁已经删掉了，所以这一节测的是「数据库真的兜住了」。
     def race(user: str, count: int, same: bool = False) -> tuple[int, int, list[str]]:
         """让 count 个线程尽量同时写，返回（落盘条数，抛异常的线程数，异常样本）。
 
@@ -161,7 +156,6 @@ def test_concurrent() -> None:
             thread.start()
         for thread in threads:
             thread.join()
-        # 异常样本要打出来：只报「7 次失败」等于什么都没说
         samples = [f"{type(e).__name__}: {e}" for e in errors[:2]]
         return len(memories.memories_of(user)), len(errors), samples
 
@@ -171,8 +165,6 @@ def test_concurrent() -> None:
         print(f"      异常样本：{sample}")
     check("一条都没丢、一次都没报错", kept == 8 and failed == 0, f"{kept} 条 / {failed} 次异常")
 
-    # 更狠的一种：8 个线程同时写**同一条**事实。去重靠唯一约束，所以应该是
-    # 1 条落盘、hits 累加到 8——这正是原来那把锁在防的场景，现在靠事务兜。
     dup_kept, dup_failed, dup_samples = race("u-dup", 8, same=True)
     hits = memories.memories_of("u-dup")[0]["hits"] if dup_kept else 0
     print(f"   8 个线程并发写**同一条** -> 落盘 {dup_kept} 条，hits={hits}，失败 {dup_failed} 次")
@@ -186,7 +178,6 @@ def test_concurrent() -> None:
 def test_legacy_import() -> None:
     print("== 4. 老 JSON 一次性迁移 ==")
     fresh_db()
-    # 造一个老格式的文件，条目里带自定义的时间戳和 hits，看会不会原样保留
     LEGACY.write_text(
         json.dumps(
             {
@@ -207,7 +198,6 @@ def test_legacy_import() -> None:
         ),
         encoding="utf-8",
     )
-    # 库路径刚换过，所以下一次连接就会走「建表 + 导入」那条路
     stored = memories.memories_of("old-user")
     print(f"   导入 {len(stored)} 条：{[i['text'] for i in stored]}")
     check("老数据进了库", len(stored) == 2)
@@ -217,7 +207,6 @@ def test_legacy_import() -> None:
     check("别的用户也导进来了", len(memories.memories_of("another-user")) == 1)
     check("老文件被改名成 .migrated", not LEGACY.exists() and LEGACY.with_name(LEGACY.name + ".migrated").exists())
 
-    # 再跑一次不该重复导入（老文件已经改过名了）
     check("不会重复导入", len(memories.memories_of("old-user")) == 2)
     print()
 

@@ -37,7 +37,6 @@ def main() -> None:
     documents.UPLOAD_DIR = tmp / "uploads"
     documents.ASSET_DIR = tmp / "assets"
 
-    # 第 31-60 页：既有正文、有图（图 2-5 到 2-19），也有表 2-1 和表 3-1
     src = pymupdf.open("C:/Users/13526/Desktop/Hello-Algo.pdf")
     out = pymupdf.open()
     out.insert_pdf(src, from_page=30, to_page=59)
@@ -57,7 +56,6 @@ def main() -> None:
     check("有章节锚点", "<!-- chapter:" in (markdown or ""))
     check("有图片引用", "](as_" in (markdown or ""))
 
-    # --- 1. 往返无损 ---
     elements = documents.markdown_elements(markdown)
     roundtrip = documents.render_markdown(elements)
     check(
@@ -66,13 +64,11 @@ def main() -> None:
         f"{len(roundtrip)} vs {len(markdown)}",
     )
     if roundtrip.strip() != markdown.strip():
-        # 打印第一处差异，不然只知道「不一致」没法修
         for index, (a, b) in enumerate(zip(roundtrip.splitlines(), markdown.splitlines())):
             if a != b:
                 print(f"  第 {index + 1} 行不同：\n    render   : {a[:90]}\n    original : {b[:90]}")
                 break
 
-    # --- 2. 表格 ---
     tables = [c for c in documents.chunks_of(doc_id) if c["kind"] == "table"]
     print(f"\n表格 chunk {len(tables)} 条")
     for chunk in tables:
@@ -86,7 +82,6 @@ def main() -> None:
             any("循环结构" in c["content"] and "|" in c["content"] for c in tables),
         )
 
-    # --- 3. 重切不重解析 ---
     before_markdown = documents.markdown_of(doc_id, "u1")
     before_chunks = len(documents.chunks_of(doc_id))
     documents.TARGET_CHARS = 200
@@ -100,7 +95,6 @@ def main() -> None:
     check("重切返回的条数一致", result["chunk_count"] == after_chunks, str(result["chunk_count"]))
     check("重切后仍能引用图（asset 没被清）", any(c["asset_id"] for c in documents.chunks_of(doc_id)))
 
-    # 切分参数要还原，否则后面的用例都在短参数下跑
     documents.TARGET_CHARS = 500
     documents.MAX_CHARS = 900
     documents.rechunk(doc_id)

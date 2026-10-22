@@ -8,13 +8,11 @@ import asyncio
 from datetime import datetime
 
 
-# ---------- 版本一：普通 Python 函数 ----------
 def plain_time():
     """获取当前时间。"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ---------- 版本二：只加一行 @tool ----------
 from langchain.tools import tool
 
 

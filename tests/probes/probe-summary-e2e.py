@@ -17,8 +17,6 @@ sys.path.insert(0, str(ROOT))
 
 import agent_core
 
-# 收紧阈值，让摘要一轮内就触发：两条线都压到 1，于是任何「第二轮」一进来就会把
-# 前一轮压成摘要，而且只保留当前这一轮（目标线太低，没有更少的丢法）。
 agent_core.CONTEXT_TRIGGER_TOKENS = 1
 agent_core.CONTEXT_TARGET_TOKENS = 1
 

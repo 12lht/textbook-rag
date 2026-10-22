@@ -38,7 +38,6 @@ async def main() -> None:
     print(f"  get_current_time   {len(direct_time)} → {len(mcp_time)}   x{len(mcp_time)/max(len(direct_time),1):.2f}")
     print(f"  get_user_location  {len(direct_loc)} → {len(mcp_loc)}   x{len(mcp_loc)/max(len(direct_loc),1):.2f}")
 
-    # 再验一个「本来就返回长 JSON」的工具，放大效应会被 JSON 转义进一步放大
     print("\n=== web_search（长 JSON，成本较高，只跑一次）===")
     direct_search = tools.web_search("LangGraph 是什么")
     mcp_search = await by_name["web_search"].ainvoke({"query": "LangGraph 是什么"})

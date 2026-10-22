@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """诊断：几何规则为什么该合没合。逐对打印拆分的三个判据实际取值。"""
 import sys
 sys.path.insert(0, r"D:/agent")

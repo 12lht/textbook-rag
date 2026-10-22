@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """代码块能不能靠字体/颜色识别？看 Hello-Agents 第 20 页逐行的字体名。"""
 import sys
 sys.path.insert(0, r"D:/agent")

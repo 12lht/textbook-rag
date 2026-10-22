@@ -61,7 +61,6 @@ documents.DB_PATH = TMP / "documents.sqlite3"
 documents.UPLOAD_DIR = TMP / "uploads"
 documents.ASSET_DIR = TMP / "assets"
 
-# 只桩掉会真的去跑图的那几个（本探针不聊一句话），其余全走真代码。
 import agent_core  # noqa: E402
 
 
@@ -87,7 +86,6 @@ RENDER_REF = re.compile(r"!\[.*?\]\((/api/assets/as_[0-9a-f]+\?u=[^&]+&t=[^)]+)\
 print("临时目录:", TMP)
 check("样本存在", PDF.is_file(), str(PDF))
 
-# 从真教材切一小段，跑得快、有正文也有图
 src = pymupdf.open(PDF)
 out = pymupdf.open()
 out.insert_pdf(src, from_page=34, to_page=43)  # 第 35-44 页
@@ -142,7 +140,6 @@ with client:
     check("渲染里的图都换成了 URL", len(url_refs) == len(raw_refs),
           f"{len(url_refs)} / {len(raw_refs)}")
     check("渲染里没有漏掉的相对引用", not ASSET_REF.search(render_text))
-    # 把 URL 换回文件名，应该和原文一模一样：说明只动了图引用那一处。
     restored = RENDER_REF.sub(lambda m: "![" + "换回来" + "](" + "x.png)", render_text)
     check(
         "除图引用外内容未变",
@@ -178,13 +175,10 @@ with client:
           client.get(f"/api/documents/{doc_id}/markdown?render=1", headers=auth_b).status_code == 404)
     check("游客取 render → 401",
           client.get(f"/api/documents/{doc_id}/markdown?render=1").status_code == 401)
-    # 签名是「这张图 + 这个人」，所以 A 的 URL 别人拿到也能看——这是刻意的取舍，
-    # 断言一下当前行为，免得以后有人以为是 bug 又改回去。
     check("A 的签名 URL 不带身份也能取（签名即凭证）",
           client.get(f"{path}?{query}").status_code == 200)
 
     header("7. 老数据兼容：已入库的书不用重新解析")
-    # 直接改库里的 markdown，模拟「迁移前存的书（相对引用）」再读一遍。
     import sqlite3
 
     conn = sqlite3.connect(documents.DB_PATH)

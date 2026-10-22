@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """引用溯源后端探针：解析函数、get_history 重建、_decorate_history。
 
 checkpoint 用临时库，不碰生产 data/*.sqlite3。
@@ -20,9 +19,6 @@ def check(label, condition, detail=""):
         failures.append(label)
 
 
-# ---------------------------------------------------------------------------
-# 1. _citations_from_tool_text：工具返回文本 → 引用条目
-# ---------------------------------------------------------------------------
 TOOL_TEXT = (
     "[c1] 移动通信 · 第3章 分集接收 · 第 45-46 页 · 图\n"
     "![图 3-4 MRC 合并](as_1f3a.png)\n"
@@ -57,12 +53,8 @@ c3 = items[2]
 check("c3 单页码", c3["page_start"] == 12 and c3["page_end"] == 12, (c3["page_start"], c3["page_end"]))
 check("c3 kind=formula", c3["kind"] == "formula", c3["kind"])
 
-# 空 / 无命中文本
 check("空文本给空列表", agent_core._citations_from_tool_text("教材里没有找到相关内容。") == [])
 
-# ---------------------------------------------------------------------------
-# 1b. _figure_markdown：图类命中补 markdown 图片行
-# ---------------------------------------------------------------------------
 md = agent_core._figure_markdown(
     {"kind": "figure", "asset_id": "as_1f3a", "content": "图 9.2 系统提示(校准)流程\n其他行"},
     "图 9.2 系统提示(校准)流程\n其他行",
@@ -75,15 +67,8 @@ check("空题注兜底", agent_core._figure_markdown({"kind": "figure", "asset_i
       "\n![教材插图](as_9.png)", agent_core._figure_markdown({"kind": "figure", "asset_id": "as_9"}, ""))
 
 
-# ---------------------------------------------------------------------------
-# 2. get_history 端到端：合成一个带教材检索的 checkpoint（临时库）
-# ---------------------------------------------------------------------------
 async def history_case():
-    # 不用 TemporaryDirectory：AsyncSqliteSaver 的连接要等 graph_stack 关掉才释放，
-    # 自动清理会撞 WinError 32。固定探针路径，用完显式关闭再删。
     db_path = Path("D:/agent/.workbuddy/tmp/probe-cite-checkpoint.sqlite3")
-    # checkpoint 是固定路径，上次运行的消息还在（add_messages 是累加的），
-    # 不删的话 get_history 会翻倍。
     for suffix in ("", "-wal", "-shm"):
         Path(str(db_path) + suffix).unlink(missing_ok=True)
     agent_core.CHECKPOINT_PATH = db_path
@@ -133,9 +118,6 @@ check("普通轮没有 citations 字段", "citations" not in history[3])
 check("最后一轮 user 无 citations", "citations" not in history[2])
 
 
-# ---------------------------------------------------------------------------
-# 3. _decorate_history：图片 URL 内联 + 引用条目补 URL
-# ---------------------------------------------------------------------------
 import service  # noqa: E402
 
 messages = [
@@ -162,7 +144,6 @@ check("引用原文里的图也内联了", "/api/assets/as_1f3a" in cite["conten
 check("普通助手消息原样", decorated[2]["content"] == "普通回答，没有图。")
 check("user 消息不被动", decorated[0]["content"] == "讲讲图 3-4")
 
-# 签名能验回去（防的是「前端拿到 URL 却 403」）
 url = cite["asset_url"]
 from urllib.parse import parse_qs, urlparse  # noqa: E402
 

@@ -1,6 +1,5 @@
 """访客隔离回归（2026-10-22）。不调用任何 LLM。
 
-## 为什么有这个测试
 
 改之前所有未登录访客共用 `GUEST_USER_ID = "1"`，后果是**任何陌生人打开网址
 都能读到此前所有访客的会话**。现在每个浏览器领一个签名 cookie 当独立身份。
@@ -14,7 +13,6 @@
 
 另外验证清理：过期访客会话会被删，**登录用户的会话一条都不动**。
 
-## 隔离手段
 
 存储路径在 import 时就指到临时目录（`conversations` 的四个 JSON + `limits` 的
 SQLite），所以这个脚本可以反复跑，不会污染 `data/`。
@@ -34,7 +32,6 @@ sys.path.insert(0, str(ROOT))
 
 import conversations
 
-# ---- 先隔离存储，再 import 其它模块 -------------------------------------
 TMP = Path(tempfile.mkdtemp(prefix="guest-isolation-"))
 for _name, _file in [
     ("SUMMARY_PATH", "summaries.json"),
@@ -64,10 +61,7 @@ def main() -> None:
     a = TestClient(api.app)
     b = TestClient(api.app)
 
-    # ---- 1. 两个浏览器拿到不同身份 -------------------------------------
     print("\n=== 身份签发 ===")
-    # 第一次请求要留住 response 对象：cookie 只在「这个浏览器还没有身份」时下发，
-    # 之后再问一次是没有 Set-Cookie 的（拿第二次去断言会假失败）。
     resp_a = a.get("/api/auth/me")
     ra = resp_a.json()
     rb = b.get("/api/auth/me").json()
@@ -76,24 +70,20 @@ def main() -> None:
     check("id 带 g- 前缀", ra["user_id"].startswith("g-"))
     check("首次响应下发 Set-Cookie", "aw_guest" in resp_a.headers.get("set-cookie", ""))
 
-    # ---- 2. 身份连贯 ---------------------------------------------------
     again = a.get("/api/auth/me").json()
     check("刷新后身份不变", again["user_id"] == ra["user_id"], again["user_id"])
 
-    # ---- 3. 验签 -------------------------------------------------------
     print("\n=== 伪造 cookie ===")
     forged = TestClient(api.app)
     forged.cookies.set("aw_guest", "g-0000000000000000." + "0" * 24)
     rf = forged.get("/api/auth/me").json()
     check("伪造 id 不被采纳", rf["user_id"] != "g-0000000000000000", f"got={rf['user_id']}")
-    # 改签名但不改 id，同样要挡住
     tampered = TestClient(api.app)
     good = ra["user_id"]
     tampered.cookies.set("aw_guest", f"{good}.{'a' * 24}")
     rt = tampered.get("/api/auth/me").json()
     check("签名不对不被采纳", rt["user_id"] != good, f"got={rt['user_id']}")
 
-    # ---- 4. 会话隔离 ---------------------------------------------------
     print("\n=== 会话隔离 ===")
     tid = a.post("/api/conversations").json()["thread_id"]
     a_list = [x["thread_id"] for x in a.get("/api/conversations").json()]
@@ -104,7 +94,6 @@ def main() -> None:
     check("B 改 A 的标题 → 404", b.patch(f"/api/conversations/{tid}", json={"title": "x"}).status_code == 404)
     check("B 删 A 的会话 → 404", b.delete(f"/api/conversations/{tid}").status_code == 404)
 
-    # ---- 5. 全局访客池 -------------------------------------------------
     print("\n=== 访客池（防清 cookie 绕配额）===")
     saved_pool = limits.GUEST_ASK_PER_DAY
     limits.GUEST_ASK_PER_DAY = 2
@@ -123,13 +112,11 @@ def main() -> None:
     finally:
         limits.GUEST_ASK_PER_DAY = saved_pool
 
-    # ---- 6. 清理 -------------------------------------------------------
     print("\n=== 过期清理 ===")
     guest_old = service.new_guest_id()
     guest_new = service.new_guest_id()
     old_thread = conversations.create_conversation(guest_old)
     new_thread = conversations.create_conversation(guest_new)
-    # 登录侧（用默认账号模拟，它同样不该被清）
     keeper = conversations.create_conversation(service.CLI_IDENTITY.user_id)
 
     touched = conversations.load_touched()
@@ -137,11 +124,6 @@ def main() -> None:
     touched[keeper] = "2020-01-01T00:00:00+00:00"  # 老，但不是访客
     conversations.save_touched(touched)
 
-    # checkpoint 删除换成替身。两个理由：
-    # 1. 真删要连 LangGraph 的 aiosqlite 连接，而它绑在 TestClient 那个事件循环上，
-    #    `asyncio.run` 一开新循环就报 "no active connection"（跨循环用连接的老坑）；
-    # 2. 这个测试要守的是「**选了谁**去删」，删 checkpoint 本身归 agent_core 管。
-    # 顺带还能断言「确实请了 checkpoint 删除」，比 no-op 更有信息量。
     import agent_core
 
     asked: list[str] = []

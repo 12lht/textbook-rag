@@ -37,8 +37,6 @@ async def main() -> int:
     graph = await agent_core._ensure_graph()
     config = agent_core._config(THREAD)
 
-    # 直接灌历史，不花模型的钱。阈值压到 1 是为了让裁剪**必定**发生——
-    # 这支探针要验的是「truncate 会不会播 token」，不是阈值合不合理。
     agent_core.CONTEXT_TRIGGER_TOKENS = 1
     agent_core.CONTEXT_TARGET_TOKENS = 1
     seeded = [SystemMessage(content=agent_core._system_prompt())]

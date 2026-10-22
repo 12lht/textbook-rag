@@ -31,8 +31,6 @@ async def load_summaries(user_id: str) -> dict[str, str]:
 
 
 async def run_cli(identity: service.Identity | None = None) -> None:
-    # 命令行不走登录：本机单人使用，直接用 service 里备好的那个身份
-    # （默认账号 + **开着**记忆，理由见 service.CLI_IDENTITY）。
     who = identity or service.CLI_IDENTITY
     user_id = who.user_id
     active_thread_id = None
@@ -84,10 +82,6 @@ async def run_cli(identity: service.Identity | None = None) -> None:
             summaries = await load_summaries(user_id)
             print("已自动开启新会话。")
 
-        # 回答是流式来的：先打一次「助手：」，之后逐段拼接输出。
-        # 注意事件名是 assistant_delta，不是 assistant——改造前这里判断的是
-        # "assistant"，而 service/agent_core 从来不发这个事件，所以那段分支
-        # 一次都没执行过，CLI 实际上不会打印任何回答。这次重写顺手改正。
         assistant_started = False
         async for event in service.chat_events(
             user_id, active_thread_id, user_input, memory_enabled=who.memory_enabled
@@ -109,7 +103,6 @@ async def _main() -> None:
     try:
         await run_cli()
     finally:
-        # 收掉 MCP 子进程与 checkpoint 连接
         await service.shutdown()
 
 

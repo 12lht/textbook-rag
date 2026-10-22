@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """WeKnora 配置平移实验：把它的公开默认参数搬到我们的语料上跑一遍。
 
 它的配置（文档站 03-document-parsing / 02-architecture/04-rag-pipeline）：
@@ -99,7 +98,6 @@ def build_units(markdown: str) -> list[tuple[str, int, str]]:
         if not line.strip():
             i += 1
             continue
-        # 普通行按句号再切（它的递归第二级），超长兜底按字符
         for piece in re.split(r"(?<=[。！？])", line):
             piece = piece.strip()
             if piece:
@@ -139,7 +137,6 @@ def weknora_chunks(markdown: str) -> list[tuple[str, int, str]]:
             buf_page, buf_chapter = page, chapter
         buffer.append(text)
         buf_len += len(text) + 1
-        # 单元本身就超限（大代码块/表格）：整块单独出，不硬切
         if buf_len >= CHUNK_SIZE:
             prev = "\n".join(buffer)
             flush(prev[-OVERLAP:] if len(prev) > OVERLAP else prev)

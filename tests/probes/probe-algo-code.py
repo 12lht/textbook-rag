@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """在 Hello-Algo（LaTeX 排版）上验证同一套规则，防止它只对一本书成立。"""
 import sys
 sys.path.insert(0, r"D:/agent")
@@ -22,7 +21,6 @@ def unclosed(s):
 
 
 doc = pymupdf.open(r"C:/Users/13526/Desktop/Hello-Algo.pdf")
-# 找等宽行最多的页
 best = []
 for i in range(20, 120):
     n = sum(1 for b in doc[i].get_text("dict")["blocks"] if b.get("type") == 0

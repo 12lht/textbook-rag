@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """并排对照：同一页，按 block 聚合 vs 按几何合并，看谁更接近原文段落。"""
 import sys
 sys.path.insert(0, r"D:/agent")

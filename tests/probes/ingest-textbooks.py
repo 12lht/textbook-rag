@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """把 textbook/ 下的六本书（26 个 PDF）走生产链路入库。
 
 create_upload → parse_document（同步解析）→ ensure_vectors。

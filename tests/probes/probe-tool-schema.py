@@ -52,7 +52,6 @@ async def main() -> int:
         else:
             print(f"  ✓ {name} 在模型侧是 0 个参数")
 
-    # 反证：进程内那个工具的内部 schema 里确实有 runtime，只是没发给模型。
     print("\n== 反证：get_user_location 的原始签名 ==")
     print(f"  {json.dumps(by_name['get_user_location'], ensure_ascii=False)[:160]}")
 

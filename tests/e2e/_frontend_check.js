@@ -25,19 +25,9 @@
     const LOCATION_KEY = 'agent.location';
     const TOKEN_KEY = 'agent.token';
 
-    // ---------- 身份 ----------
-    //
-    // 令牌是服务端签发的、放在 localStorage 里的唯一凭证。**前端不再自己声称
-    // 「我是谁」**：以前聊天请求里带一个写死的 user_id，任何人都能改成别人的。
-    // 现在服务端只认令牌，请求体里的 user_id 会被忽略。
-    //
-    // `identity` 是 /api/auth/me 的返回，用来决定界面怎么显示；它只是**展示用**，
-    // 真正的权限判断在服务端。别拿它当安全边界。
     let token = readToken();
     let identity = null;
     let authMode = 'login';
-    // 401 只处理一次：一次页面操作可能并发打好几个请求，全都 401 的话
-    // 会重复清状态、重复弹提示。处理期间把它挡住。
     let handlingUnauthorized = false;
 
     function readToken() {
@@ -50,8 +40,6 @@
         if (value) localStorage.setItem(TOKEN_KEY, value);
         else localStorage.removeItem(TOKEN_KEY);
       } catch (error) {
-        // 无痕模式下 localStorage 会抛错。记不住令牌的后果是「刷新后退出登录」，
-        // 本次会话仍然可用，不值得打断用户。
       }
     }
 
@@ -70,8 +58,6 @@
         : '问点什么…';
     }
 
-    // 回到「未选择会话」的空白页。切换身份时必须调用：上一个身份的会话不属于
-    // 新身份，留着旧消息会让人以为那是自己的。
     function resetConversationView() {
       state.threadId = null;
       state.autoFollow = true;
@@ -81,12 +67,6 @@
       updateScrollBottomButton();
     }
 
-    // 所有接口都走这里：统一带令牌、统一处理 401。
-    //
-    // 401 的含义是「这个令牌不认了」（过期或被撤销）。这时候必须清掉本地令牌、
-    // 退回游客态——不然界面一直显示已登录，而每个请求都失败，用户完全不知道
-    // 发生了什么。后端**不会**在令牌失效时静默降级成游客，就是为了让这里能
-    // 明确地分辨出「该重新登录了」。
     async function apiFetch(url, options = {}) {
       const headers = Object.assign({}, options.headers || {});
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -105,8 +85,6 @@
       try { await loadConversations(); } finally { handlingUnauthorized = false; }
     }
 
-    // 用原生 fetch 而不是 apiFetch：这个函数本身就是用来判断令牌好坏的，
-    // 再走一层 401 处理会绕回来。
     async function refreshIdentity() {
       let me = null;
       try {
@@ -116,7 +94,6 @@
         if (response.ok) me = await response.json();
         else if (response.status === 401) writeToken(null);
       } catch (error) {
-        // 后端没起来：先按游客显示，真正聊天时会在 .hint 上给出连接错误
       }
       applyIdentity(me);
     }
@@ -146,7 +123,6 @@
       authPassword.setAttribute('autocomplete', registering ? 'new-password' : 'current-password');
     }
 
-    // 登录成功后的收尾：换身份必然换会话列表，所以整页重置再重新拉。
     async function adoptSession(data, message) {
       writeToken(data.token);
       applyIdentity({ account: data.user.account, guest: false, memory_enabled: true });
@@ -158,14 +134,11 @@
 
     async function doLogout() {
       try {
-        // 登出接口刻意不要求登录态有效：令牌过期时也得能登出，否则用户会卡在一个
-        // 点了没反应的按钮上。所以这里失败也不拦着下面清本地状态。
         await fetch('/api/auth/logout', {
           method: 'POST',
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
       } catch (error) {
-        // 忽略：本地状态清掉就够了
       }
       writeToken(null);
       applyIdentity(null);
@@ -185,8 +158,6 @@
       }
       authSubmit.disabled = true;
       try {
-        // 走原生 fetch：这里失败了只该显示在弹窗里，不该顺手把外面的界面
-        // 也切回游客态（用户只是输错一次密码）。
         const response = await fetch(`/api/auth/${authMode}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -212,7 +183,6 @@
     accountAction.onclick = () => {
       if (identity && !identity.guest) doLogout(); else openAuth('login');
     };
-    // 点遮罩关闭（点卡片内部不关）
     authModal.addEventListener('mousedown', (event) => {
       if (event.target === authModal) closeAuth();
     });
@@ -234,14 +204,11 @@
       return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
     }
 
-    // 状态和错误都显示在输入框下面那行小字上，出错时必须让用户看见，
-    // 否则接口失败会表现为「点了没反应」。
     function setHint(text, isError = false) {
       hint.textContent = text || HINT_IDLE;
       hint.classList.toggle('error', Boolean(text) && isError);
     }
 
-    // 忙碌状态和提示文案必须分开：出错时只解除忙碌，不能顺手把错误文案清掉。
     function setBusy(busy) {
       send.disabled = busy;
       input.disabled = busy;
@@ -254,14 +221,6 @@
       setHint(text);
     }
 
-    // ---------- 位置：浏览器授权优先，失败降级为用户手选 ----------
-    //
-    // 位置只由前端提供，服务端**不会**用 IP 去猜：IP 定位收的是请求来源地址，
-    // 多用户部署下会把所有人都定位到服务器所在地，模型会据此向用户断言错误的城市。
-    // 拿不到就如实说拿不到，不编一个。
-    //
-    // 「手选城市」优先于「授权坐标」——手选是用户明确确认过的，坐标可能来自 VPN
-    // 或粗粒度 Wi-Fi 定位，可靠性反而更低。这个优先级由后端 service 统一裁决。
 
     function loadStoredLocation() {
       try {
@@ -292,13 +251,10 @@
           localStorage.removeItem(LOCATION_KEY);
         }
       } catch (error) {
-        // 隐私模式下 localStorage 会抛错。记不住不影响这次会话，忽略。
       }
       renderLocateButton();
     }
 
-    // 坐标换城市名。走 /api/location 而不是等聊天接口返回，是因为聊天是 SSE 流，
-    // 坐标在那一轮里只会进模型上下文，前端拿不到解析结果去回显。
     function locateByCoordinates() {
       return new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
@@ -336,7 +292,6 @@
       });
     }
 
-    // 手选兜底。留空 = 清除已设置的位置。
     function chooseCityByHand(reason) {
       const entered = window.prompt(`${reason}\n\n留空则清除已设置的位置。`, state.locationLabel || '');
       if (entered === null) return; // 用户取消，保持原状
@@ -354,8 +309,6 @@
       }
     };
 
-    // 页面加载时：记住过就直接用；否则只在「用户以前就已授权」时静默取一次，
-    // 不在页面刚打开就弹权限框出来。
     async function restoreLocation() {
       const saved = loadStoredLocation();
       if (saved) { setLocation(saved.location, saved.label); return; }
@@ -364,11 +317,9 @@
         const status = await navigator.permissions.query({ name: 'geolocation' });
         if (status.state === 'granted') await locateByCoordinates();
       } catch (error) {
-        // 部分浏览器不支持查询 geolocation 权限（含 file:// 与本机 http），静默跳过
       }
     }
 
-    // 把后端返回的 detail 取出来，附加到错误信息上。
     async function readError(response, fallback) {
       try {
         const problem = await response.json();
@@ -377,12 +328,10 @@
           return `HTTP ${response.status}：${detail}`;
         }
       } catch (error) {
-        // 后端没有返回 JSON，用兜底文案
       }
       return fallback || `HTTP ${response.status}`;
     }
 
-    // 滚动只发生在 .chat 内部：页面本身不滚动，所以侧边栏、顶栏和输入框始终固定。
     function isNearBottom(threshold = 120) {
       return chat.scrollHeight - chat.scrollTop - chat.clientHeight <= threshold;
     }
@@ -391,7 +340,6 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
-    // 只要不在底部就显示「回到底部」按钮
     function updateScrollBottomButton() {
       scrollBottomButton.classList.toggle('visible', !isNearBottom());
     }
@@ -402,8 +350,6 @@
       updateScrollBottomButton();
     };
 
-    // 是否跟随由真实滚动行为决定：向上滚离底部就停止，重新接近底部就恢复。
-    // 不能在每个流式分片里现算 isNearBottom()——跟随滚动本身就会把跟随关掉。
     chat.addEventListener('scroll', () => {
       const currentScrollTop = chat.scrollTop;
       if (currentScrollTop < state.lastScrollTop - 2 && !isNearBottom()) {
@@ -431,12 +377,10 @@
       contentNode.trace = item.querySelector('.trace');
       contentNode.traceList = item.querySelector('.trace-list');
       operations.forEach((operation) => {
-        // 历史里的思维链（kind=reasoning）整段拿回来，一次性填进折叠块。
         if (operation.kind === 'reasoning') {
           appendReasoning(addReasoning(contentNode), operation.text || '');
           return;
         }
-        // 工具返回：按 status 分「完成 / 失败」，和历史流走同一套渲染。
         if (operation.kind === 'result') {
           addToolResult(contentNode, operation.tool, operation.status);
           return;
@@ -454,7 +398,6 @@
       return contentNode;
     }
 
-    // 按历史渲染消息，同时给每条用户消息标上它的序号（从 0 开始），回退要用。
     function renderHistory(history) {
       messages.innerHTML = '';
       let userTurn = 0;
@@ -476,19 +419,11 @@
       node.traceList.appendChild(event);
     }
 
-    // 工具成功和失败必须长得不一样。
-    // 后端一直在 `tool_result` 事件里发 `status`，前端以前把它整个丢掉了，于是
-    // 「工具失败」也渲染成「工具完成」——用户会以为事情办成了，继续往下说。
-    // 一个界面在无声地说反话，比不显示更糟。
     function addToolResult(node, tool, status) {
       const failed = status === 'error';
       addTrace(node, `${failed ? '工具失败' : '工具完成'}：${tool}`, '', failed);
     }
 
-    // 思维链做成可折叠块，而不是像工具调用那样平铺一行。
-    // 理由：它比正文长一个量级（实测一次提问：思维链 317 字 / 正文 80 字，
-    // 分片数 166 / 47）。平铺会把工具调用挤到看不见。折叠起来、summary 上带
-    // 实时字数，既能看出「它正在想」，又不占地方。
     function addReasoning(node, text = '') {
       if (!node?.traceList) return null;
       node.trace.hidden = false;
@@ -506,11 +441,8 @@
 
     function appendReasoning(box, text) {
       if (!box || !text) return;
-      // 用 appendChild(TextNode) 而不是 `textContent +=`：后者每来一片都要把
-      // 整块内容读出来再写回去，几百个分片下来会退化成 O(n²)。
       box.body.appendChild(document.createTextNode(text));
       box.chars += text.length;
-      // 只留开头一小截做预览，别让 summary 随着思维链一起变长。
       box.head = (box.head + text).slice(0, 40);
       const preview = box.head.replace(/\s+/g, ' ').trim();
       const more = box.chars > preview.length ? '…' : '';
@@ -518,8 +450,6 @@
     }
 
     async function loadConversations() {
-      // 列表每次都是整块重建，菜单里缓存的 row 会变成脱离 DOM 的旧节点；
-      // 顺手收起来，避免「重命名」改到一个看不见的行上。
       closeConversationMenu();
       let data;
       try {
@@ -544,7 +474,6 @@
         button.innerHTML = `<div class="conversation-title"></div><div class="conversation-count">${conversation.message_count} 条消息</div>`;
         button.querySelector('.conversation-title').textContent = conversation.summary;
         button.onclick = () => selectConversation(conversation.thread_id);
-        // 删除和重命名都收进右键菜单，列表里不再常住一个删除按钮
         row.addEventListener('contextmenu', (event) => {
           event.preventDefault();
           openConversationMenu(event.clientX, event.clientY, row, conversation);
@@ -573,13 +502,11 @@
       setStatus('');
     }
 
-    // ---------- 会话右键菜单（重命名 / 删除） ----------
     let menuTarget = null;
 
     function openConversationMenu(x, y, row, conversation) {
       menuTarget = { row, conversation };
       conversationMenu.hidden = false;
-      // 先显示再量尺寸，才拿得到菜单自身的宽高来做视口内收边
       const rect = conversationMenu.getBoundingClientRect();
       const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
       const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
@@ -601,14 +528,11 @@
         });
         if (!response.ok) {
           const detail = await readError(response, '重命名失败');
-          // 405 说明路径存在、只是这个 HTTP 方法没注册——一般是后端进程还是改 PATCH
-          // 之前启动的那个，重启 uvicorn 才会生效（和回退接口的 404 是同一类问题）。
           throw new Error(response.status === 405
             ? `${detail}。后端可能是在这次改动之前启动的，重启 uvicorn 后重命名接口才会生效。`
             : detail);
         }
         await loadConversations();
-        // 和回退一致：不在提示行播报成功，直接还原成默认输入提示
         setStatus('');
       } catch (error) {
         setHint(`重命名失败：${error.message}`, true);
@@ -616,8 +540,6 @@
       }
     }
 
-    // 就地改标题：把整行的内容换成输入框（不能把 input 塞进 .conversation 按钮里，
-    // 那样点输入框会连带触发按钮的选中逻辑）。提交或取消后靠 loadConversations 重建整行。
     function startInlineRename(row, conversation) {
       const field = document.createElement('input');
       field.className = 'conversation-rename';
@@ -650,7 +572,6 @@
         if (event.key === 'Enter') { event.preventDefault(); commit(); }
         else if (event.key === 'Escape') { event.preventDefault(); cancel(); }
       });
-      // 点走即提交，和常见的待办应用一致；settled 保证 Enter 之后 blur 不会再提交一次
       field.addEventListener('blur', () => { commit(); });
     }
 
@@ -666,11 +587,6 @@
       if (target) deleteConversation(target.conversation.thread_id, target.conversation.summary);
     };
 
-    // 左键点别处、滚轮、Esc、改窗口大小、失焦，都把菜单收起来。
-    // 这里刻意不用 scroll：scroll 事件是异步派发的，右键之前那次滚动的 scroll
-    // 可能在菜单打开之后才到达，会把刚打开的菜单立刻关掉（点击可滚动区域时
-    // 浏览器的 scrollIntoView 就会稳定触发这个竞态）。wheel / mousedown 是
-    // 同步的用户意图，不会误伤。
     document.addEventListener('mousedown', (event) => {
       if (!event.target.closest('#conversationMenu')) closeConversationMenu();
     }, true);
@@ -697,7 +613,6 @@
       setStatus('');
     }
 
-    // 回退：删掉这条用户消息以及它之后的全部对话，并把原文放回输入框方便改完重发。
     async function rewindTo(turn) {
       if (state.busy) return;
       if (state.threadId === null) {
@@ -726,7 +641,6 @@
         input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
         input.focus({ preventScroll: true });
         await loadConversations();
-        // 不额外播报「已回退…」：原文已经在输入框里了，直接把提示行还原成默认输入提示
         setStatus('');
       } catch (error) {
         setBusy(false);
@@ -763,15 +677,11 @@
       let assistantNode = null;
       let assistantText = '';
       let streamFailed = false;
-      // 当前这一轮模型的思考块。模型一轮里「先想、再答」，调完工具进入下一轮时
-      // 要另起一块，所以 tool_call 那里会把它清掉（见下）。
       let reasoningBox = null;
       try {
         const response = await apiFetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // 请求体里**没有** user_id：身份只认 Authorization 头里的令牌。
-          // 以前这里带一个写死的 user_id，改成可编辑就等于谁都能读别人的会话。
           body: JSON.stringify({ message: text, thread_id: state.threadId, location: state.location })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));
@@ -798,7 +708,6 @@
               appendReasoning(reasoningBox, event.content);
               if (state.autoFollow) scrollToBottom();
             } else if (event.type === 'tool_call') {
-              // 这条之后模型要重新开始推理，下一段思维链另起一块。
               reasoningBox = null;
               if (!assistantNode) assistantNode = addMessage('assistant', '');
               (event.calls || [{ name: event.tool, args: {} }]).forEach((call) => {
@@ -846,8 +755,6 @@
     document.querySelectorAll('.suggestion').forEach((button) => { button.onclick = () => { input.value = button.dataset.prompt; input.focus(); }; });
     renderLocateButton();
     restoreLocation();
-    // **先问服务端「我是谁」，再按身份拉列表**。顺序反了会先按游客拉一次
-    // （本地有令牌时那次请求还是会带上令牌，但界面上会先闪一下游客态）。
     (async () => {
       await refreshIdentity();
       await loadConversations();

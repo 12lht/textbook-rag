@@ -45,10 +45,8 @@
     外部 API 返回的内容每次都不一样，搜索正文长度实测波动 1.1~2.5 倍，比被测的代码
     改动大得多。所以对比前先把工具输出冻结下来：
 
-    # 1. 录一轮（真实调用外部 API，把返回值存进 cassette）
     python eval/run.py --cassette-mode record --cassette frozen-v1 --tag rec
 
-    # 2. 之后所有对比都走 replay，两次运行拿到的工具输出逐字一致
     python eval/run.py --cassette-mode replay --cassette frozen-v1 --tag a
     python eval/run.py --cassette-mode replay --cassette frozen-v1 --tag b --compare ...
 
@@ -83,28 +81,14 @@ DEFAULT_CASES = EVAL_DIR / "cases.jsonl"
 DEFAULT_BASELINE_DIR = EVAL_DIR / "baselines"
 DEFAULT_CASSETTE_DIR = EVAL_DIR / "cassettes"
 
-# 只统计这些工具名，把流式分片可能产生的半截名字挡在指标之外。
-# 改造后工具是从 MCP server 动态加载的，所以这个集合要在跑之前异步取回来
-# （由 _load_known_tools() 填），不能像改造前那样在 import 时静态算出来。
 KNOWN_TOOLS: set[str] = set()
-# 会消耗外部配额的工具体。高德的天气和 Tavily 的搜索/提取都是计量的。
-# 这份分类放在评测侧而不是 tools.py：它回答的是「多调一次算不算浪费」，
-# 是评测口径问题。
-#
-# 注意 `get_user_location` **不在**这里了：它改成读客户端传来的位置之后，
-# 工具本身不再发任何外部请求（坐标解析在 service 层做一次，还带缓存），
-# 所以它现在是零配额工具，和 `get_current_time` 同类。
 METERED_TOOLS = {
     "get_weather_for_location",
     "web_search",
     "web_extract",
 }
-# cases.jsonl 没写 allow_tools 时的兜底：只放行零配额的本地工具。
 DEFAULT_ALLOW_TOOLS = ["get_current_time"]
-# 评测里模拟「客户端授权提供的位置」。走 Context 不进工具参数，所以不碰 cassette；
-# 给一个固定值是为了让定位类用例可复现（原来靠服务器 IP 定位，每次跑可能都不同）。
 DEFAULT_EVAL_LOCATION = "北京市"
-# 这些 key 名里只出现名字、不出现值，用来确认评测环境装没装齐。
 KEY_NAMES = ["DEEPSEEK_API_KEY", "AMAP_API_KEY", "TAVILY_API_KEY", "GLM_API_KEY"]
 
 
@@ -115,7 +99,6 @@ async def _load_known_tools() -> set[str]:
     return KNOWN_TOOLS
 
 
-# ---------------------------------------------------------------- 小工具
 
 def _percentile(values: list[float], p: float) -> float | None:
     """线性插值分位数。样本量为 1 时直接返回该值。"""
@@ -161,7 +144,6 @@ def _line(title: str) -> None:
     print("-" * len(title) * 2)
 
 
-# ---------------------------------------------------------------- 用例读取与校验
 
 def load_cases(path: Path) -> list[dict]:
     cases: list[dict] = []
@@ -202,15 +184,12 @@ def validate_cases(cases: list[dict]) -> list[str]:
         if not isinstance(allowed, list):
             problems.append(f"{case_id}: allow_tools 必须是列表")
         elif not expected:
-            # 负例：一个工具都不该调，写任何 allow 都是自相矛盾。
             if allowed:
                 problems.append(f"{case_id}: 负例的 allow_tools 必须为空（任何调用都算违规）")
         else:
             unknown = [name for name in allowed if name not in KNOWN_TOOLS]
             if unknown:
                 problems.append(f"{case_id}: allow_tools 里有不存在的工具 {unknown}")
-            # allow_tools 的语义是「**额外**允许」，必备工具已经在 expect_tools 里，
-            # 再写一遍说明写的人对语义理解错了，值得直接拦下来。
             duplicated = sorted(set(allowed) & set(expected))
             if duplicated:
                 problems.append(
@@ -224,7 +203,6 @@ def validate_cases(cases: list[dict]) -> list[str]:
     return problems
 
 
-# ---------------------------------------------------------------- 三档判定
 
 def judge_selection(expected: list[str], allowed: list[str], called: list[str]) -> dict:
     """按「必备 / 额外允许 / 违规」三档判定一次工具选择。
@@ -254,7 +232,6 @@ def judge_selection(expected: list[str], allowed: list[str], called: list[str]) 
     }
 
 
-# ---------------------------------------------------------------- 单例跑一次
 
 async def _read_usage(thread_id: str) -> tuple[dict, str | None]:
     """从 checkpoint 里读真实 token 用量和工具输出指纹。
@@ -289,8 +266,6 @@ async def _read_usage(thread_id: str) -> tuple[dict, str | None]:
 
     digest = None
     if outputs:
-        # 排序后再拼：指纹要反映「模型从工具那儿看到了什么内容」，
-        # 不该因为工具调用顺序变了就报不一致。顺序差异由 called_tools 反映。
         joined = "\x1e".join(sorted(outputs))
         digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
@@ -371,8 +346,6 @@ async def run_case(case: dict, repeat_index: int, run_slug: str, location: str |
 
     raw_selected = [name for name in tool_call_events if name]
     executed = [result["tool"] for result in tool_results if result["tool"]]
-    # 流式分片理论上可能在名字还没拼完时就报一个半截名字，统一用它和真实执行结果
-    # 求并集、再按已知工具名过滤，既能补上 updates 通道漏掉的一次，也不会被半截名字污染。
     unrecognized = sorted({n for n in raw_selected + executed if n not in KNOWN_TOOLS})
     called = sorted({n for n in raw_selected + executed if n in KNOWN_TOOLS})
 
@@ -401,7 +374,6 @@ async def run_case(case: dict, repeat_index: int, run_slug: str, location: str |
         "repeat": repeat_index,
         "query": case["query"],
         "thread_id": thread_id,
-        # 记下这一轮模拟的客户端位置，否则「定位类用例跑的是什么位置」事后无从考证
         "client_location": location,
         "expected_tools": expected,
         "called_tools": called,
@@ -430,11 +402,8 @@ async def run_case(case: dict, repeat_index: int, run_slug: str, location: str |
     }
 
 
-# ---------------------------------------------------------------- 聚合
 
 def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_stats: dict | None = None) -> dict:
-    # 兼容 2026-10-10 之前跑的基线：那些记录里没有三档字段。按 cases.jsonl 里现补的
-    # allow_tools 重算一遍，历史基线就能直接用新口径汇总，不必重跑模型花钱。
     allow_by_case = {
         case["id"]: case.get(
             "allow_tools", DEFAULT_ALLOW_TOOLS if case.get("expect_tools") else []
@@ -450,8 +419,6 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
             record.get("called_tools", []),
         )
         record.update(verdict)
-        # e2e_ok 必须一起重算。旧记录里它是用严格口径算出来的，只补 selection_ok
-        # 会让「端到端通过率 / 未通过样本」和新的「合规率」自相矛盾。
         record["e2e_ok"] = bool(
             verdict["selection_ok"]
             and record.get("contains_ok") is not False
@@ -469,7 +436,6 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     totals = [r["total_ms"] for r in records if r["total_ms"] is not None]
     total_tokens = sum(r["usage"]["total_tokens"] for r in records)
 
-    # 工具调用事件数 vs 真实执行数。两者不等说明事件流重复上报了同一调用。
     duplicate_events = sum(
         max(0, r["tool_call_events"] - r["tool_result_events"]) for r in records
     )
@@ -506,15 +472,11 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     }
 
     if cassette_stats is not None:
-        # 这三个是「本次运行」的增量，不是样本级指标。未命中不为 0 说明有工具的
-        # 入参没被录过，那些样本的外部内容仍然不可控，对比时要把它们挑出来。
         metrics["外部调用录制"] = cassette_stats["records"]
         metrics["外部调用命中"] = cassette_stats["hits"]
         metrics["外部调用未命中"] = cassette_stats["misses"]
 
     by_category: dict[str, dict] = {}
-    # 累加先放在 _tools 里，最后才换算成「平均工具数」——避免同一个 key
-    # 一会儿是 list、一会儿是数字，读的时候要回头看类型。
     for record in records:
         bucket = by_category.setdefault(
             record["category"],
@@ -536,8 +498,6 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
         "by_category": by_category,
         "config": config,
         "failed_case_ids": sorted({r["case_id"] for r in records if not r["e2e_ok"]}),
-        # 严格口径下不通过的用例。和上面的差集就是「被三档口径救回来」的那批，
-        # 出对照表时用得上。
         "strict_failed_case_ids": sorted({r["case_id"] for r in records if not r["exact_match"]}),
         "unrecognized_tool_names": sorted({n for r in records for n in r["unrecognized_tool_names"]}),
         "errored_case_ids": sorted({r["case_id"] for r in records if r["error"]}),
@@ -553,8 +513,6 @@ def environment() -> dict:
         except importlib.metadata.PackageNotFoundError:
             return None
 
-    # 直接问真实模型对象，别自己拼字符串——有 GLM_API_KEY 时标题模型也叫 glm，
-    # 按环境变量猜会报出一个评测里根本没用到的模型名。
     main_model = agent_core.model
     model_name = (
         getattr(main_model, "model_name", None)
@@ -578,7 +536,6 @@ def environment() -> dict:
     }
 
 
-# ---------------------------------------------------------------- 输出
 
 def print_report(summary: dict, records: list[dict], verbose: bool) -> None:
     metrics = summary["metrics"]
@@ -617,8 +574,6 @@ def print_report(summary: dict, records: list[dict], verbose: bool) -> None:
         print(f"  [{record['case_id']}] {record['query']}")
         print(f"      {'；'.join(detail) or '未分类原因'}")
 
-    # 「允许但非必备」的额外调用单独摊开。这不是错误，是成本：要么多一次模型往返，
-    # 要么多烧一次外部配额（配额那部分已经计进「配额违规调用数」，这里只看被放行的）。
     redundant = [r for r in records if r["redundant_tools"]]
     if redundant:
         _line(f"被允许的冗余调用（{sum(len(r['redundant_tools']) for r in redundant)} 次，成本不是错误）")
@@ -677,8 +632,6 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
                 f"{_fmt(bucket.get('完全匹配率')):>8}"
             )
 
-    # 「严格口径不通过、三档口径通过」的样本：这些就是被口径修正救回来的。
-    # 如果新基线是旧基线用严格口径跑出来的，这里能直接看出差异来自哪几条。
     old_strict_failed = set(previous.get("strict_failed_case_ids", []))
     new_failed = set(current.get("failed_case_ids", []))
     if old_strict_failed:
@@ -688,10 +641,6 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
             for case_id in rescued:
                 print(f"  {case_id}")
 
-    # 工具输出指纹：录制回放模式下，同一个入参应该拿到逐字一致的返回值。这里要把
-    # 两种「不一致」分开，否则会把模型行为差异误判成冻结失败：
-    #   工具调用序列也变了      → 模型这一轮少调/多调了工具，是行为差异，属于要测的信号
-    #   调用序列一样但内容不同   → 外部内容没被冻结住，这次对比不干净，必须报出来
     old_records = {(r["case_id"], r.get("repeat", 0)): r for r in previous.get("records", [])}
     new_records = {(r["case_id"], r.get("repeat", 0)): r for r in current.get("records", [])}
     common = sorted(set(old_records) & set(new_records))
@@ -729,7 +678,6 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
             print("  → 模型这一轮多调/少调了工具，属于要测的行为差异，不是外部内容问题")
 
 
-# ---------------------------------------------------------------- main
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description="跑金标集，产出 Agent 量化指标")
@@ -766,9 +714,6 @@ async def main() -> int:
         except Exception:  # noqa: BLE001 — 终端不支持就算了，不影响评测
             pass
 
-    # 必须在建立 MCP 会话之前设好：工具跑在子进程里，是靠继承父进程环境变量
-    # 才知道要不要录制回放的。agent_core 里 MCP 客户端是延迟构造的（见 _build_mcp_client），
-    # 就是为了让这个顺序成立。
     cassette_path = (args.cassette_dir / f"{args.cassette}.json").resolve()
     os.environ["TOOL_CASSETTE_MODE"] = args.cassette_mode
     os.environ["TOOL_CASSETTE_PATH"] = str(cassette_path)
@@ -789,8 +734,6 @@ async def main() -> int:
     if args.limit:
         cases = cases[: args.limit]
     if args.category:
-        # 录制回放只对外部内容敏感的用例有意义（搜索/提取/天气/定位）。
-        # 只跑这几个分类，A/B 的 token 成本能砍掉一大半。
         wanted = {name.strip() for name in args.category.split(",") if name.strip()}
         available = sorted({case.get("category", "未分类") for case in load_cases(args.cases)})
         unknown = wanted - set(available)
@@ -800,8 +743,6 @@ async def main() -> int:
     if not cases:
         raise SystemExit("金标集是空的（或分类筛选后为空）。")
 
-    # 工具名要从 MCP server 动态取回来，validate_cases 才能校验 expect_tools。
-    # 改造前是 import 时静态算的，现在必须先建立 MCP 会话。
     await _load_known_tools()
 
     problems = validate_cases(cases)
@@ -832,14 +773,11 @@ async def main() -> int:
     if missing:
         print(f"  缺失的密钥      {missing}  → 相关用例会拿到「服务未配置」，指标会偏低")
 
-    # 固定开销：每次模型调用都要重发的工具 schema。这是纯本地计算，不花钱。
     schemas = []
     for tool in await agent_core.load_tools():
         schema = getattr(tool, "tool_call_schema", None)
         if schema is None:
             continue
-        # 两种来源的形态不同：进程内 @tool 给的是 pydantic 模型（要调
-        # model_json_schema()），MCP 适配器给的是已经是 dict 的 JSON Schema。
         schemas.append(schema if isinstance(schema, dict) else schema.model_json_schema())
     fixed_chars = len(json.dumps(schemas, ensure_ascii=False)) + len(agent_core.SYSTEM_PROMPT)
     print(f"  每次调用的固定开销  {fixed_chars} 字符（工具 schema + 系统提示，纯本地统计）")
@@ -876,9 +814,6 @@ async def main() -> int:
     records: list[dict] = []
     wall_started = time.perf_counter()
     if args.concurrency > 1:
-        # 用 asyncio 并发。注意 MCP 会话和 checkpoint 连接都是进程内共享的单一资源，
-        # aiosqlite 会把同一连接上的写操作排队，所以并发提高的是「等待模型返回」的
-        # 重叠度，不会把 sqlite 写坏。给每个样本自己的 thread_id，互不干扰。
         semaphore = asyncio.Semaphore(args.concurrency)
 
         async def limited(case: dict, index: int) -> dict:
@@ -901,7 +836,6 @@ async def main() -> int:
     wall_ms = (time.perf_counter() - wall_started) * 1000
     records.sort(key=lambda r: (r["case_id"], r["repeat"]))
 
-    # 工具子进程每次调用都会即时把计数写回 cassette 文件，所以这里读到的是准确值。
     cassette_after = cassette.counters()
     cassette_stats = {
         name: cassette_after[name] - cassette_before[name]
@@ -950,8 +884,6 @@ async def main() -> int:
         print(f"  {target}")
         print(f"  {args.baseline_dir / 'latest.json'}")
 
-    # 收掉 MCP 子进程和 checkpoint 连接。不显式收的话，子进程还活着，
-    # 解释器可能一直不退出（命令行看起来就像卡住了）。
     await agent_core.shutdown()
 
     return 0 if summary["metrics"]["端到端通过率"] == 1.0 else 1

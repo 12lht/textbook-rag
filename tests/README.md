@@ -12,6 +12,7 @@
 |---|---|
 | `probes/` | 后端探针，Python，直接 import 项目模块 |
 | `e2e/` | 前端端到端，Node + playwright-core，跑真实浏览器 |
+| `bench/` | 系统核心指标基准：token 消耗、缓存命中、时延（定义见 `bench/README.md`） |
 | `fixtures/` | 测试素材（双栏 PDF 等） |
 
 ## 怎么跑
@@ -209,6 +210,8 @@ e2e 脚本里的 Chromium 路径固定为
 
 | 脚本 | 用途 | 调模型 |
 |---|---|---|
+| `bench/bench.py` | 系统核心指标基准（token / 缓存命中率 / TTFT / 时延分位），口径见 `bench/README.md` | **是** |
+| `probes/probe-usage-shape.py` | usage_metadata 字段勘察：provider 到底回传哪些 token 字段 | 是（2 次短调用） |
 | `probe-gil-contention.py` | CPU 密集线程会不会拖慢事件循环 | 否 |
 | `probe-sqlite-journal-modes.py` | 各种日志模式下一次提交的耗时 | 否 |
 

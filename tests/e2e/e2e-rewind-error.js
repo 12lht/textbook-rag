@@ -13,7 +13,6 @@ async function send(page, text) {
   await page.waitForTimeout(150);
 }
 
-// 点「新建会话」让假后端清空历史，保证每段场景从零开始
 async function reset(page) {
   await page.click('#newChat');
   await page.waitForTimeout(400);
@@ -24,7 +23,6 @@ async function reset(page) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on('dialog', (dialog) => dialog.accept());
 
-  // --- 场景 A：后端没有这个接口（模拟旧进程） ---
   await page.route('**/rewind', (route) => route.fulfill({
     status: 404,
     contentType: 'application/json; charset=utf-8',
@@ -45,7 +43,6 @@ async function reset(page) {
   await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/rewind-404.png' });
   const passA = errText.includes('404') && errText.includes('重启') && errFlag && stillThere === 2;
 
-  // --- 场景 B：正常后端 ---
   await page.unroute('**/rewind');
   await page.reload();
   await page.waitForTimeout(400);

@@ -1,8 +1,3 @@
-// 记忆面板前端的 DOM 测试：把 index.html 里的脚本真跑起来，点开面板、改一条、删一条。
-//
-// 后端探针只能证明「接口按约定返回」，这里要证明的是另一件事：
-// **界面真的把正确的 id 传回去了**。如果哪一行错手传了 `item.text`，
-// 后端会乖乖报 404，而接口层测试照样全绿——只有真 DOM 才看得出来。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
@@ -19,8 +14,6 @@ function check(label, condition, detail = '') {
   if (!condition) failures.push(label);
 }
 
-// 服务端那一套：id 是 12 位随机 hex，和原文毫无关系。
-// 测试也用不相干的 id，才不会「碰巧拿原文去查也能命中」。
 const MEMORIES = () => [
   { id: '2a6cf3e94ae2', text: '先给结论再展开', kind: '偏好', hits: 7,
     source: 't-1', created_at: '2026-09-01T10:00:00', last_seen: '2026-10-01T10:00:00' },
@@ -90,7 +83,6 @@ async function boot({ loggedIn, items = MEMORIES(), patchStatus = 200, deleteSta
       }
       const id = String(url).slice('/api/memories/'.length);
       const body = JSON.parse(options.body || '{}');
-      // 关键契约：改措辞**不换 id**。前端要是拿返回值里的什么东西重建 key，这里就会暴露。
       rows = rows.map((r) => (r.id === id ? { ...r, text: body.text } : r));
       return json({ status: 'updated' });
     }
@@ -112,14 +104,12 @@ const flush = async () => {
   for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
 };
 
-// --- 游客：入口不出现 ---
 {
   const { document } = await boot({ loggedIn: false });
   const entry = document.querySelector('#memoryEntry');
   check('游客看不到记忆入口', entry.hidden === true);
 }
 
-// --- 登录：入口出现，点开能看 ---
 {
   const { document, calls } = await boot({ loggedIn: true });
   const entry = document.querySelector('#memoryEntry');
@@ -151,7 +141,6 @@ const flush = async () => {
   check('原文照原样显示', texts[0] === '先给结论再展开', texts[0]);
 }
 
-// --- 删一条：URL 里必须是 id，不是原文 ---
 {
   const { document, calls } = await boot({ loggedIn: true });
   document.querySelector('#memoryOpen').onclick();
@@ -174,7 +163,6 @@ const flush = async () => {
   check('剩两条', texts.length === 2, `实际 ${texts.length}`);
 }
 
-// --- 改一条：走 PATCH，body 是 {text}，改完 id 不变还能接着删 ---
 {
   const { document, calls } = await boot({ loggedIn: true });
   document.querySelector('#memoryOpen').onclick();
@@ -199,7 +187,6 @@ const flush = async () => {
   const texts = [...document.querySelectorAll('#memoryList .memory-text')].map((n) => n.textContent);
   check('界面显示新措辞', texts.includes('叫我涛哥就行'), texts.join('/'));
 
-  // 回归：改完直接用**列表里现在的 id** 删，必须删得掉
   const stillThere = [...document.querySelectorAll('#memoryList .memory-row')]
     .find((r) => r.querySelector('.memory-text').textContent === '叫我涛哥就行');
   check('改完那条还在列表里', Boolean(stillThere));
@@ -215,7 +202,6 @@ const flush = async () => {
   }
 }
 
-// --- 改成重复 / 改成空 / 取消 ---
 {
   const { document, calls } = await boot({ loggedIn: true, patchStatus: 409 });
   document.querySelector('#memoryOpen').onclick();
@@ -263,7 +249,6 @@ const flush = async () => {
   check('取消后回到原文', texts[0] === '先给结论再展开', texts[0]);
 }
 
-// --- 空列表 ---
 {
   const { document } = await boot({ loggedIn: true, items: [] });
   document.querySelector('#memoryOpen').onclick();
@@ -274,7 +259,6 @@ const flush = async () => {
     !(empty.textContent || '').includes('删除'), empty && empty.textContent);
 }
 
-// --- 删一条但服务端说 404（另一个标签页刚删掉）---
 {
   const { document } = await boot({ loggedIn: true, deleteStatus: 404 });
   document.querySelector('#memoryOpen').onclick();
@@ -285,7 +269,6 @@ const flush = async () => {
     document.querySelector('#memoryError').textContent);
 }
 
-// --- 关闭：X 按钮 / 点遮罩 / 点卡片内部 ---
 {
   const { window, document } = await boot({ loggedIn: true });
   const modal = document.querySelector('#memoryModal');
@@ -297,13 +280,11 @@ const flush = async () => {
 
   document.querySelector('#memoryOpen').onclick();
   await flush();
-  // 点遮罩本身 → 关
   modal.dispatchEvent(new window.Event('click', { bubbles: false }));
   check('点遮罩关闭', modal.hidden === true);
 
   document.querySelector('#memoryOpen').onclick();
   await flush();
-  // 点卡片内部 → 不关（事件从卡片冒泡到 modal，target 是卡片）
   const card = modal.querySelector('.modal-card');
   card.dispatchEvent(new window.Event('click', { bubbles: true }));
   check('点卡片内部不关闭', modal.hidden === false, String(modal.hidden));

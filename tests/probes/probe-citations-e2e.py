@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """真实端到端探针：跑一轮真实教材问答，验证 citations 事件真的流通。
 
 会真实调用一次主模型（DeepSeek）和教材检索，一轮的成本可接受。
@@ -39,11 +38,8 @@ async def main():
                 print(f"\n[citations] {len(event['items'])} 条", flush=True)
             elif kind == "done":
                 print("\n[done]", flush=True)
-        # 端到端第二段：get_history 能重建引用（C5）。必须在 drop 之前查，
-        # conversation_messages 有归属检查，删了就查不了。
         history = await service.conversation_messages(thread_id, "u-671d242584")
     finally:
-        # 探针会话清掉，别在会话列表里留垃圾（checkpoint 留着无害）。
         try:
             service.conversations.drop_conversation(thread_id)
         except Exception:
@@ -61,13 +57,11 @@ async def main():
         proximity = [i for i in items if not i.get("code")]
         check("编号条目有编号和出处", all(i.get("code") and i.get("doc_title") for i in numbered),
               [(i.get("code"), i.get("doc_title"), i.get("page_start")) for i in items])
-        # 邻近图条目（code 为空）：不占编号，只为给前端提供签名 URL
         check("邻近图条目都带 asset_id", all(i.get("asset_id") and i.get("kind") == "figure" for i in proximity),
               [(i.get("asset_id"), i.get("kind")) for i in proximity])
         check("引用条目带原文内容", all(i.get("content") for i in items))
         check("citations 事件在 done 之前", types.index("citations") < types.index("done"))
 
-        # 事件顺序契约：正文引用编号 cN 必须能在引用条目里找到
         body = "".join(e["content"] for e in events if e.get("type") == "assistant_delta")
         codes_in_body = [i["code"] for i in items if f"[{i['code']}]" in body]
         check("正文引用了至少一个编号", len(codes_in_body) >= 1, codes_in_body)
@@ -76,7 +70,6 @@ async def main():
             print(f"  [{i['code']}] {i.get('doc_title')} · {i.get('chapter')} · "
                   f"第 {i.get('page_start')}-{i.get('page_end')} 页 · {i.get('kind')} · asset={i.get('asset_id')}")
 
-    # 端到端第二段：get_history 能重建引用（C5）
     answer = [m for m in history if m.get("role") == "assistant" and m.get("citations")]
     check("历史消息能重建引用", len(answer) >= 1, len(answer))
     if answer:
@@ -84,7 +77,6 @@ async def main():
         check("重建条目有出处", all(i.get("doc_title") for i in got),
               [(i.get("code"), i.get("doc_title")) for i in got])
         check("重建条目有原文", all(i.get("content") for i in got))
-        # 图片 URL 内联：服务端已经把 as_xx.png 换成签名 URL
         all_content = answer[-1]["content"] + "".join(i.get("content", "") for i in got)
         check("历史里图引用已是签名 URL", "as_" not in all_content or "/api/assets/" in all_content,
               all_content[:80])

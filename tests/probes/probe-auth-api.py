@@ -62,8 +62,6 @@ users.DB_PATH = TMP / "users.sqlite3"
 conversations.SUMMARY_PATH = TMP / "conversation_summaries.json"
 conversations.RENAME_PATH = TMP / "conversation_renames.json"
 conversations.OWNER_PATH = TMP / "conversation_owners.json"
-# 配额和待办列表：不重定向的话这个探针会去消费**生产**的提问次数
-# （`limits.sqlite3` 在 data/ 下），跑两遍就把额度打没了。
 memories.DATA_DIR = TMP
 memories.DB_PATH = TMP / "memories.sqlite3"
 memories.LEGACY_JSON_PATH = TMP / "memories.json"
@@ -78,7 +76,6 @@ for _sub in ("uploads", "assets"):
 
 import agent_core  # noqa: E402
 
-# ---- 桩掉 agent_core 的「跑图 / 读状态」部分 ----------------------------------
 stream_calls: list[dict] = []
 
 
@@ -92,9 +89,6 @@ async def fake_stream_agent(
     reasoning=True,
     web_search=True,
 ):
-    # 签名必须和 `agent_core.stream_agent` **完全对齐**：`service` 是按关键字
-    # 传 `reasoning` / `web_search` 的，桩少写一个参数就会在开流之后才抛
-    # `unexpected keyword argument`，表现成「200 但流里只有一个 error 事件」。
     stream_calls.append(
         {
             "user_id": user_id,
@@ -150,9 +144,7 @@ def auth(token: str | None) -> dict:
 print("临时目录:", TMP)
 
 with client:
-    # ----------------------------------------------------------------
     header("1. 游客：没有令牌也能列会话，且拿到的是默认账号视角")
-    # ----------------------------------------------------------------
     legacy = conversations.create_conversation(users.GUEST_USER_ID)
     r = client.get("/api/conversations")
     check(r.status_code == 200, "无令牌列会话 → 200", str(r.status_code))
@@ -165,9 +157,7 @@ with client:
     check(me["memory_enabled"] is False,
           "游客身份 memory_enabled=False（几个陌生人共用一个账号，不能互看记忆）")
 
-    # ----------------------------------------------------------------
     header("2. 注册")
-    # ----------------------------------------------------------------
     r = client.post("/api/auth/register", json=ALICE)
     check(r.status_code == 200, "注册成功 → 200", str(r.status_code))
     alice = r.json()
@@ -178,8 +168,6 @@ with client:
     check("password" not in str(alice).lower().replace("password_hash", ""),
           "响应里不含密码相关字段")
 
-    # 站里已经有 alice 了，之后每次注册都要持码（F1）。
-    # 主人发码走真实的 `/api/invites`，顺手把这条路径也验了。
     def new_invite() -> str:
         return client.post("/api/invites", json={}, headers=auth(alice_token)).json()["code"]
 
@@ -191,7 +179,6 @@ with client:
     check(r.status_code == 400, "密码太短 → 400", str(r.status_code))
     check("8" in r.json()["detail"], "文案说的是 8 位（领域层的规则）", r.json()["detail"])
 
-    # 缺邀请码 → 400，且文案说的是「需要邀请码」而不是「码不对」
     r = client.post("/api/auth/register", json=BOB)
     check(r.status_code == 400, "没带邀请码 → 400", str(r.status_code))
     check("需要邀请码" in r.json()["detail"], "文案点明缺的是邀请码", r.json()["detail"])
@@ -200,9 +187,7 @@ with client:
     bob_token = r.json()["token"]
     bob_id = r.json()["user"]["user_id"]
 
-    # ----------------------------------------------------------------
     header("3. me：带令牌 / 乱令牌")
-    # ----------------------------------------------------------------
     r = client.get("/api/auth/me", headers=auth(alice_token))
     me = r.json()
     check(me["account"] == ALICE["account"] and me["guest"] is False, "登录态 me", str(me))
@@ -214,9 +199,7 @@ with client:
     r = client.get("/api/auth/me", headers={"Authorization": alice_token})
     check(r.status_code == 401, "缺 Bearer 前缀 → 401（不静默当游客）", str(r.status_code))
 
-    # ----------------------------------------------------------------
     header("4. 登录")
-    # ----------------------------------------------------------------
     r = client.post("/api/auth/login", json=ALICE)
     check(r.status_code == 200, "正确密码 → 200", str(r.status_code))
     check(r.json()["user"]["user_id"] == alice_id, "登录拿到的还是同一个人")
@@ -227,9 +210,7 @@ with client:
     check(r1.json()["detail"] == r2.json()["detail"],
           "两者文案完全相同（不给探测账号是否存在）", r1.json()["detail"])
 
-    # ----------------------------------------------------------------
     header("5. 会话隔离：B 拿 A 的 thread_id")
-    # ----------------------------------------------------------------
     a_conv = client.post("/api/conversations", headers=auth(alice_token)).json()["thread_id"]
     b_conv = client.post("/api/conversations", headers=auth(bob_token)).json()["thread_id"]
 
@@ -261,9 +242,7 @@ with client:
     check(r.status_code == 200, "A 自己删 → 200", str(r.status_code))
     check(deleted_threads == [a_conv], "确实去删了 checkpoint", str(deleted_threads))
 
-    # ----------------------------------------------------------------
     header("6. 客户端不能再自报 user_id")
-    # ----------------------------------------------------------------
     stream_calls.clear()
     r = client.post(
         "/api/chat/stream",
@@ -285,9 +264,7 @@ with client:
     check(stream_calls and stream_calls[-1]["memory_enabled"] is True,
           "登录用户这次请求开着记忆")
 
-    # ----------------------------------------------------------------
     header("7. 游客聊天：memory_enabled 必须是 False")
-    # ----------------------------------------------------------------
     stream_calls.clear()
     r = client.post("/api/chat/stream", json={"message": "你好"})
     check(r.status_code == 200, "游客不给令牌也能聊 → 200", str(r.status_code))
@@ -296,7 +273,6 @@ with client:
     check(stream_calls and stream_calls[-1]["user_id"] == users.GUEST_USER_ID,
           "游客挂在默认账号下", str(stream_calls[-1] if stream_calls else None))
 
-    # 游客新建的会话归默认账号，登录用户看不到
     guest_conv = None
     for c in client.get("/api/conversations").json():
         if c["thread_id"] not in {legacy}:
@@ -306,9 +282,7 @@ with client:
                              client.get("/api/conversations", headers=auth(alice_token)).json()],
           "登录用户看不到游客新会话")
 
-    # ----------------------------------------------------------------
     header("8. 登出")
-    # ----------------------------------------------------------------
     r = client.post("/api/auth/logout", headers=auth(bob_token))
     check(r.status_code == 200 and r.json()["revoked"] is True, "登出 → 200", str(r.json()))
     r = client.get("/api/auth/me", headers=auth(bob_token))
@@ -317,9 +291,7 @@ with client:
     check(r.status_code == 200 and r.json()["revoked"] is False,
           "重复登出不报错（幂等）", str(r.json()))
 
-    # ----------------------------------------------------------------
     header("9. 真实 data/ 没被碰过")
-    # ----------------------------------------------------------------
     check(before_real == real_snapshot(), "四个文件 mtime 未变", str(real_snapshot()))
     check(users.DB_PATH != REAL_DIR / "users.sqlite3", "users 库路径已换到临时目录")
 

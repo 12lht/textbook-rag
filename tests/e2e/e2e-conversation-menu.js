@@ -1,4 +1,3 @@
-// 会话右键菜单（重命名 / 删除）的端到端验证，走真实鼠标右键。
 const http = require('http');
 const { chromium } = require('playwright-core');
 
@@ -40,18 +39,15 @@ async function scenario(browser, width, height, expectClamp) {
 
   const menu = page.locator('#conversationMenu');
 
-  // 1. 初始状态
   check('菜单默认隐藏', await menu.isHidden());
   check('列表里没有常驻删除按钮', (await page.locator('.delete-conversation').count()) === 0);
 
-  // 2. 右键打开菜单
   const row2 = page.locator('.conversation-item').nth(1);
   await row2.click({ button: 'right' });
   check('右键后菜单可见', await menu.isVisible());
   const items = await menu.locator('.context-menu-item').allTextContents();
   check('菜单含重命名/删除会话两项', JSON.stringify(items) === JSON.stringify(['重命名', '删除会话']), `items=${JSON.stringify(items)}`);
 
-  // 3. 点「重命名」→ 行内输入框
   await menu.locator('[data-action="rename"]').click();
   const field = row2.locator('input.conversation-rename');
   check('该行变成行内输入框', (await field.count()) === 1);
@@ -59,7 +55,6 @@ async function scenario(browser, width, height, expectClamp) {
   check('输入框自动聚焦', (await page.evaluate(() => document.activeElement && document.activeElement.className)) === 'conversation-rename');
   check('点完重命名菜单收起', await menu.isHidden());
 
-  // 4. Enter 提交
   await field.fill('AI 科技周报');
   await field.press('Enter');
   await page.waitForTimeout(350);
@@ -73,7 +68,6 @@ async function scenario(browser, width, height, expectClamp) {
   const hintAfterRename = await page.locator('.hint').textContent();
   check('重命名成功后提示行是默认输入提示', hintAfterRename === 'Enter 发送 · Shift + Enter 换行', `hint=${JSON.stringify(hintAfterRename)}`);
 
-  // 5. Escape 取消
   await page.locator('.conversation-item').nth(0).click({ button: 'right' });
   await menu.locator('[data-action="rename"]').click();
   const fieldEsc = page.locator('.conversation-item').nth(0).locator('input.conversation-rename');
@@ -83,7 +77,6 @@ async function scenario(browser, width, height, expectClamp) {
   titles = await page.locator('.conversation-title').allTextContents();
   check('Escape 取消不改标题', titles.includes('北京今天的天气') && !titles.includes('不应该保存'), JSON.stringify(titles));
 
-  // 6. 失焦提交
   await page.locator('.conversation-item').nth(2).click({ button: 'right' });
   await menu.locator('[data-action="rename"]').click();
   const fieldBlur = page.locator('.conversation-item').nth(2).locator('input.conversation-rename');
@@ -93,7 +86,6 @@ async function scenario(browser, width, height, expectClamp) {
   titles = await page.locator('.conversation-title').allTextContents();
   check('点别处失焦即提交', titles.includes('失焦提交的标题'), JSON.stringify(titles));
 
-  // 7. 删除
   const before = await page.locator('.conversation-item').count();
   await page.locator('.conversation-item').nth(0).click({ button: 'right' });
   await menu.locator('[data-action="delete"]').click();
@@ -105,7 +97,6 @@ async function scenario(browser, width, height, expectClamp) {
   const deleted = requests.find((item) => item.method === 'DELETE');
   check('发出了 DELETE 请求', Boolean(deleted) && deleted.threadId === 't-aaa11111', JSON.stringify(deleted));
 
-  // 8. 菜单的关闭方式
   await page.locator('.conversation-item').nth(0).click({ button: 'right' });
   check('菜单能再次打开', await menu.isVisible());
   await page.keyboard.press('Escape');
@@ -115,9 +106,7 @@ async function scenario(browser, width, height, expectClamp) {
   await page.locator('.brand-name').click();
   check('点别处关闭菜单', await menu.isHidden());
 
-  // 9. 贴着视口底部右键，菜单必须收进视口内
   const last = page.locator('.conversation-item').last();
-  // 先把列表滚到底，保证最后一项完整贴在列表容器底部
   await page.evaluate(() => {
     const container = document.querySelector('#conversationList');
     container.scrollTop = container.scrollHeight;
@@ -142,7 +131,6 @@ async function scenario(browser, width, height, expectClamp) {
   await page.close();
 }
 
-// 模拟「后端进程还是改 PATCH 之前启动的那个」：路径在、但方法没注册 → 405
 async function scenario405(browser) {
   console.log('\n--- 405：后端没注册 PATCH ---');
   await request('POST', '/__reset');

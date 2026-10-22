@@ -68,7 +68,6 @@ def main() -> None:
     texts = [c for c in chunks if c["kind"] == "text"]
     print(f"正文 chunk {len(texts)} 条，平均 {sum(len(c['content']) for c in texts)/max(1,len(texts)):.0f} 字")
 
-    # --- A6：段落干净度。抽 20 段，人工看 3 个特征 ---
     print("\n--- 抽查 20 段 ---")
     sample_chunks = random.Random(42).sample(texts, min(20, len(texts)))
     dirty = 0
@@ -79,7 +78,6 @@ def main() -> None:
             problems.append("碎片")
         if len(content) > 1000:
             problems.append(f"超长{len(content)}")
-        # 页眉页脚的典型样子：段首是页码、段尾带「第 N 章」之类重复行
         if any(line.strip().isdigit() for line in content.splitlines()[-1:]):
             problems.append("段尾是页码")
         if problems:
@@ -89,13 +87,11 @@ def main() -> None:
     print(f"有问题的段落 {dirty}/{len(sample_chunks)}（验收线：≤3）")
     check("A6 段落干净度 ≤3", dirty <= 3, f"{dirty}")
 
-    # --- 章节归属 ---
     with_chapter = [c for c in texts if c["chapter"]]
     print(f"\n带章节的段落 {len(with_chapter)}/{len(texts)}")
     if with_chapter:
         print(f"  例：{with_chapter[0]['chapter']}")
 
-    # --- A7：图 ---
     print("\n--- 图/公式 ---")
     assets = [a for a in documents.chunks_of(doc_id) if a["kind"] in {"figure", "formula"}]
     with_conn = documents._connect()
@@ -107,7 +103,6 @@ def main() -> None:
     check("A7 抽到图 ≥ 5", len(rows) >= 5, f"{len(rows)}")
     check("A7 都有题注编号", all(r["label"] for r in rows))
 
-    # --- 越权与删除 ---
     print()
     check("别人查不到这本书", documents.get_document(doc_id, "u2") is None)
     check("别人删不掉这本书", documents.delete_document(doc_id, "u2") is False)

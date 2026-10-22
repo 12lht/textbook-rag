@@ -27,7 +27,6 @@ async function run(browser, width, height, count) {
     };
   });
 
-  // 指针放到会话列表中间，用真实滚轮往下滚
   const midX = 146;
   const midY = Math.round((geometry.listTop + geometry.listBottom) / 2);
 
@@ -39,7 +38,6 @@ async function run(browser, width, height, count) {
     trail.push(await page.evaluate(() => Math.round(document.querySelector('#conversationList').scrollTop)));
   }
 
-  // 指针放到侧边栏顶部（logo / 新建会话按钮区域）再滚
   await page.mouse.move(midX, 60);
   const trailTop = [];
   for (let i = 0; i < 2; i += 1) {
@@ -52,7 +50,6 @@ async function run(browser, width, height, count) {
   console.log(`列表可视高=${geometry.listClientH} 内容高=${geometry.listScrollH} overflowY=${geometry.overflowY}`);
   console.log(`指针在列表中间滚动(${midX},${midY}) → scrollTop 轨迹: ${trail.join(' → ')}`);
   console.log(`指针在顶部区域滚动(${midX},60)     → scrollTop 轨迹: ${trailTop.join(' → ')}`);
-  // 当前预期：只有指针落在会话列表上时才滚动（原生），顶部区域不接管
   const listOk = trail[trail.length - 1] > 0;
   const topIdle = trailTop[trailTop.length - 1] === trail[trail.length - 1];
   console.log(`判定：停在列表上可滚动 = ${listOk ? '是' : '否'}；停在顶部区域不接管 = ${topIdle ? '是' : '否'}`);

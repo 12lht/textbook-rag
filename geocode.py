@@ -26,8 +26,6 @@ from urllib.request import urlopen
 
 REGEO_URL = "https://restapi.amap.com/v3/geocode/regeo"
 
-# 坐标取到小数点后两位（约 1 公里）再当缓存键：同一个城市里走动不该反复调用高德。
-# 高德逆地理编码是计费接口，缓存既省钱也降低被打限流的概率。
 _CACHE_LIMIT = 256
 _cache: dict[tuple[float, float], str] = {}
 _lock = threading.Lock()
@@ -50,7 +48,6 @@ def _cached(key: tuple[float, float]) -> str | None:
 def _remember(key: tuple[float, float], value: str) -> None:
     with _lock:
         if len(_cache) >= _CACHE_LIMIT:
-            # 简单的 FIFO 淘汰：dict 保持插入顺序，弹掉最早那条。
             _cache.pop(next(iter(_cache)), None)
         _cache[key] = value
 
@@ -76,7 +73,6 @@ def describe(latitude: float, longitude: float) -> str | None:
     if not api_key:
         return None
 
-    # 换序：高德要「经度,纬度」。传反不会报错，只会安静地定位到别处。
     location = f"{longitude:.6f},{latitude:.6f}"
     params = urlencode({"location": location, "key": api_key, "extensions": "base"})
     try:
@@ -90,7 +86,6 @@ def describe(latitude: float, longitude: float) -> str | None:
     component = (data.get("regeocode") or {}).get("addressComponent") or {}
     province = _text(component.get("province"))
     city = _text(component.get("city"))
-    # 直辖市的 city 是空的，province 已经带了「市」字，直接用 province 就够。
     described = f"{province}{city}" or province
     if not described:
         return None

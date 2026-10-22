@@ -434,10 +434,8 @@
         const node = document.createElement('button');
         node.type = 'button';
         node.className = 'cat' + (state.filter === row.id ? ' active' : '');
-        // 用属性记 category_id 而不是靠名字找回节点：改名时用
-        // `querySelector('[data-category-id="..."]')` 定位，比「遍历所有行、
-        // 比较文字内容」可靠——后者在名字相近时会认错行（改「移动通信」结果
-        // 改到「移动通信（下）」上面）。
+        // 用属性记 category_id 而不是靠名字找回节点：`[data-category-id]` 比遍历文本可靠
+        // （名字相近时会认错行，改「移动通信」结果改到「移动通信（下）」）。
         node.setAttribute('data-category-id', row.id);
         const name = document.createElement('span');
         name.className = 'cat-name';
@@ -701,9 +699,8 @@
         node.textContent = option.name;
         bulkCategory.appendChild(node);
       });
-      // 优先用当前筛选的分类做默认值——「看着某个分类、勾几本、移进去」
-      // 是最常见的顺序，预选好就少一次点击。keep 是上一次选过的值，
-      // 保留它是因为用户可能刚换了目标分类，还没点「移过去」。
+      // 默认填当前筛选的分类（「看着某个分类、勾几本、移进去」是最常见的顺序）；
+      // keep 是上一次选过的值，用户可能刚换了目标分类还没点「移过去」。
       bulkCategory.value = keep || (state.filter === UNFILED ? '' : state.filter);
     }
 
@@ -765,9 +762,7 @@
             say(`${item.name}：${await readError(response, '上传失败')}`, true);
           } else {
             const record = await response.json();
-            // 正在看某个分类时上传的书，直接归到那个分类。不这么做的话，
-            // 传完它是「未分类」，还得再单独指派一次——用户提这个页面就是为了
-            // 「把一个学科的几个 PDF 归到一个分类下」，这一步不该让人重复做。
+            // 正在看某个分类时上传的书直接归到那个分类，不然传完还得再单独指派一次。
             if (target && record.doc_id) {
               await apiFetch(`/api/documents/${encodeURIComponent(record.doc_id)}`, {
                 method: 'PATCH',

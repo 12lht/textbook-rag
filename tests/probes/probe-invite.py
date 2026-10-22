@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：邀请制注册（F1）——第一人免码、之后必须持码、码一次性、失败不烧码。
 
 跑在临时库上，不碰生产账号。用 `service` 而不是直接调 `users`，
@@ -76,7 +75,6 @@ def main() -> None:
     inv = service.create_invite(owner, "给室友小李")
     code = inv["code"]
     print(f"  发出来的码：{code}")
-    # AW-XXXX-XXXX → 3 + 4 + 1 + 4 = 12 个字符
     check("码是 AW-XXXX-XXXX 形状",
           len(code) == 12 and code.startswith("AW-") and code[7] == "-", code)
     check("码里没有容易看错的字符", not (set(code[3:]) & set("ILO01")), code)
@@ -107,7 +105,6 @@ def main() -> None:
     code3 = service.create_invite(owner, "给老张")["code"]
     expect("重名报 AccountTaken", users.AccountTaken,
            service.register_user, "lisi", "12345678", code3)
-    # 关键：码必须还在。注册是先抢码再插用户，整个事务回滚才对。
     leftover = [i for i in service.invites_of(owner) if i["code"] == code3]
     check("那个码还在列表里", len(leftover) == 1)
     check("而且没被标成已用", leftover and leftover[0]["used"] is False, str(leftover))
@@ -124,39 +121,30 @@ def main() -> None:
     check("列表不泄露被谁用了", all("used_by" not in i for i in all_invites), str(all_invites[0]))
 
     print("\n=== 删除邀请码 ===")
-    # 到这一步库里 3 个码都被用掉了。先补两个新的：一个用来删、一个用来验「没被连坐」。
     fresh = users.create_invite(owner, "待删除")["code"]
     spare = users.create_invite(owner, "留着别动")["code"]
     check("新建了两个码", len(users.list_invites()) == 5, str(len(users.list_invites())))
 
-    # 大小写容错：码本来就要转发出去，谁抄回来都可能是小写。
     check("删除成功（传小写也认）", users.delete_invite(fresh.lower(), owner) is True)
     check("列表里没了", all(i["code"] != fresh for i in users.list_invites()))
     check("删第二次返回 False", users.delete_invite(fresh, owner) is False)
 
-    # 删掉的码必须**真的作废**：这是「删除」和「只是从列表里藏起来」的区别。
-    # 用没注册过的账号名，避免先撞上「账号重名」而不是「码无效」。
     expect("用删掉的码注册 → 被拦", users.InvalidInvite,
            service.register_user, "sunqi", "12345678", fresh)
     check("被拦下之后它也没复活", all(i["code"] != fresh for i in users.list_invites()))
     check("那次失败没建出用户", users.count_users() == 4, str(users.count_users()))
 
-    # 删一个码不该连坐别的
     check("别的码还在", any(i["code"] == spare for i in users.list_invites()))
     check("别的码仍然能用", "token" in service.register_user("zhaoliu", "12345678", spare))
 
-    # 已用的码也能删（代价是查不到来源），删了**不影响**已经注册的账号
     used_code = all_invites[0]["code"]
     check("已用的码能删", users.delete_invite(used_code, owner) is True)
     check("删已用的码不影响那个账号", bool(service.login("lisi", "12345678")["token"]))
 
-    # 越权 / 打歪
     check("不是他发的（用别人的 id 删）→ False",
           users.delete_invite(spare, second_id) is False)
     check("删不存在的码 → False", users.delete_invite("AW-NONE-NONE", owner) is False)
     check("空码 → False", users.delete_invite("", owner) is False)
-    # 空码必须返回 False 而不是「DELETE FROM invites WHERE code=''」以外的东西，
-    # 最怕的是条件被拼丢、变成删整表。
     check("空码没把整表清空", len(users.list_invites()) >= 1, str(len(users.list_invites())))
 
     print("\n=== 主角色的边界 ===")

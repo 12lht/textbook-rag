@@ -36,8 +36,6 @@ async def main() -> int:
     content_block_types = set()
     piece_len = 0  # 逐片思维链长度之和
 
-    # 一次请求里**同时**算逐片长度和聚合结果。分两次跑没意义：模型两次说的
-    # 话本来就不一样长，比出来的差异分不清是「合并丢了内容」还是「模型换了说法」。
     async for chunk in model.astream([HumanMessage(content=QUESTION)]):
         total += 1
         raw = (chunk.additional_kwargs or {}).get("reasoning_content")
@@ -46,7 +44,6 @@ async def main() -> int:
             piece_len += len(raw)
         if chunk.content:
             text_chunks += 1
-        # content 是字符串还是块列表？块里有没有 reasoning？
         if isinstance(chunk.content, list):
             for block in chunk.content:
                 if isinstance(block, dict):
@@ -64,14 +61,11 @@ async def main() -> int:
     else:
         print("[ok]   分片里能逐片拿到 reasoning_content")
 
-    # ---- 聚合后的完整消息 ----
     full_reasoning = (agg.additional_kwargs or {}).get("reasoning_content") or ""
     content = agg.content if isinstance(agg.content, str) else str(agg.content)
     print(f"聚合后思维链长度    = {len(full_reasoning)} 字符")
     print(f"聚合后正文长度      = {len(content)} 字符")
 
-    # 逐片长度之和 vs 聚合长度：相等说明 merge_dicts 是「相加」而不是「覆盖」。
-    # 这两个数来自**同一次请求**，所以任何差异都只可能是合并导致的。
     print(f"逐片长度之和        = {piece_len} 字符")
 
     if not full_reasoning:
@@ -83,7 +77,6 @@ async def main() -> int:
     else:
         print("[ok]   聚合后思维链是完整的（与逐片之和逐字相等）")
 
-    # ---- content 是否被污染 ----
     leaked = "reasoning" in content_block_types
     if leaked:
         print("[FAIL] 思维链混进了 content 块 —— 会被当正文渲染！")

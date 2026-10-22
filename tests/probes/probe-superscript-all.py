@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """全本跑一遍 _line_text，把所有还原出的上标列出来人工过一遍。"""
 import collections
 import sys

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：邀请制注册的 HTTP 层（F1）。
 
 存储层已经由 `probe-invite.py` 覆盖，这里只验路由层要额外保证的东西：
@@ -19,7 +18,6 @@ import memories  # noqa: E402
 import users  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="probe-invite-api-"))
-# 各模块各自的库文件，理由见 `probe-memory-api.py` 里那段。
 users.DATA_DIR = tmp
 users.DB_PATH = tmp / "users.sqlite3"
 memories.DATA_DIR = tmp
@@ -120,10 +118,8 @@ def main() -> None:
         check("被拦下之后码还在",
               len(client.get("/api/invites", headers=owner_headers).json()) == 1)
 
-        # 未登录连身份都没有 → 401，不是 403
         check("未登录删 → 401", client.delete("/api/invites/AW-AAAA-BBBB").status_code == 401)
 
-        # 主人删一个没用的码：删掉即作废，之后拿它注册必须失败
         unused = client.post("/api/invites", json={"note": "删我"}, headers=owner_headers).json()["code"]
         r = client.delete(f"/api/invites/{unused}", headers=owner_headers)
         check("主人删 → 200", r.status_code == 200, r.text[:100])
@@ -142,7 +138,6 @@ def main() -> None:
         r = client.delete("/api/invites/AW-NONE-NONE", headers=owner_headers)
         check("删不存在的码 → 404", r.status_code == 404, r.text[:100])
 
-        # 已用的码也能删（前端会提示代价），删完不影响已经注册的账号
         used_code = items[0]["code"]
         r = client.delete(f"/api/invites/{used_code}", headers=owner_headers)
         check("已用的码也能删 → 200", r.status_code == 200, r.text[:100])

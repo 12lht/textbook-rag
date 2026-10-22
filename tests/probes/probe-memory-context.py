@@ -145,7 +145,6 @@ async def main() -> int:
     recall_rounds = [i for i, (_, c) in enumerate(per_round, start=1) if "recall_memory" in c]
     print(f"   调过 recall_memory 的轮次：{recall_rounds or '（一次都没有）'}")
 
-    # 关键结论：事实在窗口里天然有两份，所以「需要用到」的那几轮不该重复读
     tail = await context_evidence(thread_id)
     ok &= check(
         "事实在上下文里有用户原话这份",

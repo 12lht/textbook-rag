@@ -2813,6 +2813,29 @@ if running and total <= CONTEXT_LIMIT_TOKENS:
 写成 `\uXXXX`（为了输出纯 ASCII，几十年前留下的默认值）。适配层只是没关掉它。
 MCP 那一层返回的**确实是中文**，问题全在「塞进请求」这最后一步。
 
+这里有个容易想岔的地方：**不是 DeepSeek 不支持数组**。绕过适配层直接问 API，
+同一个请求两种写法拿到的 token 数一字不差（60 / 60；换长文本是 77 / 77）：
+
+```text
+字符串 content：60 token
+数组 content：  60 token
+```
+
+也就是说数组这条路本身是通的，**只是被适配层堵住了**——它无条件 `json.dumps`，
+数组压根没机会到达 API。所以有两条修法：子类化 `ChatDeepSeek` 去 override 它私有的
+`_get_request_payload`，或者在自己这边摊平。选摊平，因为纯文本用数组没有任何语义
+增益（token 一样），却少一个要跟着上游版本走的补丁；而且上游哪天改成透传数组，
+摊平依然成立，不会变成多余的一次转换。
+
+「等新版本修」这条路也堵着：`langchain-deepseek` 的 1.1.1 已经是 PyPI 上最新，
+而 GitHub master 里那段代码和它一字不差（2026-10-22 查过）。还有个对照——同一个
+数组走 `ChatOpenAI`（本项目的 GLM 那条路）是**原样透传**的，`_format_message_content`
+只做校验不做转换。所以这确实只是 deepseek 这个包自己加的 override，不是协议问题。
+
+顺带看到一个佐证：同一段代码对 `assistant` 消息的处理是「抽出 text block 拼回字符串」，
+注释写着 "DeepSeek API expects assistant content to be a string"。实测它其实是收的，
+这句注释要么过时、要么是保守——**依赖库里的注释不能当协议规范用，能测就测**。
+
 MCP 工具返回的是 content-block 列表（`[{"type": "text", "text": "..."}]`）。
 langchain 的 deepseek 适配层在把 `ToolMessage` 转成请求体时，对非字符串 content 直接
 `json.dumps`——**带默认的 `ensure_ascii=True`**，于是每个汉字变成 `\u5faa` 六个字节。

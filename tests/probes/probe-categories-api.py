@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：知识库管理页的 HTTP 层——分类增删改 + 文档归类。
 
 存储层的行为（重名靠唯一索引、删分类不删书）已经由 `probe-categories.py` 覆盖，
@@ -28,8 +27,6 @@ import documents  # noqa: E402
 import users  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="probe-categories-api-"))
-# 每个模块各自的库文件，理由见 probe-memory-api.py：共用一个库是靠
-# 「表名恰好不一样」侥幸成立的。
 users.DATA_DIR = tmp
 users.DB_PATH = tmp / "users.sqlite3"
 documents.DATA_DIR = tmp
@@ -86,7 +83,6 @@ def main() -> None:
 
         print("\n=== 两个用户 ===")
         alice = register(client, "alice")
-        # 第二个人要走邀请码（第一个注册的才是主人）。
         code = client.post("/api/invites", json={}, headers=alice).json()["code"]
         bob = register(client, "bob", code)
         alice_id = client.get("/api/auth/me", headers=alice).json()["user_id"]
@@ -112,7 +108,6 @@ def main() -> None:
               str(r.json())[:120])
 
         r = client.post("/api/categories", json={"name": "   "}, headers=alice)
-        # 这条最关键：写成 Field(min_length=1) 会变成 422 + 校验数组
         check("空名字 → 400（不是 422）", r.status_code == 400, r.text[:120])
         check("空名字的 detail 可读", r.json().get("detail") == "分类名不能为空", str(r.json())[:120])
 
@@ -156,9 +151,6 @@ def main() -> None:
         r = client.patch(f"/api/documents/{bob_doc}", json={"category_id": cat1}, headers=alice)
         check("给别人的书归类 → 404", r.status_code == 404, r.text[:120])
         detail_doc = r.json().get("detail")
-        # 这里必须用**自己的书 + 别人的分类**，才走得到「分类不存在」那条分支。
-        # 拿别人的书配别人的分类，第一道检查（书是不是我的）就返回了，
-        # 测的其实还是同一件事。
         r = client.patch(f"/api/documents/{bob_doc}", json={"category_id": cat1}, headers=bob)
         check("用别人的分类 id 归类 → 404", r.status_code == 404, r.text[:120])
         detail_cat = r.json().get("detail")

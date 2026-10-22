@@ -1,4 +1,3 @@
-// 真浏览器验证引用小窗：mock 接口，加载真实页面，点角标，看小窗是否真的出现。
 const { chromium } = require('playwright-core');
 
 const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
@@ -36,16 +35,11 @@ const HISTORY = [
   await page.route('**/api/conversations', (route) => route.fulfill({
     contentType: 'application/json', body: '[]',
   }));
-  await page.route('**/api/conversations/*/messages', (route) => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({ thread_id: 't-cite', messages: HISTORY }),
-  }));
-  await page.route('**/api/documents', (route) => route.fulfill({ contentType: 'application/json', body: '[]' }));
+  await page.route('**/api/conversationsapi/documents', (route) => route.fulfill({ contentType: 'application/json', body: '[]' }));
 
   await page.goto(BASE + '/');
   await page.waitForTimeout(800);
 
-  // 打开带引用的历史会话（mock 的 /messages 返回 HISTORY）
   await page.evaluate(() => selectConversation('t-cite'));
   await page.waitForTimeout(600);
 

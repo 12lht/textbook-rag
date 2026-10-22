@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,8 +27,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 import agent_core
 
-# 样本刻意覆盖四种形状：纯中文、纯英文、中英混排的 markdown（教材 chunk 的样子）、
-# 工具返回的 content-block（content 是列表，不是字符串）。
 SAMPLES = {
     "纯中文 200 字": (
         "正交频分复用是一种多载波传输技术，它把高速数据流分解成若干个低速子流，"
@@ -117,7 +116,6 @@ def tool_turn(index: int = 0) -> list:
 
 async def main() -> int:
     ok = True
-    # 关掉思考、输出卡到 1 个 token：只要 usage，不要内容。
     model = agent_core.build_model(temperature=0, max_tokens=1, disable_reasoning=True)
 
     print("== 0. 工具结果的 content-block 不能被转义成 \\u5faa 发出去 ==")
@@ -135,14 +133,6 @@ async def main() -> int:
     print()
     print("== 1. 字符数 → token 的换算误差（单个用户消息）==")
     print(f"   {'样本':<18}{'估算':>8}{'实际':>8}{'偏差':>10}")
-    # 容差按样本形状单独给，理由写在旁边——这里要的是「知道偏多少、往哪偏」，
-    # 不是把所有样本调到一个数上（一个系数做不到，见下面的实测）。
-    # 纯英文散文：真实分词四五个字符才一个 token，系数按文档取 0.3 必然偏高；
-    #   偏高的方向安全（早裁一点），不值得为英文再分一套系数。
-    # 公式密集的 markdown：`\log_2` `\frac{SNR}{N_t}` 这类 LaTeX 一段能切出十几个
-    #   token，靠字符分类估不出来（要把标点权重提到 1.5 才凑得上，那样 JSON 就会
-    #   高估三成）。这里是**已知低估**，不影响结论：真实会话里的大头是工具返回的
-    #   JSON 和中文正文，见第 4 节。
     tolerances = {
         "纯英文 200 字符": (0.0, 0.55),
         "中英混排 markdown": (-0.35, 0.25),
@@ -182,9 +172,6 @@ async def main() -> int:
           f"（偏差 {(est_schema - actual_schema) / max(actual_schema, 1):+.0%}）")
     ok &= check("工具 schema 估算在 ±30% 内",
                 abs(est_schema - actual_schema) / max(actual_schema, 1) <= 0.30)
-    # 这支脚本没有注入记忆 / 检索后端，所以系统提示只有一句 `SYSTEM_PROMPT`，
-    # 而 `_prompt_overhead_tokens` 刻意按「两段引导都在」的最坏情况算——
-    # 在这里必然偏高，在生产里才是准的。打出来只为看清差了多少。
     print(f"   `_prompt_overhead_tokens()` = {agent_core._prompt_overhead_tokens()}"
           f"（本脚本没注入后端，引导段并未真的发出去，偏高是设计如此）")
 
@@ -194,11 +181,56 @@ async def main() -> int:
     for index in range(8):
         history.extend(tool_turn(index))
     got = await measure(bound, sent(history, system=system))
-    # 这次模型绑了工具，所以估算里必须把 schema 算进来，否则比的不是同一件事。
     est = estimate(history, system=system) + est_schema
     print(f"   {len(history)} 条消息：估算 {est} / 实际 {got}"
           f"（偏差 {(est - got) / max(got, 1):+.0%}）")
     ok &= check("多轮累计偏差仍在 ±25% 内", abs(est - got) / max(got, 1) <= 0.25)
+
+    print()
+    print("== 5. 数组格式 API 认不认（绕过适配层直接问，用来定「摊平还是透传」）==")
+    from openai import OpenAI
+
+    raw = OpenAI(
+        api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com"
+    )
+    sample = "循环前缀要大于信道的最大时延扩展，否则相邻符号之间会产生干扰。"
+
+    def raw_payload(tool_content):
+        return [
+            {"role": "user", "content": "书上怎么讲循环前缀"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "type": "function",
+                        "id": "c1",
+                        "function": {"name": "search_textbook", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": tool_content},
+        ]
+
+    def ask(tool_content) -> int | None:
+        try:
+            reply = raw.chat.completions.create(
+                model="deepseek-flash",
+                messages=raw_payload(tool_content),
+                max_tokens=1,
+                extra_body={"reasoning_effort": "none"},
+            )
+            return reply.usage.prompt_tokens
+        except Exception as error:  # noqa: BLE001
+            print(f"      被拒：{type(error).__name__}: {str(error)[:160]}")
+            return None
+
+    as_string = ask(sample)
+    as_array = ask([{"type": "text", "text": sample}])
+    print(f"   字符串 content：{as_string} token；数组 content：{as_array} token")
+    ok &= check("数组格式被接受", as_array is not None)
+    ok &= check("两种写法的 token 数一致（数组对纯文本没有语义增益）",
+                as_string is not None and as_array == as_string)
 
     await agent_core.close_mcp()
     print()

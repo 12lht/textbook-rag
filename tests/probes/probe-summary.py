@@ -29,9 +29,7 @@ from agent_core import (
     truncate_node,
 )
 
-# 一轮「重」聊天（一条消息 2400 字）：60 轮约 17 万 token，能压过预警线。
 HEAVY_CHARS = 2400
-# 一轮「轻」聊天：60 轮才两千多 token，怎么都不该被裁。
 LIGHT_CHARS = 20
 
 
@@ -220,7 +218,6 @@ async def main() -> int:
     print()
     print("== 8. 摘要模型的输入里，工具返回的 content-block 被摊平了 ==")
     agent_core.model = StubModel()
-    # 这三条要放在**最前面**，才会落进被裁掉的那一批里（裁剪是从前面丢的）。
     head = [
         SystemMessage(content=agent_core.SYSTEM_PROMPT, id="sys"),
         HumanMessage(content="查一下循环前缀", id="hx"),
@@ -271,7 +268,6 @@ async def main() -> int:
 
     print()
     print("== 12. 时机：任务中途不压，等轮边界；撞硬顶才中途压 ==")
-    # 12a：过预警线但最后一条是工具结果 = 任务正跑着，应该等
     agent_core.model = StubModel()
     running = build_tool_state(turns=20, calls_per_turn=3, chars=4500, next_turn=False)
     tokens = total_tokens(running)
@@ -279,14 +275,12 @@ async def main() -> int:
     print(f"   任务中途，约 {tokens} token（预警 {CONTEXT_TRIGGER_TOKENS}，硬顶 {CONTEXT_LIMIT_TOKENS}）")
     ok &= check("过了预警线但因任务未结束而不压", update == {}, f"update={update}")
     ok &= check("也没调摘要模型", agent_core.model.prompts == [])
-    # 12b：同一条会话，下一轮开始（补一条用户消息）→ 这时才压
     running["messages"].append(HumanMessage(content="这一轮问完了，再问一个", id="h-next-2"))
     update = await truncate_node(running)
     ok &= check("到了轮边界就压了", len(update.get("messages", [])) > 0)
     ok &= check("压完落进目标线",
                 total_tokens({"messages": [m for m in running["messages"] if m not in dropped_of(running, update)]})
                 <= CONTEXT_TARGET_TOKENS)
-    # 12c：超过硬顶，即使任务中途也压（安全阀，正常不该走到）
     agent_core.model = StubModel()
     urgent = build_tool_state(turns=32, calls_per_turn=3, chars=4500, next_turn=False)
     tokens = total_tokens(urgent)

@@ -33,7 +33,6 @@ try:
 
     show("初始")
 
-    # 目标：回退到「问题2」发出之前 -> 删掉 h2 及之后的所有消息
     msgs = graph.get_state(config).values["messages"]
     humans = [i for i, m in enumerate(msgs) if isinstance(m, HumanMessage)]
     print("人类消息位置:", humans, "-> 第 2 条(索引1)在列表位置", humans[1])
@@ -45,7 +44,6 @@ try:
     graph.update_state(config, {"messages": [RemoveMessage(id=m.id) for m in to_remove]})
     show("截断后")
 
-    # 再验证一次：回退到第一条用户消息之前
     msgs = graph.get_state(config).values["messages"]
     humans = [i for i, m in enumerate(msgs) if isinstance(m, HumanMessage)]
     cut = humans[0]

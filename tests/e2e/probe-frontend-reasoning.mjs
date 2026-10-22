@@ -1,17 +1,7 @@
-// 前端渲染逻辑的 DOM 测试：把 index.html 里那段 script 真的跑起来。
-//
-// 为什么值得测：后端只保证「事件发出去了」，前端那几行的对错（选择器拼错、
-// 属性名写错、把 details 塞到错误的父节点）在服务端探针里全都看不出来。
-// 这里用 linkedom 造一个真 DOM，执行页面脚本，然后直接调 addReasoning /
-// appendReasoning / addMessage 检查产物。
-//
-// fetch 被替换成「永不落定」的 promise：页面脚本结尾会自己去问「我是谁」，
-// 不放个桩会把测试拖进网络。脚本里那部分是 async 的，不 await 它就行。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 
-// ESM 的 import 不认 NODE_PATH，从托管工作区显式取（依赖装在隔离目录里，不污染环境）。
 const require = createRequire(
   'C:/Users/13526/.workbuddy/binaries/node/workspace/package.json',
 );
@@ -60,17 +50,14 @@ if (typeof addReasoning !== 'function') {
   process.exit(1);
 }
 
-// ---------- 造一个「助手消息节点」 ----------
 const node = addMessage('assistant', '');
 check(Boolean(node.traceList), 'addMessage 产出的节点带 traceList');
-// 钉住用户可见的文案：这是给用户看的字，改错了不会有任何报错，只会静静显示成别的
 check(
   node.trace.querySelector('summary').textContent === '模型思考',
   '外层折叠面板标题是「模型思考」',
   JSON.stringify(node.trace.querySelector('summary').textContent),
 );
 
-// ---------- 1. 建块 ----------
 const box = addReasoning(node);
 check(box !== null && box !== undefined, 'addReasoning 返回了块');
 check(box.tagName === 'DETAILS', '块是 <details>（可折叠）', box.tagName);
@@ -80,7 +67,6 @@ check(node.traceList.contains(box), '块被挂进了 trace-list');
 check(box.summary?.tagName === 'SUMMARY', '块里有 summary');
 check(box.body?.className === 'trace-reasoning-body', '块里有正文容器');
 
-// ---------- 2. 逐片追加 ----------
 appendReasoning(box, '我先看看用户');
 appendReasoning(box, '问的是什么。');
 check(box.body.textContent === '我先看看用户问的是什么。', '分片按顺序拼起来了', JSON.stringify(box.body.textContent));
@@ -88,14 +74,12 @@ check(box.chars === 12, '字数统计正确', `${box.chars}`);
 check(box.summary.textContent.includes('12 字'), 'summary 上显示实时字数', box.summary.textContent);
 check(box.summary.textContent.includes('我先看看用户'), 'summary 上带开头预览', box.summary.textContent);
 
-// ---------- 3. 预览不会跟着思维链变长 ----------
 appendReasoning(box, '很长的一段思考'.repeat(30));
 check(box.summary.textContent.length < 80, 'summary 没有随思维链一起变长', `${box.summary.textContent.length} 字`);
 check(box.summary.textContent.includes('…'), '内容被截断时有省略号');
 check(box.chars === 12 + 7 * 30, '长文本的字数仍然准确', `${box.chars}`);
 check(box.body.textContent.length === 12 + 7 * 30, '正文容器里是完整的思维链');
 
-// ---------- 4. 历史里的思维链（kind=reasoning）渲染 ----------
 const histNode = addMessage(
   'assistant',
   '这是一个回答。',
@@ -121,7 +105,6 @@ check(
   '没有渲染出 undefined（kind 分派没漏分支）',
 );
 
-// ---------- 5. 工具成功 / 失败必须长得不一样 ----------
 const addToolResult = window.addToolResult;
 check(typeof addToolResult === 'function', 'addToolResult 是全局函数');
 
@@ -133,7 +116,6 @@ const badNode = addMessage('assistant', '', false, [
   { kind: 'call', tool: 'fetch_webpage', args: { url: 'https://x.invalid' } },
   { kind: 'result', tool: 'fetch_webpage', status: 'error' },
 ]);
-// 老 checkpoint 里的消息可能没有 status 字段，必须仍然按成功渲染（不能变成「失败」）
 const oldNode = addMessage('assistant', '', false, [{ kind: 'result', tool: 'get_current_time' }]);
 
 const okLine = okNode.traceList.querySelectorAll('div.trace-event')[1];
@@ -147,7 +129,6 @@ check(badLine?.classList.contains('trace-failed'), '失败那行带 trace-failed
 check(oldLine?.textContent === '工具完成：get_current_time', '没有 status 字段时按成功处理（兼容老数据）', oldLine?.textContent);
 check(!oldLine?.classList.contains('trace-failed'), '没有 status 时不会被误标成失败');
 
-// 实时流走的是同一个 addToolResult，单独调一次把这条路径也钉住
 const liveNode = addMessage('assistant', '');
 addToolResult(liveNode, 'web_search', 'error');
 check(

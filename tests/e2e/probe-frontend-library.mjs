@@ -1,11 +1,3 @@
-// 知识库管理页（/library）的 DOM 测试：把 library.html 里的脚本真跑起来。
-//
-// 为什么单独测：后端探针只能证明「接口返回了正确的 JSON」。而「分类点了有没有
-// 过滤、勾选之后批量条有没有出现、点『移过去』发的到底是不是 PATCH、
-// 发给哪个 URL、body 里的 category_id 是 id 还是名字」——这些全在 DOM 层，
-// 接口层一个都看不见。之前就有过「下拉框里放的是名字、后端要的是 id」这种错。
-//
-// 这一页是**独立页面**，不再寄生在 index.html 的侧栏里，所以探针也换了宿主。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
@@ -48,8 +40,6 @@ const DOCS = [
   },
 ];
 
-// 服务端的可变状态：探针要能验证「归类之后列表真的变了」，
-// 所以 mock 不能每次都返回同一份常量。
 function makeServer({ loggedIn }) {
   const server = {
     docs: DOCS.map((doc) => ({ ...doc })),
@@ -92,8 +82,6 @@ function makeServer({ loggedIn }) {
       if (server.cats.some((cat) => cat.name === name)) {
         return json({ detail: '已经有同名的分类了' }, 409);
       }
-      // id 必须真的唯一。早先用「调用次数」拼 id，结果新建出来的 id 撞上了
-      // 已经存在的 `c-2`，页面因此切到了别人头上——那种错会伪装成前端 bug。
       const created = { category_id: `c-new-${server.cats.length + 1}`, name, doc_count: 0 };
       server.cats.push(created);
       return json(created, 201);
@@ -142,7 +130,6 @@ async function boot({ loggedIn, withRenderer = true }) {
   globalThis.document = document;
   window.document = document;
 
-  // marked / DOMPurify 在 CDN 上，跑测试时拿不到，用最小实现顶上。
   if (withRenderer) {
     window.marked = {
       parse: (text) => String(text)
@@ -152,7 +139,6 @@ async function boot({ loggedIn, withRenderer = true }) {
     };
     window.DOMPurify = { sanitize: (html) => html };
   } else {
-    // linkedom 的 window 之间共享一部分全局，必须显式清掉。
     window.marked = undefined;
     window.DOMPurify = undefined;
   }
@@ -166,11 +152,9 @@ async function boot({ loggedIn, withRenderer = true }) {
   };
 
   const timers = [];
-  // 轮询回调**不执行**，只记录延迟——真跑会无限循环，这里只需要知道有没有安排。
   window.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
   window.clearTimeout = () => {};
   window.confirm = () => true;
-  // 上传要用。真 FormData 传进来会往网络发东西，这里只记录 append 了哪些字段。
   window.FormData = class {
     constructor() { this.fields = []; }
     append(key, value) { this.fields.push([key, value]); }
@@ -186,8 +170,6 @@ async function boot({ loggedIn, withRenderer = true }) {
     check('页面脚本能执行', false, error.message);
     return { window, document, server, timers };
   }
-  // 结尾那个 async IIFE 要跑完（loadIdentity → loadAll）。
-  // 用 setImmediate 而不是 setTimeout：window.setTimeout 已经被换成只记录的桩。
   for (let i = 0; i < 30; i += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -198,11 +180,6 @@ const catNames = (document) =>
   [...document.querySelectorAll('#catList .cat-name')].map((node) => node.textContent);
 const docTitles = (document) =>
   [...document.querySelectorAll('#docList .doc-title')].map((node) => node.textContent);
-// linkedom 的 <select> **没有实现 value**（实测读永远 undefined、写不进去）。
-// 所以「把下拉设成某个值再触发 change」只能给这个元素实例单独 define 一个属性。
-// 绕过的是测试环境的缺口，不是被测逻辑——页面里读的就是 select.value，
-// 在真浏览器里它是标准行为。反过来，验证「当前选中的是哪一项」不能用
-// select.value，要看 option 上的 selected（那个 linkedom 是实现了的）。
 function pick(element, value) {
   Object.defineProperty(element, 'value', { value, writable: true, configurable: true });
   element.onchange();
@@ -211,7 +188,6 @@ const settle = async (rounds = 20) => {
   for (let i = 0; i < rounds; i += 1) await new Promise((resolve) => setImmediate(resolve));
 };
 
-// --- 未登录 ---
 {
   const { document, server } = await boot({ loggedIn: false });
   check('未登录时显示登录门', document.querySelector('#gate').hidden === false);
@@ -221,12 +197,10 @@ const settle = async (rounds = 20) => {
     !server.calls.some((c) => c.url === '/api/categories'), server.calls.map((c) => c.url).join(' '));
 }
 
-// --- 已登录：列表渲染 ---
 {
   const { document, server, timers } = await boot({ loggedIn: true });
   check('登录门挡起来', document.querySelector('#gate').hidden === true);
 
-  // 「全部文档 / 未分类」两个虚拟分类 + 两个真分类
   const names = catNames(document);
   check('分类栏有 4 行', names.length === 4, names.join('/'));
   check('前两行是虚拟分类', names[0] === '全部文档' && names[1] === '未分类', names.join('/'));
@@ -267,7 +241,6 @@ const settle = async (rounds = 20) => {
   check('已就绪的书能看解析',
     document.querySelectorAll('#docList .doc-op')[0].disabled === false);
 
-  // --- 点分类过滤 ---
   const catNodes = [...document.querySelectorAll('#catList .cat')];
   catNodes[1].onclick();   // 未分类
   check('点「未分类」只剩 1 本', docTitles(document).length === 1, docTitles(document).join('/'));
@@ -278,7 +251,6 @@ const settle = async (rounds = 20) => {
   catNodes[0].onclick();   // 全部
   check('点回「全部文档」恢复 3 本', docTitles(document).length === 3, docTitles(document).join('/'));
 
-  // --- 单本归类：下拉 ---
   const select2 = [...document.querySelectorAll('#docList .doc-cat')][1];
   pick(select2, 'c-2');
   await settle(10);
@@ -291,7 +263,6 @@ const settle = async (rounds = 20) => {
     document.querySelectorAll('#catList .cat-count')[1].textContent === '0',
     document.querySelectorAll('#catList .cat-count')[1].textContent);
 
-  // --- 批量归类 ---
   const boxes = [...document.querySelectorAll('#docList input[type=checkbox]')];
   check('批量条默认隐藏', document.querySelector('#bulkBar').hidden === true);
   boxes.forEach((box) => { box.checked = true; box.onchange(); });
@@ -304,7 +275,6 @@ const settle = async (rounds = 20) => {
     String(document.querySelectorAll('#docList .doc-card.picked').length));
 
   const bulk = document.querySelector('#bulkCategory');
-  // 批量下拉只能整块伪造 value：它是页面自己新建的元素，实例上 define 即可。
   Object.defineProperty(bulk, 'value', { value: 'c-2', writable: true, configurable: true });
   server.calls.length = 0;
   document.querySelector('#bulkApply').onclick();
@@ -315,7 +285,6 @@ const settle = async (rounds = 20) => {
     bulkCalls.every((c) => c.body.category_id === 'c-2'), JSON.stringify(bulkCalls.map((c) => c.body)));
   check('移动完批量条收起', document.querySelector('#bulkBar').hidden === true);
 
-  // --- 预览 ---
   server.calls.length = 0;
   await document.querySelectorAll('#docList .doc-op')[0].onclick();
   for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
@@ -338,7 +307,6 @@ const settle = async (rounds = 20) => {
   check('关掉后浮层隐藏', document.querySelector('#preview').hidden === true);
 }
 
-// --- 渲染组件没加载出来（CDN 被拦 / 离线）---
 {
   const { document } = await boot({ loggedIn: true, withRenderer: false });
   await document.querySelectorAll('#docList .doc-op')[0].onclick();
@@ -349,13 +317,10 @@ const settle = async (rounds = 20) => {
     document.querySelector('#previewBody').innerHTML.slice(0, 60));
 }
 
-// --- 新建分类 ---
 {
   const { window, document, server } = await boot({ loggedIn: true });
   const input = document.querySelector('#catInput');
   input.value = '数字信号处理';
-  // 表单的 submit 监听是 addEventListener 注册的；linkedom 不会自己触发，
-  // 手动派发一个真 Event（commit 的默认行为它不会做，所以不用额外拦）。
   document.querySelector('#catForm').dispatchEvent(new window.Event('submit'));
   await settle();
   const posts = server.calls.filter((c) => c.method === 'POST' && c.url === '/api/categories');
@@ -374,7 +339,6 @@ const settle = async (rounds = 20) => {
     (document.querySelector('#docList').textContent || '').slice(0, 40));
 }
 
-// --- 重名：错误写在分类栏，不吞掉 ---
 {
   const { window, document } = await boot({ loggedIn: true });
   document.querySelector('#catInput').value = '移动通信';
@@ -389,7 +353,6 @@ const settle = async (rounds = 20) => {
     document.querySelector('#catInput').value);
 }
 
-// --- 删除分类：书退回未分类 ---
 {
   const { document, server } = await boot({ loggedIn: true });
   const target = document.querySelector('[data-category-id="c-1"]');
@@ -402,16 +365,12 @@ const settle = async (rounds = 20) => {
     JSON.stringify(deletes.map((c) => c.url)));
   check('分类行消失', !catNames(document).includes('移动通信'), catNames(document).join('/'));
   check('书一本都没少', docTitles(document).length === 3, docTitles(document).join('/'));
-  // 删之前：c-1 装着 d1/d3，d2 本来就没归类 → 未分类 1 本。
-  // 删掉 c-1 之后三本全归未分类。
   check('书退回未分类', document.querySelectorAll('#catList .cat-count')[1].textContent === '3',
     document.querySelectorAll('#catList .cat-count')[1].textContent);
 }
 
-// --- 上传：正在看某个分类时，上传的书直接落到那个分类 ---
 {
   const { document, server } = await boot({ loggedIn: true });
-  // 先切到「信号与系统」（c-2）
   const target = document.querySelector('[data-category-id="c-2"]');
   target.onclick();
   check('切到 c-2', document.querySelector('#docsTitle').textContent === '信号与系统',
@@ -423,7 +382,6 @@ const settle = async (rounds = 20) => {
     configurable: true,
   });
   server.calls.length = 0;
-  // 让上传成功：mock 里没有处理 POST /api/documents，这里临时补一个分支。
   const original = server.handle;
   server.handle = async (input, init = {}) => {
     if (String(input) === '/api/documents' && String(init.method).toUpperCase() === 'POST') {

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """探针：配额与限流（F3 / F4）。
 
 两个东西在测：
@@ -26,8 +25,6 @@ tmp = Path(tempfile.mkdtemp(prefix="probe-limits-"))
 limits.DATA_DIR = tmp
 limits.DB_PATH = tmp / "limits.sqlite3"
 
-# 假时钟：只替换 limits 模块里的 time 引用，不动真的 time 模块
-# （动了的话整个进程里所有 sleep / 超时都会跟着坏）。
 _clock = types.SimpleNamespace(now=0.0)
 limits.time = types.SimpleNamespace(monotonic=lambda: _clock.now)
 
@@ -68,7 +65,6 @@ def main() -> None:
     check("一开始是 0", limits.used_today("u1", "ask") == 0)
     check("剩 2（上限 3）", limits.consume("u1", "ask", 3) == 2)
     check("剩 1", limits.consume("u1", "ask", 3) == 1)
-    # 第 3 次本身是合法的，成功之后剩余正好 0。返回 0 表示「这次放行，但没余额了」。
     check("第 3 次成功、剩 0（不是被拒）", limits.consume("u1", "ask", 3) == 0)
     check("第 4 次返回 -1", limits.consume("u1", "ask", 3) == -1)
     check("超额那次没被算进计数", limits.used_today("u1", "ask") == 3,
@@ -118,7 +114,6 @@ def main() -> None:
     print("\n=== 不同 key 互不牵连 ===")
     _clock.now = 100.0
     check("另一个 key 不受影响", limits.allow("other", 3, 60)[0] is True)
-    # 顺手证明上一个 key 还在自己的窗口里
     _clock.now = 61.0
     state = limits.rate_limit_state()
     check("状态里能看到多个 key", state["keys"] >= 2, str(state))
@@ -149,8 +144,6 @@ def main() -> None:
     finally:
         limits.ASK_PER_DAY = real_limit
 
-    # 限流优先于配额：同一秒连点 25 次，前 20 次（ASKS_PER_MINUTE）进去，
-    # 之后是 RateLimited 而不是 QuotaExceeded——因为配额还剩 180 次。
     limits.reset_rate_limits()
     _clock.now = 0.0
     kinds = []

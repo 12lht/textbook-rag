@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """以「关掉上标还原」的状态跑一次解析评测，用来重建改动前的基线。
 
 用法: python eval-baseline-off.py <pdf> <pages> <tag>

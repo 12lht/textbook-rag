@@ -1,5 +1,3 @@
-// 支持 GET / PATCH / DELETE /api/conversations 的假后端，用于验证右键菜单。
-// 端口 8768。状态在内存里，可用 POST /__reset 重置。
 const http = require('http');
 const fs = require('fs');
 const path = require('path');

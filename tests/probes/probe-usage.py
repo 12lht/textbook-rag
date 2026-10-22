@@ -40,7 +40,6 @@ for m in state.get("messages", []):
 print()
 print(f"合计 input_tokens={total_in}  output_tokens={total_out}  总计={total_in + total_out}")
 
-# 顺带看看 response_metadata 里有没有另一条路径
 for m in state.get("messages", []):
     if isinstance(m, AIMessage):
         rm = getattr(m, "response_metadata", {}) or {}

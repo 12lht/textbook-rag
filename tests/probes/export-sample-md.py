@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """导出一段可直接打开的 Markdown（含图片），用来肉眼验收解析质量。"""
 from __future__ import annotations
 import shutil, sys, tempfile, time

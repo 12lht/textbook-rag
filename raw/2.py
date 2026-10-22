@@ -63,7 +63,6 @@ agent = create_agent(
     checkpointer=checkpointer
 )
 
-# `thread_id` 是给定对话的唯一标识符。
 config = {"configurable": {"thread_id": "1"}}
 
 def run_agent(user_input: str) -> None:
@@ -79,7 +78,6 @@ def run_agent(user_input: str) -> None:
             for message in state_update.get("messages", []):
                 message.pretty_print()
 
-# 注意，我们可以使用相同的 `thread_id` 继续对话。
 run_agent("外面的天气怎么样？")
 run_agent("你能告诉我现在的时间吗？")
 run_agent("谢谢！")

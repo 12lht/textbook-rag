@@ -26,8 +26,6 @@ import agent_core
 import conversations
 import service
 
-# 用本机默认账号做测试身份：它本来就归 CLI 用，不参与任何访客隔离逻辑，
-# 也不会在 users 表里多建一行。
 TEST_USER = service.CLI_IDENTITY.user_id
 
 SEED = [
@@ -57,14 +55,12 @@ async def brief(thread_id: str) -> list[tuple[str, str]]:
 async def service_level() -> None:
     tid = service.create_conversation(TEST_USER)["thread_id"]
     try:
-        # 先手动改个名字，验证「回退到清空」会把标题和手动命名标记一起还原
         conversations.rename_conversation(tid, "天气三连问")
         await seed(tid, SEED)
         print("初始历史:", await brief(tid))
         print("初始标题:", conversations.load_conversation_summaries().get(tid),
               " 手动命名:", conversations.is_renamed(tid))
 
-        # 生产路径：真实会话里最后一个节点已经写过 checkpoint
         result = await service.rewind_conversation(tid, 1, TEST_USER)
         print("\n回退到第 2 条用户消息之前 ->")
         print("  返回文本:", repr(result["text"]), " 删除条数:", result["removed"])
@@ -78,7 +74,6 @@ async def service_level() -> None:
         ]
         assert conversations.load_conversation_summaries().get(tid) == "天气三连问"
 
-        # 再回退到第一条之前，应当清空；标题还原成默认值、手动命名标记撤销
         result = await service.rewind_conversation(tid, 0, TEST_USER)
         print("\n再回退到第 1 条之前 ->")
         print("  返回文本:", repr(result["text"]), " 之后历史:", await brief(tid))
@@ -88,7 +83,6 @@ async def service_level() -> None:
         assert conversations.load_conversation_summaries().get(tid) == conversations.DEFAULT_SUMMARY
         assert conversations.is_renamed(tid) is False
 
-        # 越界应当报错
         for bad in (0, 5, -1):
             try:
                 await service.rewind_conversation(tid, bad, TEST_USER)
@@ -96,7 +90,6 @@ async def service_level() -> None:
             except ValueError as exc:
                 print(f"  turn={bad}: 正确抛出 ValueError -> {exc}")
 
-        # 不存在的会话应当抛 KeyError
         try:
             await service.rewind_conversation("t-不存在", 0, TEST_USER)
             print("  不存在的会话: 未报错（不符合预期）")
@@ -113,12 +106,6 @@ async def http_level() -> None:
 
     import api as api_module
 
-    # 直接注入身份，绕开登录流程。
-    #
-    # 为什么不用「注册一个测试账号拿令牌」：那会往生产 `users` 表里留一行垃圾，
-    # 而且注册要过邀请码。为什么不靠访客身份：会话是 TEST_USER 名下的，
-    # 访客去看一律 404——这正是隔离生效的表现，不能拿来测回退。
-    # `dependency_overrides` 是 FastAPI 官方给测试用的入口，只在这一段生效。
     api_module.app.dependency_overrides[api_module.current_identity] = (
         lambda: service.CLI_IDENTITY
     )

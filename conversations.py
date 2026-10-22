@@ -15,21 +15,6 @@ conversation_renames.json    {thread_id: true}
 conversation_owners.json     {thread_id: user_id}
 conversation_touched.json    {thread_id: ISO 时间}
 ```
-
-第四个（`conversation_touched`）是 2026-10-22 加的，给**访客会话清理**用：
-访客的会话不归任何人管，不清就会一直堆在 checkpoint 里。为什么不塞进
-`summaries`：那个文件是 `thread_id -> 标题` 的扁平结构，前端直接消费，
-加字段要动所有读它的地方。
-
-## 归属为什么要有兜底
-
-本次改造之前建的会话，在归属文件里**没有记录**。它们当时全部属于硬编码的
-`user_id = "1"`，所以查不到就按默认账号算——这是**把旧事实补上，不是猜**。
-兜底只写在 `_owner_from` 一处，凡是判断「这个会话是不是你的」都经过它，
-免得某个入口忘了兜底、把老会话判成别人的（那是让用户丢数据）。
-
-归属文件里**不删残留**：会话被删掉后若归属记录还在，`ids_of_user` 也不受影响，
-因为它以**会话表**为准去遍历（见那里的注释）。
 """
 from __future__ import annotations
 
@@ -155,8 +140,7 @@ def _owner_from(owners: dict[str, str], thread_id: str) -> str:
 
 
 def owner_of(thread_id: str) -> str:
-    """这个会话属于谁。**任何越权判断都必须经过它。**
-
+    """这个会话属于谁。任何越权判断都必须经过它。
     注意它对**不存在**的会话也会返回默认账号——它只回答「归属」，
     不回答「存不存在」。要连存在性一起判，用 `belongs_to`。
     """
@@ -164,13 +148,7 @@ def owner_of(thread_id: str) -> str:
 
 
 def ids_of_user(user_id: str) -> set[str]:
-    """这个用户名下的全部 thread_id。
-
-    以**会话表**为准去遍历（不是以归属表为准），好处是「会话已删、归属记录
-    还留在文件里」的残渣自动被滤掉，不用专门去清理那个文件。
-
-    归属判断走 `_owner_from`，所以老会话（没有记录的）会正确落到默认账号名下。
-    """
+    """这个用户名下的全部 thread_id。以**会话表**为准去遍历（不是以归属表为准）"""
     owners = load_conversation_owners()
     return {
         thread_id
@@ -207,14 +185,7 @@ def create_conversation(user_id: str) -> str:
 
 
 def rename_conversation(thread_id: str, title: str) -> str:
-    """手动重命名会话，返回清洗后实际保存的标题。
-
-    清洗规则：所有空白（含换行）折叠成单个空格，去首尾，截断到 MAX_TITLE_LENGTH。
-    清洗后为空抛 ValueError；会话不存在抛 KeyError。
-
-    同时写入「已手动命名」标记：不然用户改完名字，只要在前几轮内再发一条消息，
-    自动起标题就会把它覆盖掉。
-    """
+    """手动重命名会话，返回清洗后实际保存的标题。同时写入「已手动命名」标记"""
     cleaned = " ".join(str(title).split())[:MAX_TITLE_LENGTH]
     if not cleaned:
         raise ValueError("会话标题不能为空")
@@ -248,25 +219,12 @@ def reset_summary(thread_id: str) -> None:
 
 
 def drop_conversation(thread_id: str) -> bool:
-    """删掉一个会话的四份元数据，返回它此前是否存在。等价于 `drop_conversations([id])`。
-
-    四份都要删：留着归属记录不会让会话「复活」（`ids_of_user` 以会话表为准），
-    但会一直堆在文件里，而且万一 thread_id 被复用就会串号。时间戳同理——
-    留着它的唯一后果是清理时多一次无用的 IO。
-    """
+    """删掉一个会话的四份元数据，返回它此前是否存在。"""
     return drop_conversations([thread_id]) > 0
 
 
 def drop_conversations(thread_ids: list[str]) -> int:
-    """批量删元数据，**只重写一次文件**。返回实际删掉几个。
-
-    和 `drop_conversation` 的关系：单个删除复用这里（传一个元素的列表）。
-    需要批量版本的唯一原因是清理：访客会话一次可能清掉几十上百个，
-    逐个调 `drop_conversation` 会把四个 JSON 文件各重写上百遍（O(n²) IO）。
-
-    *不* 检查会话是否属于谁——归属判断在 `service`，这一层只负责「删」。
-    调用方必须是已经判定过可以删的（见 `service.purge_stale_guests`）。
-    """
+    """批量删元数据，**只重写一次文件**。返回实际删掉几个。"""
     wanted = {str(thread_id) for thread_id in thread_ids}
     if not wanted:
         return 0

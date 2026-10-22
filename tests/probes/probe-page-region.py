@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """打印某页某个 y 区间的所有 line，用来看上下标在 PDF 里长什么样。"""
 import sys
 

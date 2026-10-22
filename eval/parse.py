@@ -5,7 +5,6 @@
     只吃 PDF，十秒跑完、结果确定。混在一起会让「解析退化」和「模型波动」
     在同一条失败里分不清。
 
-## 口径先说清：这里没有 ground truth
 
 解析没有标准答案（同一本书，人抄一遍也不会和机器逐字一致）。所以这套指标分两类：
 
@@ -36,7 +35,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# 存储全部重定向到临时目录：评的是解析器，不是生产库。
 _TMP = Path(tempfile.mkdtemp(prefix="parse-eval-"))
 
 import documents  # noqa: E402
@@ -47,8 +45,6 @@ documents.ASSET_DIR = _TMP / "assets"
 
 BASELINE_DIR = ROOT / "eval" / "baselines"
 
-# --- 阈值 -------------------------------------------------------------------
-# 只有「过了/没过」有意义的才给阈值。近似类指标不给，免得把噪声当结论。
 TARGET_SHORT_RATIO = 0.10  # <80 字残段占比；_merge_short 之后应该很低
 TARGET_LONG_RATIO = 0.15  # >900 字超长段占比；超了说明断点没找到
 TARGET_DIRTY_RATIO = 0.15  # 脏段占比（A6 的机器版：抽 20 段 ≤3 段，即 15%）
@@ -56,16 +52,7 @@ TARGET_CAPTION_RECALL = 0.70  # A7 的机器版：抽 10 张对得上 ≥7
 TARGET_PAGE_COVER = 0.95  # 有正文的页应该都有页码锚点
 TARGET_TEXT_LAYER = 0.90  # 低于 90% 有文字层的页 = 这本书基本是扫描版
 
-# 长度和脏段**只对 `kind='text'` 算**。第一版把 figure / table 也算进去，
-# 跑出来「残段 32%、脏段 19%」，看着像解析出了问题——但脏段样例全是
-# 「图 2‑5 尾递归过程」这种 8 个字的图注。
-# 图注本来就只有一句话（它和截图合成一条 figure chunk，图注就是 content），
-# 用「段落该有多长」去要求它，是尺子错了，不是东西坏了。
 
-# 脏段规则（保守）。这里的每一条都对应一次真实踩坑，不是凭空想的：
-#   - `Col\d`：pdfplumber 式的自动列名，出现在表格清洗没兜住的单元格里
-#   - 以标点开头：被切断的句子尾巴
-#   - 太短又不收尾：残段（正常段落不会 20 字就断）
 DIRTY_RULES = [
     ("auto_col", re.compile(r"\bCol\d+\b")),
     ("punct_start", re.compile(r"^\s*[，。、；：,.;:）)】」』]")),
@@ -106,14 +93,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
 
     subset = pymupdf.open()
     subset.insert_pdf(src, from_page=start, to_page=end - 1)
-    # **书签必须跟着复制**。`insert_pdf` 只搬页面、不搬目录，第一版漏了这步，
-    # 结果 Hello-Agents（原书 449 条书签）被评成「目录 0 条」，等于逼它走
-    # 「靠编号猜章节」的降级路径——用降级路径的结果去评判解析器，是评测在骗人。
-    #
-    # 还有一层坑：`set_toc` 要求**第一条是 level 1**。切出来的子集第一条往往是
-    # 2.3.3 这种三级标题，直接塞进去会抛 `hierarchy level of item 0 must be 1`，
-    # 而它抛在一个 try 里，于是静默失效——第一次修完还是「目录 0 条」。
-    # 所以这里把层级重新归一化，并且**把成败记进报告**，失败不许悄悄发生。
     toc_copied = 0
     try:
         bookmarks = [
@@ -136,9 +115,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
     subset.save(sample)
     total_pages = subset.page_count
 
-    # ---- 直接对 PDF 数分母（不经过解析器），这是「近似类」指标的前提 ----
-    # 图和表的题注分开数：混在一起算，召回率会被「表没被当成图」直接拉低，
-    # 而表本来就该进 table chunk，不进 figure。第一版就混了，18/27 看着像丢图。
     text_layer_pages = 0
     figure_captions: set[str] = set()
     table_captions: set[str] = set()
@@ -149,9 +125,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
         if lines:
             text_layer_pages += 1
         for line in lines:
-            # 直接调解析器自己的题注判定（三道过滤 + 45 字上限），不自己写一份。
-            # 这不是偷懒：分母宽一点，召回率就低一点——用宽松的尺子量自己，
-            # 结论只会是「我很好」或「我莫名其妙很差」，两种都没用。
             caption = documents._match_caption(line)
             if caption is None:
                 continue
@@ -163,13 +136,10 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
                 table_pages += 1
         except Exception:  # noqa: BLE001 - 畸形页面不参与统计
             pass
-    # 复用解析器自己的预检，拿到「是不是幻灯片」——残段指标对幻灯片不适用：
-    # 一页 PPT 只有 20 个字也是完整主题，用「段落该有多长」量它是错的尺子。
     preflight = documents._pdf_preflight(subset, pymupdf)
     subset.close()
     src.close()
 
-    # ---- 走真实解析链路 ----
     started = time.perf_counter()
     record = documents.create_upload("eval-user", pdf_path.name, sample.read_bytes())
     doc_id = str(record["doc_id"])
@@ -187,7 +157,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
     text_lengths = sorted(length for length, kind in lengths_all if kind == "text")
     lengths = text_lengths
     n = len(lengths) or 1
-    # 脏段只看正文段：图注/表格短是设计如此，不是脏。
     dirty = [
         chunk for chunk in chunks
         if chunk["kind"] == "text" and dirty_reasons(str(chunk["content"]))
@@ -201,9 +170,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
     referenced = {name for _, name in figure_lines}
     missing = sorted(referenced - on_disk)
 
-    # 目录条数用**复制进子集的书签数**，不查库：`parse_document` 返回的是列表行
-    # （`_row_to_doc`），本来就不带 toc 列，第一版从那里取永远拿到 None，
-    # 报告里的「目录 0 条」是个假数字。
     toc_leaves = toc_copied
 
     return {
@@ -218,7 +184,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
             "assets": parsed.get("asset_count"),
             "toc_entries": toc_copied,
         },
-        # 结构类
         "text_layer_ratio": round(text_layer_pages / total_pages, 3),
         "page_anchor_cover": round(len(page_anchors) / total_pages, 3),
         "chunk_len": {
@@ -240,7 +205,6 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
         "chapters": len(chapter_anchors),
         "chapter_list": chapter_anchors[:12],
         "toc_leaves": toc_leaves,
-        # 近似类
         "figure_captions_in_pdf": len(figure_captions),
         "table_captions_in_pdf": len(table_captions),
         "figures_in_markdown": len(figure_lines),

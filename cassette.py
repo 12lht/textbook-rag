@@ -1,6 +1,5 @@
 """录制回放：把工具的返回值冻结下来，让评测前后可比。
 
-## 为什么需要它
 
 外部 API 的返回内容每次都在变：搜索结果正文长度实测波动 1.1~2.5 倍，天气和时间
 也在变。这些波动**远大于**被测的代码改动，导致评测分不清差异是改动带来的还是
@@ -9,7 +8,6 @@
 做法：按「工具名 + 参数」给每次外部调用存一份返回值。评测先跑一轮 record，
 之后都走 replay，两次运行拿到的工具输出逐字一致，差异只可能来自代码和模型。
 
-## 三种模式
 
 环境变量 `TOOL_CASSETTE_MODE`（**调用时读取**，不是 import 时）：
 
@@ -19,14 +17,12 @@
     replay  只读 cassette。命中就返回录下来的内容；未命中则**照常真实调用**
             并计入 miss，这样评测不会因为缺料而崩，同时 miss 数会如实报出来。
 
-## 为什么录制点放在工具函数这一层
 
 改造前后工具跑在不同的地方（改造后在 MCP 子进程里），但**工具函数体是同一段代码**。
 把录制点放在这里，两版代码共用同一套机制、同一个 cassette 文件，A/B 才算是同一个
 实验。如果录制点放在 agent_core 那一层，改造前要包一层、改造后要包另一层，两边
 机制不同，对比就又不干净了。
 
-## 文件位置
 
 `TOOL_CASSETTE_PATH` 指定，默认 `eval/cassettes/default.json`。
 只依赖标准库，因为 `tools.py` 会被 MCP server 子进程加载，那一层不许有框架依赖。
@@ -141,7 +137,6 @@ def recorded(tool_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any
     """
 
     def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
-        # 签名在装饰时算一次就够了，不必每次调用都算。
         signature = inspect.signature(func)
 
         @functools.wraps(func)

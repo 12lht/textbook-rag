@@ -27,7 +27,6 @@ async function run(page, path, label) {
   await page.waitForTimeout(600);
   const p2 = await page.evaluate(probe);
 
-  // 上滚后停在原地，观察输出过程中是否被强行拽回底部
   const hold = await page.evaluate(async () => {
     const samples = [];
     for (let i = 0; i < 8; i += 1) {
@@ -41,7 +40,6 @@ async function run(page, path, label) {
     return samples;
   });
 
-  // 模拟用户把滚动条拖到最底部，然后每 200ms 采样一次
   await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight }));
   const trail = await page.evaluate(async () => {
     const samples = [];

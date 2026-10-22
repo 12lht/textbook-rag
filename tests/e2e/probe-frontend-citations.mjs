@@ -1,7 +1,3 @@
-// 引用溯源前端探针（交互 v2：角标 → 弹出小窗）：把 index.html 里的脚本真跑起来。
-// 1) 历史消息：角标索引建好，点角标弹小窗显示出处+原文（C5）；
-// 2) 实时流：citations 事件后正文图占位符换成签名 URL，点角标弹小窗（C1/C3）；
-// 3) 小窗行为：重复点同一角标=关闭，点外部/Esc/聊天区滚动=关闭。
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
@@ -18,7 +14,6 @@ function check(label, condition, detail = '') {
   if (!condition) failures.push(label);
 }
 
-// 历史消息：内容里的图引用已经是签名 URL（服务端 _decorate_history 重写后的契约）。
 const HISTORY = [
   { role: 'user', content: '第3章的分集接收讲了什么？' },
   {
@@ -41,7 +36,6 @@ const HISTORY = [
   { role: 'assistant', content: '普通回答，没有引用。' },
 ];
 
-// 实时流：正文先出（图还是占位文件名），citations 事件最后才到。
 const SSE_EVENTS = [
   { type: 'conversation', thread_id: 't-cite' },
   { type: 'tool_call', tool: 'search_textbook', calls: [{ name: 'search_textbook', args: { query: 'MRC' } }] },
@@ -65,7 +59,6 @@ async function boot() {
   globalThis.document = document;
   window.document = document;
 
-  // marked / DOMPurify 是 CDN 的，用最小桩：原样放行（保留 sup/img 标签）。
   window.marked = { parse: (text) => String(text) };
   window.DOMPurify = { sanitize: (html) => html };
 
@@ -128,7 +121,6 @@ function clickBadge(window, badge) {
   badge.dispatchEvent(new ClickEvent('click', { bubbles: true }));
 }
 
-// --- 1. 历史渲染（C5：刷新后点角标还能看引用） ---
 {
   const ctx = await boot();
   if (ctx) {
@@ -141,7 +133,6 @@ function clickBadge(window, badge) {
     check('角标索引建在 contentNode 上', first._citations && first._citations.c1?.code === 'c1');
     check('没有引用的消息没有索引', !document.querySelectorAll('#messages .message.assistant')[1]._citations);
 
-    // 点角标 → 小窗
     const badge = first.querySelector('sup.cite[data-code="c1"]');
     clickBadge(window, badge);
     let pop = document.getElementById('citePopover');
@@ -156,18 +147,15 @@ function clickBadge(window, badge) {
     check('小窗定位了坐标', pop.style.top !== '' && pop.style.top !== 'NaNpx',
       `${pop.style.left},${pop.style.top}`);
 
-    // 再点同一个角标 = 关闭
     clickBadge(window, badge);
     check('重复点同一角标关闭小窗', !document.getElementById('citePopover'));
 
-    // 点外部 = 关闭
     clickBadge(window, badge);
     check('重新打开成功', Boolean(document.getElementById('citePopover')));
     const MousedownEvent = window.Event || globalThis.Event;
     document.body.dispatchEvent(new MousedownEvent('mousedown', { bubbles: true }));
     check('点外部关闭小窗', !document.getElementById('citePopover'));
 
-    // Esc = 关闭（linkedom 没有 KeyboardEvent，用 Event 手动补 key 属性）
     clickBadge(window, badge);
     check('再次打开', Boolean(document.getElementById('citePopover')));
     const esc = new (window.Event || globalThis.Event)('keydown', { bubbles: true });
@@ -177,7 +165,6 @@ function clickBadge(window, badge) {
   }
 }
 
-// --- 2. 实时流（C1/C3：citations 事件 → 图出正文，角标可点开小窗） ---
 {
   const ctx = await boot();
   if (ctx) {
@@ -186,7 +173,6 @@ function clickBadge(window, badge) {
 
     const assistant = document.querySelector('#messages .message.assistant .message-content');
     check('流式正文已渲染', Boolean(assistant) && assistant.textContent.includes('MRC'));
-    // 工具返回原文：折叠块出现、摘要有字数、正文是返回原文
     const toolBox = document.querySelector('#messages .trace-tool-result');
     check('工具返回折叠块出现', Boolean(toolBox), toolBox && toolBox.outerHTML.slice(0, 80));
     check('返回摘要带字数', toolBox && toolBox.querySelector('summary').textContent.includes('返回'),
@@ -207,7 +193,6 @@ function clickBadge(window, badge) {
       pop && pop.querySelector('.body').innerHTML.includes('t=8888888888.live'),
       pop && pop.querySelector('.body').innerHTML.slice(0, 90));
 
-    // 聊天区滚动 → 关闭
     const ScrollEvent = window.Event || globalThis.Event;
     document.querySelector('#chat').dispatchEvent(new ScrollEvent('scroll', { bubbles: false }));
     check('聊天区滚动关闭小窗', !document.getElementById('citePopover'));

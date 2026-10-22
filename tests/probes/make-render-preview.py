@@ -45,7 +45,6 @@ documents.parse_document(doc_id)
 markdown = documents.markdown_of(doc_id, "u1") or ""
 doc = documents.list_documents("u1")[0]
 
-# 图换成 data URI：快照要能单独存在，不能指向临时目录里的 PNG。
 def embed(match: "re.Match[str]") -> str:
     alt, name = match.group(1), match.group(2)
     path = documents.ASSET_DIR / doc_id / name
@@ -60,7 +59,6 @@ import re  # noqa: E402
 markdown_with_images = re.sub(r"!\[(.*?)\]\((as_[0-9a-f]+\.png)\)", embed, markdown)
 chunks = documents.chunks_of(doc_id)
 
-# 渲染用 marked 的 CDN 版：快照是给人看的，宁可依赖网络也别自己写半个渲染器。
 page = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>解析产物渲染快照 · Hello-Algo 第 {PAGES[0] + 1}-{PAGES[1]} 页</title>

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """比「跨 block 间隙 2.0 → 0.35」前后，Markdown 里到底有哪些行变了。"""
 import difflib
 import sys

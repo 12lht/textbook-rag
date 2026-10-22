@@ -54,7 +54,6 @@ check(type(main_model) is type(title_model), "两个模型是同一个类")
 check(describe(main_model) == describe(title_model),
       "型号字符串一致（没有偷偷换 provider）", describe(title_model))
 
-# 反向检查：如果 provider 是 glm，就不该是 deepseek；反之亦然
 expected = "glm" if PROVIDER == "glm" else "deepseek"
 check(expected in describe(title_model).lower() or expected in type(title_model).__name__.lower(),
       f"标题模型确实属于 {expected}", describe(title_model))
@@ -69,13 +68,6 @@ if PROVIDER != "glm":
 
 print()
 print("== 3. 真发一次请求：标题要短、要非空 ==")
-# 第 4 节是**真正的守卫**：deepseek 是推理模型，几十个 token 的思考过程会先把
-# `max_tokens` 吃掉、content 变成空串，表现出来就是「标题莫名其妙没了」。
-# 所以不光要看「拿得到标题」，还要看「没在思考」。
-#
-# 两节必须在**同一个事件循环**里跑：HTTP 连接池是绑定事件循环的，
-# 拆成两次 `asyncio.run` 会在收尾时冒 `RuntimeError: Event loop is closed`
-# （错在清理阶段，会盖住真正的失败）。
 
 
 async def main() -> None:

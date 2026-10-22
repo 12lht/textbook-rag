@@ -62,7 +62,6 @@ async def collect(thread_id: str, question: str) -> list[dict]:
 
 
 async def main() -> int:
-    # ---------- 用例 1：普通一问一答 ----------
     print("用例 1：实时思维链 + 与历史一致")
     events = await collect(PLAIN_THREAD, "用一句话说明什么是可重构智能表面（RIS）。")
     reasoning, content = split(events)
@@ -80,7 +79,6 @@ async def main() -> int:
         f"首次思维链 #{first_reasoning} / 首次正文 #{first_content}",
     )
 
-    # 思维链不该混进正文
     check(
         not reasoning or reasoning not in content,
         "正文里没有混进思维链",
@@ -98,7 +96,6 @@ async def main() -> int:
     print(f"  实时思维链前 60 字：{reasoning[:60]!r}")
     print(f"  正文前 60 字：{content[:60]!r}")
 
-    # ---------- 用例 2：触发摘要，确认摘要的思维链被挡住 ----------
     print("\n用例 2：摘要节点的思维链必须被过滤掉")
     graph = await agent_core._ensure_graph()
     config = agent_core._config(SEEDED_THREAD)
@@ -112,17 +109,12 @@ async def main() -> int:
     events = await collect(SEEDED_THREAD, "那再补一个简单的问题：一加一等于几？")
     reasoning, content = split(events)
 
-    # 正向对照：先证明摘要**真的被触发了**。少了这一步，过滤就算坏掉，只要摘要
-    # 恰好没跑，用例也会「通过」——那是空过，不是通过。
     state = (await graph.aget_state(config)).values
     summary = (state.get("summary") or "").strip()
     check(bool(summary), "摘要确实被触发（否则本用例是空过）", f"{len(summary)} 字")
 
     check(bool(reasoning), "摘要场景下仍然收到思维链", f"长度 {len(reasoning)}")
 
-    # 关键判据：`get_history` 只能读到**主模型**的消息——摘要那次调用的结果只留在
-    # `state["summary"]` 里，从来不作为 AIMessage 进 state。所以「实时长度 == 历史
-    # 长度」就是精确的泄漏检测：只要摘要的思维链漏出来一分，实时就会比历史长。
     restored = history_reasoning(await agent_core.get_history(SEEDED_THREAD))
     check(
         restored.strip() == reasoning.strip(),
@@ -131,10 +123,6 @@ async def main() -> int:
     )
     print(f"  实时思维链：{reasoning[:120]!r}")
 
-    # 诊断（不是断言）：正文那条分支**没有**按节点过滤，所以摘要的文字应该会漏进
-    # 实时正文里。这里把差值打出来，作为「正文侧存在泄漏」的实测证据。
-    # 只取**最后一条**助手消息：灌进去的 20 轮假历史也被 get_history 算进来了，
-    # 全加起来比的是假数据，不是这一轮的泄漏（第一次就写错了，记在这儿）。
     history = await agent_core.get_history(SEEDED_THREAD)
     last_assistant = [m for m in history if m["role"] == "assistant"][-1]
     stored_content = last_assistant["content"]
@@ -144,7 +132,6 @@ async def main() -> int:
     if leaked > 0:
         print(f"  [诊断] 摘要正文泄漏样例：{content[:leaked + 20]!r}")
 
-    # ---------- 清理 ----------
     for thread_id in (PLAIN_THREAD, SEEDED_THREAD):
         try:
             await agent_core.delete_checkpoint_thread(thread_id)

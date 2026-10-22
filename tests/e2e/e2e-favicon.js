@@ -1,6 +1,3 @@
-// 验证：加了 <link rel="icon"> 之后浏览器不再去要 /favicon.ico。
-// 关键是有对照组 —— headless Chromium 本来就可能不抓 favicon，
-// 所以必须同时测「没有这行的旧页面」，否则 0 次请求可能只是因为根本没这个行为。
 const { chromium } = require('playwright-core');
 
 const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
@@ -39,8 +36,6 @@ async function probe(browser, path) {
 }
 
 (async () => {
-  // 关键：默认的 headless 外壳不抓 favicon，会让这条验证空转。
-  // --headless=new 跑的是完整 Chromium，行为和真实浏览器一致（无可见窗口）。
   const browser = await chromium.launch({
     executablePath: CHROME,
     headless: false,

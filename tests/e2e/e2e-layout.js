@@ -33,7 +33,6 @@ async function run(page, path, label) {
   await page.waitForTimeout(700);
   const p1 = await page.evaluate(probe);
 
-  // 模拟用户往上滚去看前面的内容
   await page.evaluate(() => {
     const c = document.querySelector('#chat') || document.querySelector('.chat');
     c.scrollTop = 0;
@@ -55,7 +54,6 @@ async function run(page, path, label) {
     return out;
   });
 
-  // 再把消息区拖到底部
   await page.evaluate(() => {
     const c = document.querySelector('#chat') || document.querySelector('.chat');
     c.scrollTop = c.scrollHeight;

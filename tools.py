@@ -10,8 +10,7 @@
 **这里的工具只能是「纯函数」——返回值只由参数决定。**
 `get_user_location` 曾经也在这里，后来被搬回了 `agent_core.py`，原因见下面它原来的位置。
 
-注意：每个函数的 docstring 就是模型看到的工具描述，改一个字都会影响工具选择，
-做 A/B 对比时不要动这些文字。
+注意：每个函数的 docstring 就是模型看到的工具描述，改它就等于改提示词。
 
 每个工具还套了一层 `cassette.recorded`，用于评测录制回放。默认模式是 off，
 直接调用外部 API，行为和没套一样；只有评测时把 `TOOL_CASSETTE_MODE` 设成
@@ -94,22 +93,6 @@ def get_weather_for_location(
         return "高德天气数据格式异常。"
 
 
-# ---------------------------------------------------------------------------
-# 这里原本是 `get_user_location`，现已搬回 `agent_core.py`。
-#
-# 原因不是「IP 定位不准」那么表面，而是**这类工具在 MCP 这一层没有合适的通道**。
-# 要说准确：MCP 协议**有**逐次调用的旁路通道（`CallToolRequest.params._meta`，
-# SDK 里就是 `session.call_tool(name, args, meta={...})`）；挡住它的是
-# `langchain-mcp-adapters`——它调 `session.call_tool` 时不传 `meta`，
-# interceptor 能改的字段也只有 `name` / `args` / `headers`。
-#
-# 而「用户在哪」是**客户端已知的事实**，必须随每次请求进来。即使把通道打通，
-# 让模型去「调一个工具来问一个本可以被告知的信息」本身就是反模式。
-#
-# 所以它回到了进程内，用 `runtime: ToolRuntime[Context]` 读调用方传进来的位置。
-# 代价是架构上出现「4 个走 MCP + 1 个走进程内」的例外，换来的是位置从
-# 「服务端猜」变成「客户端授权提供」。完整说明见 `agent_core.get_user_location`。
-# ---------------------------------------------------------------------------
 
 
 @recorded("get_current_time")
@@ -171,10 +154,6 @@ def web_extract(url: str) -> str:
         return f"读取网页失败：{url}"
 
 
-# 注册顺序刻意与改造前 agent_core.tools 的顺序一致，
-# 保证发给模型的工具列表顺序不变（有些模型对工具顺序敏感）。
-# `get_user_location` 原本在天气之后，现已移到 agent_core；合并后的顺序
-# 由 agent_core._TOOL_ORDER 统一维护。
 ALL_TOOLS = [
     get_weather_for_location,
     get_current_time,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """看得见差距的对照：BM25 单用 vs BM25 + 向量（严格判据版）。
 
 上一版（285 段 + 「命中段里含有某个词」）看不出差别，两处判据都不严：
@@ -37,7 +36,6 @@ import retrieval
 
 CORPUS = Path(r"D:/agent/.workbuddy/tmp/ab-corpus")
 
-# (术语提问, 换个说法的提问)。标准答案由第一列定出来。
 CASES = [
     ("递归", "函数在自己里面又调用自己，什么时候会栈溢出"),
     ("迭代", "用循环代替一层层往下调用，写法上有什么不一样"),
@@ -116,7 +114,6 @@ def main() -> None:
     lengths = [len(str(doc.meta.get("content") or "")) for doc in index.docs]
     print(f"语料 {len(index.docs)} 段，中位 {statistics.median(lengths):.0f} 字\n")
 
-    # --- 定标准答案（用 BM25，避免让向量参与自己的评分标准）---
     matrix = index.matrix
     index.matrix = None
     ground: list[tuple[str, str, str, float]] = []  # (术语, 换说法, chunk_id, 重合率)

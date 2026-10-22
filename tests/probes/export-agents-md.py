@@ -47,7 +47,6 @@ if parsed["status"] != "ready":
 
 markdown = documents.markdown_of(doc_id, "export") or ""
 
-# 图引用指向子目录，这样 md 和图片可以一起搬走
 markdown = markdown.replace("](as_", "](images/as_")
 
 if OUT_DIR.exists():
