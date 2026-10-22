@@ -791,6 +791,29 @@
     // ------------------------------------------------------------------
     // 入库（上传 → 后台解析）
     // ------------------------------------------------------------------
+    // 手机蜂窝网络下大请求体容易被链路抖动掐断（表现为 fetch 长时间不返回也不报错）。
+    // 超时主动断掉重试：上传是完整 POST、没有部分成功状态，重试安全。
+    async function uploadWithRetry(body, attempts = 3) {
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120000);
+        try {
+          const response = await apiFetch('/api/documents', {
+            method: 'POST', body, signal: controller.signal,
+          });
+          clearTimeout(timer);
+          // 4xx（除 408/429）是确定性错误（文件超限、没登录），重试也不会好，直接返回给调用方报错
+          const retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+          if (response.ok || !retryable || attempt === attempts) return response;
+          say(`网络不稳（${response.status}），正在重试第 ${attempt}/${attempts - 1} 次…`, true);
+        } catch (error) {
+          clearTimeout(timer);
+          if (attempt === attempts) throw error;
+          say(`网络不稳（${error.message}），正在重试第 ${attempt}/${attempts - 1} 次…`, true);
+        }
+      }
+    }
+
     async function uploadFiles(files) {
       const list = Array.from(files || []);
       if (!list.length) return;
@@ -802,9 +825,9 @@
         const body = new FormData();
         body.append('file', item);
         try {
-          const response = await apiFetch('/api/documents', { method: 'POST', body });
+          const response = await uploadWithRetry(body);
           if (!response.ok) {
-            say(`${item.name}：${await readError(response, '上传失败')}`, true);
+            say(`${item.name}：${await readError(response, '上传失败')}（换 Wi-Fi/流量再试，或等电脑前再传）`, true);
           } else {
             const record = await response.json();
             // 正在看某个分类时上传的书直接归到那个分类，不然传完还得再单独指派一次。
