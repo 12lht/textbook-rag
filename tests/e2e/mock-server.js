@@ -13,15 +13,25 @@ for (let i = 1; i <= 200; i += 1) CHUNKS.push(`第 ${i} 段。${SENT}`);
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
 
-  if (url.pathname === '/') {
+  if (url.pathname === '/' || url.pathname === '/library') {
+    const file = url.pathname === '/library'
+      ? 'D:/agent/frontend/library.html'
+      : FRONTEND;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(fs.readFileSync(FRONTEND));
+    res.end(fs.readFileSync(file));
     return;
   }
 
   if (url.pathname === '/original') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(fs.readFileSync(ORIGINAL));
+    return;
+  }
+
+  if (url.pathname === '/api/auth/me') {
+    // e2e 假身份：knowledge 库页有登录门，不给 200 就整页被 gate 挡住
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ account: 'e2e-user', guest: false }));
     return;
   }
 

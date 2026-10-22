@@ -218,11 +218,28 @@
       .doc-cat, .doc-ops { grid-column: 2; }
       .who { display: none; }
     }
+    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #cfdacf; border-radius: 10px; background: #fff; font-size: 16px; cursor: pointer; }
+    @media (max-width: 760px) {
+      /* 分类栏改抽屉：250px 固定栏在手机上会把文档区挤到只剩一百来像素。
+         交互与聊天页的抽屉侧栏一致：汉堡唤出、遮罩点击/选中分类后收起。 */
+      .menu-btn { display: inline-flex; }
+      .topbar { padding: 12px 16px; gap: 10px; }
+      .layout { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 61px); }
+      .cats { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(280px, 84vw); transform: translateX(-105%); transition: transform .22s ease; box-shadow: 0 0 40px rgba(0,0,0,.15); overflow-y: auto; }
+      .cats.open { transform: none; }
+      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(20, 24, 18, .42); }
+      .sidebar-backdrop.show { display: block; }
+      .cat-ops { opacity: 1; }
+      .docs { padding: 16px; }
+      .doc-card { grid-template-columns: auto minmax(0, 1fr); }
+      .doc-cat, .doc-ops { grid-column: 2; justify-self: start; }
+    }
   </style>
 </head>
 <body>
   <div class="topbar">
     <a class="back" href="/">← 回到对话</a>
+    <button class="menu-btn" id="menuBtn" type="button" aria-label="打开分类">☰</button>
     <div class="brand">
       <div class="brand-mark">A</div>
       <div>
@@ -233,6 +250,7 @@
     <div class="who" id="who"></div>
   </div>
 
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <div class="layout" id="layout">
     <aside class="cats">
       <div class="cats-title">分类</div>
@@ -292,6 +310,21 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script>
+    // --- 移动端抽屉分类栏：与聊天页同一套交互 ---
+    {
+      const cats = document.querySelector('.cats');
+      const backdrop = document.getElementById('sidebarBackdrop');
+      const close = () => { cats.classList.remove('open'); backdrop.classList.remove('show'); };
+      document.getElementById('menuBtn').onclick = () => {
+        cats.classList.add('open'); backdrop.classList.add('show');
+      };
+      backdrop.onclick = close;
+      // 手机上点分类是筛选文档区，选完就该把抽屉收起来露出结果
+      document.getElementById('catList').addEventListener('click', (event) => {
+        if (event.target.closest('.cat') && window.matchMedia('(max-width: 760px)').matches) close();
+      });
+    }
+
     const $ = (selector) => document.querySelector(selector);
     // 令牌和主界面共用同一个 localStorage 键：在对话页登录过，这里直接是登录态，
     // 不用再登一次。反向也成立——这里退出会连带对话页退出，所以这一页不提供退出。
