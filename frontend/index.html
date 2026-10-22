@@ -108,6 +108,8 @@
     .context-menu-item.danger:hover { background: #fff4f1; }
     .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fffdf9; }
     .topbar { flex: none; padding: 22px 34px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 16px; cursor: pointer; }
+    .menu-btn:active { background: var(--line); }
     .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
     .scope-badge { flex: none; border: 1px solid var(--accent-dark); color: var(--accent-dark); background: rgba(255,255,255,.7); border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
     .scope-badge:hover { background: var(--accent-dark); color: #fff; }
@@ -247,12 +249,18 @@
     .modal-submit:disabled { opacity: .6; cursor: wait; }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
     @media (max-width: 760px) {
+      /* 侧栏改抽屉：手机上上下分栏会把聊天区压到半屏以下（旧做法 max-height:44vh）。
+         抽屉平时藏在屏幕外（translateX），点顶栏汉堡按钮滑入；选中会话自动收起。 */
       .shell { display: flex; flex-direction: column; }
-      .sidebar { flex: none; max-height: 44vh; padding: 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(300px, 84vw); max-height: none; padding: 24px 18px; border-right: 1px solid var(--line); background: #f7f4ed; transform: translateX(-105%); transition: transform .22s ease; overflow-y: auto; }
+      .sidebar.open { transform: none; }
+      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(20, 24, 18, .42); }
+      .sidebar-backdrop.show { display: block; }
+      .menu-btn { display: inline-flex; }
       .brand { margin-bottom: 15px; }
       .section-label { margin-top: 16px; }
-      .conversation-list { display: flex; overflow-x: auto; overflow-y: hidden; }
-      .conversation { min-width: 180px; }
+      .conversation-list { display: block; overflow-y: auto; }
+      .conversation { min-width: 0; }
       .main { flex: 1 1 auto; min-height: 0; }
       .topbar { padding: 16px 18px; }
       .chat { padding: 30px 18px 24px; }
@@ -264,6 +272,7 @@
   </style>
 </head>
 <body>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
@@ -295,6 +304,7 @@
     </aside>
     <main class="main">
       <header class="topbar">
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="打开会话列表">☰</button>
         <div class="conversation-heading" id="conversationTitle">未选择会话</div>
         <button class="scope-badge" id="scopeBadge" type="button" hidden title="退出聚焦，恢复全书检索"></button>
       </header>
@@ -403,6 +413,16 @@
     const conversationMenu = $('#conversationMenu');
     const locateButton = $('#locate');
     const scopeBadge = $('#scopeBadge');
+
+    // --- 移动端抽屉侧栏 ---
+    const sidebar = document.querySelector('.sidebar');
+    const backdrop = $('#sidebarBackdrop');
+    const openSidebar = () => { sidebar.classList.add('open'); backdrop.classList.add('show'); };
+    const closeSidebar = () => { sidebar.classList.remove('open'); backdrop.classList.remove('show'); };
+    $('#menuBtn').onclick = openSidebar;
+    backdrop.onclick = closeSidebar;
+    // 选中会话后收起抽屉：手机上屏幕只有一列，列表挡着内容；桌面端 sidebar 不动，收起是空操作。
+    const closeSidebarIfMobile = () => { if (window.matchMedia('(max-width: 760px)').matches) closeSidebar(); };
 
     function renderScopeBadge() {
       // 聚焦徽标：显示当前在哪本书里，点一下退出（清 URL 参数，恢复全书检索）。
@@ -1371,6 +1391,7 @@
     window.addEventListener('blur', () => closeConversationMenu());
 
     async function selectConversation(threadId) {
+      closeSidebarIfMobile();
       setStatus('正在加载历史…', true);
       state.autoFollow = true;
       const response = await apiFetch(`/api/conversations/${encodeURIComponent(threadId)}/messages`);
@@ -1424,6 +1445,7 @@
     }
 
     async function newConversation() {
+      closeSidebarIfMobile();
       try {
         const response = await apiFetch('/api/conversations', { method: 'POST' });
         if (!response.ok) throw new Error(await readError(response, '新建会话失败'));
