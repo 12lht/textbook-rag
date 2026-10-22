@@ -742,6 +742,10 @@ def search(
     for sim, pos in index.vector_ranked(query, limit=_RERANK_POOL):
         if sim < _VEC_MIN_COS:
             continue
+        # allowed 非空（doc_title 限定）时这里不过滤，范围外的 chunk 会混进 rerank 池，
+        # _build_hits 取 combined[pos] 直接 KeyError——检索对外就变成「服务暂时不可用」
+        if allowed is not None and pos not in allowed:
+            continue
         if pos not in seen:
             seen.add(pos)
             cand_pos.append(pos)
