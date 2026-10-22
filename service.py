@@ -79,6 +79,29 @@ agent_core.set_retrieval_backend(
 )
 
 
+def _textbook_catalog_text(user_id: str) -> str:
+    """给系统提示的书单：只列解析成功的书，一行一本，带分类名。
+
+    failed 的书检索不到，列进去只会诱导模型选一本查不到的书。没书返回空串，
+    系统提示里就不出现书单段——没有书单时模型按老路走全局检索。
+    """
+    ready = [d for d in documents.list_documents(user_id) if d.get("status") == "ready"]
+    if not ready:
+        return ""
+    categories = {
+        str(item["category_id"]): str(item["name"])
+        for item in documents.list_categories(user_id)
+    }
+    lines = []
+    for doc in ready:
+        category = categories.get(str(doc.get("category_id") or ""))
+        lines.append(f"- {doc['title']}（{category}）" if category else f"- {doc['title']}")
+    return "\n".join(lines)
+
+
+agent_core.set_textbook_catalog(_textbook_catalog_text)
+
+
 
 GUEST_USER_ID = users.GUEST_USER_ID
 

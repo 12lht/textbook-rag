@@ -26,6 +26,7 @@ from agent_core import (
     MAX_KEPT_MESSAGES,
     _estimate_tokens,
     _messages_for_model,
+    _system_prompt,
     truncate_node,
 )
 
@@ -252,10 +253,14 @@ async def main() -> int:
     ok &= check("消息条数不变", len(payload) == len(state["messages"]))
 
     print()
-    print("== 10. 没有摘要时不动系统消息 ==")
+    print("== 10. 没有摘要时系统消息内容不变（每轮重建，但逐字一致） ==")
     bare = build_state(turns=2)
     payload = _messages_for_model(bare)
-    ok &= check("第一条还是原来那条", payload[0] is bare["messages"][0])
+    ok &= check(
+        "第一条内容与 _system_prompt() 一致",
+        payload[0].content == _system_prompt(),
+        "重建是为了书单/摘要口径统一，内容必须与首轮插入的完全相同，否则缓存失效",
+    )
 
     print()
     print("== 11. 切点必须落在人类消息上（不能留下孤立的 ToolMessage） ==")

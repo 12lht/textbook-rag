@@ -103,6 +103,7 @@ async def run_turn(
     tool_ms = 0.0
     pending_tools: list[tuple[str, float]] = []
     tool_results: list[dict[str, Any]] = []
+    doc_titles: list[str] = []
     answer_chars = 0
     error: str | None = None
 
@@ -126,6 +127,10 @@ async def run_turn(
             elif kind == "tool_call":
                 for call in event.get("calls") or []:
                     pending_tools.append((str(call.get("name")), now))
+                    # 记下检索入参：书单上线后要验证模型是否真的在选书（doc_title 非空）
+                    args = call.get("args") or {}
+                    if "doc_title" in args:
+                        doc_titles.append(str(args.get("doc_title") or ""))
             elif kind == "tool_result":
                 if pending_tools:
                     name, call_at = pending_tools.pop(0)
@@ -161,6 +166,7 @@ async def run_turn(
         "model_calls": usage["model_calls"],
         "tool_calls": len(tool_results),
         "tool_results": tool_results,
+        "doc_titles": doc_titles,
         "tool_ms": round(tool_ms, 1),
         "title_ms": round(title_ms, 1) if title_ms is not None else None,
         "ttft_ms": round(first_visible_ms, 1) if first_visible_ms is not None else None,

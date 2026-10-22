@@ -218,6 +218,25 @@ def set_retrieval_backend(search) -> None:
     _retrieval_search = search
 
 
+_textbook_catalog = None  # Callable[[str], str]：user_id -> 已格式化的书单文本，空库给空串
+
+
+def set_textbook_catalog(provider) -> None:
+    """由应用层注入书单提供者。agent_core 不 import documents，书单怎么查是应用层的事。"""
+    global _textbook_catalog
+    _textbook_catalog = provider
+
+
+def _catalog_text(user_id: str) -> str:
+    if _textbook_catalog is None or not user_id:
+        return ""
+    try:
+        return str(_textbook_catalog(user_id) or "")
+    except Exception:
+        # 书单只是提示的一部分，拿不到就让模型走无书单的老路，不能因为它挂掉整轮。
+        return ""
+
+
 _SEARCH_LIMIT = 6
 
 _TOOL_RESULT_PREVIEW_CHARS = 4000
@@ -388,24 +407,36 @@ MEMORY_OFF_GUIDE = (
 
 TEXTBOOK_GUIDE = (
     "\n\n关于教材：学生上传了教材，能用 search_textbook 查。与教材有关的问题（概念、公式、图、"
-    "某章讲什么）**先查再答**，不要凭记忆。回答只依据检索到的段落，句末标 [c1] 这样的编号、"
-    "只标真用到的。确实答不了就直说教材没讲、**不要**用自己的知识补，也可以问用户要不要联网查。"
-    "与课程无关的日常问题（天气、时间、闲聊、常识）直接回答，**不要**查教材。"
+    "某章讲什么）**先查再答**，不要凭记忆。**查之前先从书单里挑最相关的一本**，把书名填进 "
+    "doc_title——单本检索比全局准得多；只有问题确实跨书（比如对比两门课）才不填、搜全部。"
+    "回答只依据检索到的段落，句末标 [c1] 这样的编号、只标真用到的。"
+    "确实答不了就直说教材没讲、**不要**用自己的知识补，也可以问用户要不要联网查。"
+    "与课程无关的日常问题（天气、时间、闲聊）直接回答，**不要**查教材。"
 )
 
 
-def _system_prompt(*, memory_enabled: bool = True) -> str:
+def _system_prompt(
+    *, memory_enabled: bool = True, textbook_catalog: str = ""
+) -> str:
     """本次请求真正发给模型的系统提示。
 
     没注入记忆后端时**逐字等于 `SYSTEM_PROMPT`**——不启用记忆就一个字都不改提示词。
     `memory_enabled=False`（游客）不是简单退回，而是加
     `MEMORY_OFF_GUIDE` 明说这次记不住：工具列表里还挂着记忆工具，光不提会得到一句假承诺。
+
+    `textbook_catalog` 是书单文本。放系统提示而不是工具描述：工具描述是 MCP schema 的
+    一部分、建会话时冻结，放不下动态书单；系统提示每轮重建，书单变了下一轮就能看到。
     """
     prompt = SYSTEM_PROMPT
     if _memory_write is not None:
         prompt += MEMORY_GUIDE if memory_enabled else MEMORY_OFF_GUIDE
     if _retrieval_search is not None:
         prompt += TEXTBOOK_GUIDE
+        if textbook_catalog:
+            prompt += (
+                "\n\n现有教材（search_textbook 的 doc_title 从这里选，填书名或其中一部分）：\n"
+                f"{textbook_catalog}"
+            )
     return prompt
 
 
@@ -927,21 +958,26 @@ def _tool_rounds_this_turn(messages: Sequence[BaseMessage]) -> int:
 
 
 def _messages_for_model(
-    state: AgentState, *, memory_enabled: bool = True, answer_now: bool = False
+    state: AgentState,
+    *,
+    memory_enabled: bool = True,
+    answer_now: bool = False,
+    user_id: str = "",
 ) -> list[BaseMessage]:
-    """发送前把摘要并进系统消息。
+    """发送前把摘要并进系统消息。**每轮都重建系统消息**。
 
     只改发出去的内容、不写回 `state`：历史展示、回退、标题生成都不受影响（靠不去改这些
     消息对象，不是靠拷贝）。`memory_enabled` 要一路透传给 `_system_prompt`，忘了就会出现
     「第一轮游客没有记忆引导，第二轮摘要生效后又冒出来」。
 
-    `answer_now=True` 是「工具轮数用尽」的收尾指令，必须重建系统消息（包括没有摘要时），
-    所以不能走「没有摘要就原样返回」的快路径。
+    为什么每轮重建而不是沿用历史里的第一条：系统提示有两个来源（首轮 stream_agent 插入、
+    本函数重建），一旦内容有任何漂移，模型在第二轮看到的规则就和第一轮不一样。重建的内容
+    逐字节一致时缓存照常命中，代价只是一次字符串拼接。
+
+    `answer_now=True` 是「工具轮数用尽」的收尾指令。
     """
     messages = _flatten_for_model(state["messages"])
     summary = (state.get("summary") or "").strip()
-    if not summary and not answer_now:
-        return messages
 
     extra = ""
     if summary:
@@ -960,7 +996,10 @@ def _messages_for_model(
         )
 
     system = SystemMessage(
-        content=f"{_system_prompt(memory_enabled=memory_enabled)}{extra}"
+        content=(
+            f"{_system_prompt(memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id))}"
+            f"{extra}"
+        )
     )
     if messages and isinstance(messages[0], SystemMessage):
         messages[0] = system
@@ -993,6 +1032,7 @@ async def model_node(state: AgentState, runtime: ToolRuntime[Context]):
             state,
             memory_enabled=_memory_enabled_of(runtime),
             answer_now=exhausted,
+            user_id=_user_id_of(runtime),
         )
     )
 
@@ -1367,7 +1407,14 @@ async def stream_agent(
     has_history = bool((await graph.aget_state(config)).values.get("messages", []))
     messages = [HumanMessage(content=user_input)]
     if not has_history:
-        messages.insert(0, SystemMessage(content=_system_prompt(memory_enabled=memory_enabled)))
+        messages.insert(
+            0,
+            SystemMessage(
+                content=_system_prompt(
+                    memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id)
+                )
+            ),
+        )
 
     await _mcp.tools()
 
