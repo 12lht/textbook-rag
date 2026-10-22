@@ -180,7 +180,9 @@
     .modal-tab.active { border-color: var(--ink); color: #fff; background: var(--ink); }
     .modal-close { width: 28px; height: 28px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 17px; line-height: 1; }
     .modal-close:hover { color: var(--ink); background: #f2efe8; }
-    .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 40px; }
+    .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 40px; word-break: break-word; }
+    /* 教材解析出大量 worst_best_time_complexity.py 这类下划线长标识符，浏览器默认不在
+       _ 处折行，手机上会把内容撑到 500px+ 而弹窗只有 350px——右边就「看不见」了。 */
     .modal-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.75 ui-monospace, Menlo, monospace; }
     .modal-body img { max-width: 100%; height: auto; display: block; margin: 1em auto; border-radius: 6px; }
     .modal-body h1, .modal-body h2, .modal-body h3 { line-height: 1.4; margin: 1.5em 0 .6em; }
@@ -231,6 +233,7 @@
       .sidebar-backdrop.show { display: block; }
       .cat-ops { opacity: 1; }
       .docs { padding: 16px; }
+      .modal { padding: 10px; }
       .doc-card { grid-template-columns: auto minmax(0, 1fr); }
       .doc-cat, .doc-ops { grid-column: 2; justify-self: start; }
     }
