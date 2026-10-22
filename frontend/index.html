@@ -107,8 +107,10 @@
     .context-menu-item.danger { color: var(--accent-dark); }
     .context-menu-item.danger:hover { background: #fff4f1; }
     .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fffdf9; }
-    .topbar { flex: none; padding: 22px 34px; border-bottom: 1px solid var(--line); }
-    .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+    .topbar { flex: none; padding: 22px 34px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+    .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+    .scope-badge { flex: none; border: 1px solid var(--accent-dark); color: var(--accent-dark); background: rgba(255,255,255,.7); border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+    .scope-badge:hover { background: var(--accent-dark); color: #fff; }
     .chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: min(900px, 100%); margin: 0 auto; padding: 46px 34px 28px; }
     .welcome { max-width: 650px; margin: 9vh auto 70px; }
     .eyebrow { color: var(--accent-dark); font: 500 12px "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
@@ -294,6 +296,7 @@
     <main class="main">
       <header class="topbar">
         <div class="conversation-heading" id="conversationTitle">未选择会话</div>
+        <button class="scope-badge" id="scopeBadge" type="button" hidden title="退出聚焦，恢复全书检索"></button>
       </header>
       <section class="chat" id="chat">
         <div class="welcome" id="welcome">
@@ -377,7 +380,16 @@
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script>
-    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '' };
+    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '', scope: null, scopeName: '' };
+    // 「进入某本书的对话」：从知识库分类点进来时 URL 带 scope（分类 id）与 scope_name。
+    // 放 state 而不是每次读 URL：退出聚焦要改 URL，读一次存住更直接。
+    {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('scope')) {
+        state.scope = params.get('scope');
+        state.scopeName = params.get('scope_name') || '聚焦教材';
+      }
+    }
     const $ = (selector) => document.querySelector(selector);
     const list = $('#conversationList');
     const messages = $('#messages');
@@ -390,6 +402,21 @@
     const scrollBottomButton = $('#scrollBottom');
     const conversationMenu = $('#conversationMenu');
     const locateButton = $('#locate');
+    const scopeBadge = $('#scopeBadge');
+
+    function renderScopeBadge() {
+      // 聚焦徽标：显示当前在哪本书里，点一下退出（清 URL 参数，恢复全书检索）。
+      if (!state.scope) { scopeBadge.hidden = true; return; }
+      scopeBadge.hidden = false;
+      scopeBadge.textContent = `聚焦：《${state.scopeName}》 ✕`;
+    }
+    scopeBadge.onclick = () => {
+      state.scope = null;
+      state.scopeName = '';
+      window.history.replaceState({}, '', window.location.pathname);
+      renderScopeBadge();
+    };
+    renderScopeBadge();
     const accountName = $('#accountName');
     const accountNote = $('#accountNote');
     const accountAction = $('#accountAction');
@@ -1444,6 +1471,7 @@
             location: state.location,
             reasoning: toggles.reasoning,
             web_search: toggles.web_search,
+            scope_category_id: state.scope || null,
           })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));

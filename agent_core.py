@@ -72,6 +72,11 @@ class Context:
 
     scoped_title: str | None = None
 
+    scope: str | None = None
+    """用户「进入某本书」时由前端逐请求传入的书名（分类名）。与 scoped_title 必须分开：
+    scoped_title 是单请求内模型自己选中的检索范围（每次请求重置），scope 是跨轮稳定的
+    用户意图——混用会让非聚焦会话在第二轮被误判成聚焦模式。"""
+
 
 @tool
 def get_user_location(runtime: ToolRuntime[Context]) -> str:
@@ -227,11 +232,11 @@ def set_textbook_catalog(provider) -> None:
     _textbook_catalog = provider
 
 
-def _catalog_text(user_id: str) -> str:
+def _catalog_text(user_id: str, scope: str | None = None) -> str:
     if _textbook_catalog is None or not user_id:
         return ""
     try:
-        return str(_textbook_catalog(user_id) or "")
+        return str(_textbook_catalog(user_id, scope) or "")
     except Exception:
         # 书单只是提示的一部分，拿不到就让模型走无书单的老路，不能因为它挂掉整轮。
         return ""
@@ -417,7 +422,10 @@ TEXTBOOK_GUIDE = (
 
 
 def _system_prompt(
-    *, memory_enabled: bool = True, textbook_catalog: str = ""
+    *,
+    memory_enabled: bool = True,
+    textbook_catalog: str = "",
+    focus: str | None = None,
 ) -> str:
     """本次请求真正发给模型的系统提示。
 
@@ -427,17 +435,29 @@ def _system_prompt(
 
     `textbook_catalog` 是书单文本。放系统提示而不是工具描述：工具描述是 MCP schema 的
     一部分、建会话时冻结，放不下动态书单；系统提示每轮重建，书单变了下一轮就能看到。
+
+    `focus` 非空 = 用户「进入了某本书」的对话：检索已被 scoped_title 限定，提示只说明
+    聚焦对象；书单由 provider 过滤成只含这一本。
     """
     prompt = SYSTEM_PROMPT
     if _memory_write is not None:
         prompt += MEMORY_GUIDE if memory_enabled else MEMORY_OFF_GUIDE
     if _retrieval_search is not None:
-        prompt += TEXTBOOK_GUIDE
-        if textbook_catalog:
+        if focus:
             prompt += (
-                "\n\n现有教材（search_textbook 的 doc_title 从这里选，填书名或其中一部分）：\n"
-                f"{textbook_catalog}"
+                f"\n\n当前会话聚焦在《{focus}》：用户只想学这一本，检索已自动限定在它的"
+                "文件范围内，search_textbook 的 doc_title **不需要填**（填了也以这个范围为准）。"
+                "问题与这本书无关时正常回答，不要硬扯到书里。"
             )
+            if textbook_catalog:
+                prompt += f"\n\n《{focus}》包含的文件：\n{textbook_catalog}"
+        else:
+            prompt += TEXTBOOK_GUIDE
+            if textbook_catalog:
+                prompt += (
+                    "\n\n现有教材（search_textbook 的 doc_title 从这里选，填书名或其中一部分）：\n"
+                    f"{textbook_catalog}"
+                )
     return prompt
 
 
@@ -964,6 +984,7 @@ def _messages_for_model(
     memory_enabled: bool = True,
     answer_now: bool = False,
     user_id: str = "",
+    scope: str | None = None,
 ) -> list[BaseMessage]:
     """发送前把摘要并进系统消息。**每轮都重建系统消息**。
 
@@ -975,7 +996,8 @@ def _messages_for_model(
     本函数重建），一旦内容有任何漂移，模型在第二轮看到的规则就和第一轮不一样。重建的内容
     逐字节一致时缓存照常命中，代价只是一次字符串拼接。
 
-    `answer_now=True` 是「工具轮数用尽」的收尾指令。
+    `answer_now=True` 是「工具轮数用尽」的收尾指令。`scope` 是聚焦的书名，与
+    stream_agent 首轮插入用的必须是同一个值。
     """
     messages = _flatten_for_model(state["messages"])
     summary = (state.get("summary") or "").strip()
@@ -998,7 +1020,7 @@ def _messages_for_model(
 
     system = SystemMessage(
         content=(
-            f"{_system_prompt(memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id))}"
+            f"{_system_prompt(memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id, scope), focus=scope)}"
             f"{extra}"
         )
     )
@@ -1034,6 +1056,7 @@ async def model_node(state: AgentState, runtime: ToolRuntime[Context]):
             memory_enabled=_memory_enabled_of(runtime),
             answer_now=exhausted,
             user_id=_user_id_of(runtime),
+            scope=getattr(runtime.context, "scope", None),
         )
     )
 
@@ -1392,11 +1415,16 @@ async def stream_agent(
     memory_enabled: bool = True,
     reasoning: bool = True,
     web_search: bool = True,
+    scope: str | None = None,
 ):
     """跑一遍图，产出 Agent 自己的事件流（异步生成器）。
 
     `reasoning=False` 关掉深度思考（不再吐思维链），`web_search=False` 把联网工具从本轮工具表
     里摘掉。两个默认 True，**不传时行为与以前完全一致**——CLI 和评测脚本不用改。
+
+    `scope` 是「进入某本书的对话」：非空时检索限定在该书（分类）内，系统提示换成聚焦版。
+    走 `Context.scoped_title` 复用现有机制——单请求内首次检索本就会把选定书写回这个字段，
+    预填等价于「用户已经替模型选好了书」，检索端、去重逻辑一行都不用改。
 
     只做「跑图 + 转发事件」：不碰会话元数据，也不发 title 事件（那是 service.chat_events
     的职责）。`location` 是**已经解析好的**可读位置文本，传 None 就是没有位置（定位工具会
@@ -1412,7 +1440,9 @@ async def stream_agent(
             0,
             SystemMessage(
                 content=_system_prompt(
-                    memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id)
+                    memory_enabled=memory_enabled,
+                    textbook_catalog=_catalog_text(user_id, scope),
+                    focus=scope,
                 )
             ),
         )
@@ -1427,6 +1457,8 @@ async def stream_agent(
         memory_enabled=memory_enabled,
         reasoning=reasoning,
         web_search=web_search,
+        scoped_title=scope or None,
+        scope=scope or None,
     )
     async for mode, chunk in graph.astream(
         {"messages": messages},

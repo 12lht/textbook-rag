@@ -247,6 +247,9 @@ class ChatRequest(BaseModel):
     location: ClientLocation | None = None
     reasoning: bool = True
     web_search: bool = True
+    scope_category_id: str | None = Field(
+        default=None, max_length=64, description="进入某本书（分类）的对话时传分类 id"
+    )
 
 
 class RewindRequest(BaseModel):
@@ -537,6 +540,7 @@ async def sse_events(
             memory_enabled=identity.memory_enabled,
             reasoning=request.reasoning,
             web_search=request.web_search,
+            scope_category_id=request.scope_category_id,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     except Exception as exc:

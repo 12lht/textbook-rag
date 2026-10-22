@@ -72,12 +72,24 @@ agent_core.set_memory_backend(
     forget=memories.forget,
 )
 
-def _textbook_catalog_text(user_id: str) -> str:
+def _scope_name(user_id: str, scope_category_id: str | None) -> str | None:
+    """把前端的分类 id 解析成书名。分类不存在/没传返回 None（不聚焦）。"""
+    if not scope_category_id:
+        return None
+    for item in documents.list_categories(user_id):
+        if str(item["category_id"]) == str(scope_category_id):
+            return str(item["name"])
+    return None
+
+
+def _textbook_catalog_text(user_id: str, scope: str | None = None) -> str:
     """给系统提示的书单：按分类聚合，一行一本书（分类），带该分类下的文件名。
 
     十几个 PDF 常常是同一本书的章节（如「生物信息基础」的 12 份课件），按文件罗列
     会把书单拉得很长还很碎；分类正好是用户在知识库里 organized 出来的「书」。
     failed 的书检索不到，列进去只会诱导模型选一本查不到的书。没书返回空串。
+
+    `scope`（聚焦的书名）非空时只生成这一本的行——进入某本书的对话不需要看到别的书。
     """
     ready = [d for d in documents.list_documents(user_id) if d.get("status") == "ready"]
     if not ready:
@@ -95,6 +107,16 @@ def _textbook_catalog_text(user_id: str) -> str:
             by_category.setdefault(category, []).append(name)
         else:
             ungrouped.append(name)
+    if scope:
+        key = retrieval.title_key(scope)
+        by_category = {
+            category: names
+            for category, names in by_category.items()
+            if key and key in retrieval.title_key(category)
+        }
+        ungrouped = []
+        if not by_category:
+            return ""
     lines = [
         f"- {category}（{len(names)} 个文件）：{'、'.join(names)}"
         for category, names in by_category.items()
@@ -610,14 +632,20 @@ async def chat_events(
     memory_enabled: bool = True,
     reasoning: bool = True,
     web_search: bool = True,
+    scope_category_id: str | None = None,
 ) -> AsyncIterator[dict[str, object]]:
     """给网页和 CLI 共用的事件流：标题与 Agent 并行生成，再转发 Agent 自己的事件。
 
     `client_location` 是原始位置（手选城市或授权坐标），在这里统一解析成可读文本。
     `memory_enabled` 由调用方显式给出，过这里只为带上 `Context`。归属检查不在这里——越权在
     开流之前就判掉（见 `begin_chat`）。
+
+    `scope_category_id` 是「进入某本书的对话」：前端从知识库的分类点进来，带分类 id。
+    在这里解析成书名（分类可能被删，解析不到就当没聚焦，不报错——进书只是个放大镜，
+    不该因为它让聊天挂掉）。
     """
     location = await resolve_client_location(client_location)
+    scope = _scope_name(user_id, scope_category_id)
     previous_messages = await agent_core.user_messages(thread_id)
     turn_number = len(previous_messages) + 1
     title_task: asyncio.Task | None = None
@@ -634,6 +662,7 @@ async def chat_events(
             memory_enabled=memory_enabled,
             reasoning=reasoning,
             web_search=web_search,
+            scope=scope,
         ):
             if event.get("type") == "done":
                 break  # done 是「流结束」的唯一标志，必须最后发（先收标题再发它）

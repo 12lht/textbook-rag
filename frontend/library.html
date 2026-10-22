@@ -451,6 +451,15 @@
         if (!row.fixed) {
           const ops = document.createElement('span');
           ops.className = 'cat-ops';
+          const chat = document.createElement('button');
+          chat.type = 'button';
+          chat.className = 'cat-op';
+          chat.textContent = '对话';
+          chat.title = '进入这本书的对话，检索限定在此分类内';
+          chat.onclick = (event) => {
+            event.stopPropagation();
+            window.location.href = `/index.html?scope=${encodeURIComponent(row.id)}&scope_name=${encodeURIComponent(row.name)}`;
+          };
           const rename = document.createElement('button');
           rename.type = 'button';
           rename.className = 'cat-op';
@@ -461,7 +470,7 @@
           remove.className = 'cat-op danger';
           remove.textContent = '删除';
           remove.onclick = (event) => { event.stopPropagation(); removeCategory(row); };
-          ops.append(rename, remove);
+          ops.append(chat, rename, remove);
           node.appendChild(ops);
         }
         catList.appendChild(node);
