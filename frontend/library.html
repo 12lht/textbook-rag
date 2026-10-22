@@ -494,7 +494,8 @@
           chat.title = '进入这本书的对话，检索限定在此分类内';
           chat.onclick = (event) => {
             event.stopPropagation();
-            window.location.href = `/index.html?scope=${encodeURIComponent(row.id)}&scope_name=${encodeURIComponent(row.name)}`;
+            // 聊天页只挂在 / 上，/index.html 在服务器上是 404；query 参数与路径无关，照样能带
+            window.location.href = `/?scope=${encodeURIComponent(row.id)}&scope_name=${encodeURIComponent(row.name)}`;
           };
           const rename = document.createElement('button');
           rename.type = 'button';

@@ -30,7 +30,7 @@ check('退出聚焦清 URL', script.includes('history.replaceState'));
 
 // --- library.html：分类行有「对话」入口 ---
 const LIB = readFileSync('D:/agent/frontend/library.html', 'utf8');
-check('library 有进入对话入口', LIB.includes("window.location.href = `/index.html?scope="));
+check('library 有进入对话入口', LIB.includes("window.location.href = `/?scope="));
 
 console.log();
 console.log('结果:', ok ? '通过' : '有失败项');
