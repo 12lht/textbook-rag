@@ -72,18 +72,12 @@ agent_core.set_memory_backend(
     forget=memories.forget,
 )
 
-agent_core.set_retrieval_backend(
-    lambda user_id, query, doc_titles, limit: retrieval.search(
-        user_id, query, limit=limit, doc_titles=doc_titles
-    )
-)
-
-
 def _textbook_catalog_text(user_id: str) -> str:
-    """给系统提示的书单：只列解析成功的书，一行一本，带分类名。
+    """给系统提示的书单：按分类聚合，一行一本书（分类），带该分类下的文件名。
 
-    failed 的书检索不到，列进去只会诱导模型选一本查不到的书。没书返回空串，
-    系统提示里就不出现书单段——没有书单时模型按老路走全局检索。
+    十几个 PDF 常常是同一本书的章节（如「生物信息基础」的 12 份课件），按文件罗列
+    会把书单拉得很长还很碎；分类正好是用户在知识库里 organized 出来的「书」。
+    failed 的书检索不到，列进去只会诱导模型选一本查不到的书。没书返回空串。
     """
     ready = [d for d in documents.list_documents(user_id) if d.get("status") == "ready"]
     if not ready:
@@ -92,13 +86,67 @@ def _textbook_catalog_text(user_id: str) -> str:
         str(item["category_id"]): str(item["name"])
         for item in documents.list_categories(user_id)
     }
-    lines = []
+    by_category: dict[str, list[str]] = {}
+    ungrouped: list[str] = []
     for doc in ready:
+        name = str(doc["title"])
         category = categories.get(str(doc.get("category_id") or ""))
-        lines.append(f"- {doc['title']}（{category}）" if category else f"- {doc['title']}")
+        if category:
+            by_category.setdefault(category, []).append(name)
+        else:
+            ungrouped.append(name)
+    lines = [
+        f"- {category}（{len(names)} 个文件）：{'、'.join(names)}"
+        for category, names in by_category.items()
+    ]
+    if ungrouped:
+        lines.append("- 未分类：" + "、".join(ungrouped))
     return "\n".join(lines)
 
 
+def _expand_doc_titles(user_id: str, doc_titles: list[str] | None) -> list[str] | None:
+    """doc_title 可能填的是书（分类）名：能对上分类就展开成该分类下的全部文件标题。
+
+    文件名的子串匹配是 retrieval 的事，这里只补「分类=书」这一层——没有这一层，
+    「生物信息基础」匹配不到「1_生物信息学基础」（中间隔个「学」字，子串不连续）。
+    模型填的是文件名时这里不动，行为与从前一致。展开用并集：填「移动通信」时
+    同名文件和同分类文件都该在范围里。
+    """
+    if not doc_titles:
+        return doc_titles
+    docs = documents.list_documents(user_id)
+    if not docs:
+        return doc_titles
+    categories = {
+        str(item["category_id"]): str(item["name"])
+        for item in documents.list_categories(user_id)
+    }
+    expanded = [str(title) for title in doc_titles]
+    for title in doc_titles:
+        key = retrieval.title_key(str(title))
+        if not key:
+            continue
+        for doc in docs:
+            if doc.get("status") != "ready":
+                continue
+            category = categories.get(str(doc.get("category_id") or ""))
+            if category and key in retrieval.title_key(category):
+                name = str(doc["title"])
+                if name not in expanded:
+                    expanded.append(name)
+    return expanded
+
+
+def _search_textbooks(user_id: str, query: str, doc_titles: object, limit: int) -> dict:
+    return retrieval.search(
+        user_id,
+        query,
+        limit=limit,
+        doc_titles=_expand_doc_titles(user_id, doc_titles),
+    )
+
+
+agent_core.set_retrieval_backend(_search_textbooks)
 agent_core.set_textbook_catalog(_textbook_catalog_text)
 
 
