@@ -29,9 +29,10 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === '/api/auth/me') {
-    // e2e 假身份：knowledge 库页有登录门，不给 200 就整页被 gate 挡住
+    // e2e 假身份：聊天页需要游客身份才能点出登录弹窗。
+    // 注意 library 页的登录门要求非游客——它有专门的 e2e 场景时再扩展这里（如按 referer 区分）。
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ account: 'e2e-user', guest: false }));
+    res.end(JSON.stringify({ guest: true }));
     return;
   }
 
