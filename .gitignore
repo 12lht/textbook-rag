@@ -30,6 +30,11 @@ out/
 # bench 基准输出：每次跑都生成新报告，历史结果留在本机即可。
 tests/bench/runs/
 
+# 归档的一次性调研脚本：结论已经写进 learning-notes.md，脚本只在需要复现某次
+# 实验时才有用。留在本机备查，不入库——否则「这次阈值怎么定的」会一直躺在
+# git 里冒充活代码。要恢复某个脚本：从 archive/ 挪回 probes/ 再 git add。
+tests/archive/
+
 # 编辑器与系统文件
 .vscode/
 .idea/
