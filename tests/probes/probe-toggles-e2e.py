@@ -12,12 +12,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, r"D:/agent")
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 from dotenv import load_dotenv
 
-load_dotenv(r"D:/agent/.env")
+load_dotenv(str(REPO_ROOT / ".env"))
 
-TMP = Path(r"D:/agent/.workbuddy/tmp/toggle-e2e")
+TMP = REPO_ROOT / ".workbuddy/tmp/toggle-e2e"
 TMP.mkdir(parents=True, exist_ok=True)
 
 import agent_core

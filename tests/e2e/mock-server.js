@@ -1,9 +1,10 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const FRONTEND = 'D:/agent/frontend/index.html';
-const ORIGINAL = 'D:/agent/.workbuddy/tmp/index.original.html';
+const FRONTEND = path.join(__dirname, '../../frontend/index.html');
+const ORIGINAL = path.join(os.tmpdir(), 'index.original.html');
 const PORT = 8766;
 
 const SENT = '这是一段用于验证流式输出时滚动跟随行为的文本，它会不断追加到当前消息中，使页面持续变长。';
@@ -15,7 +16,7 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/' || url.pathname === '/library') {
     const file = url.pathname === '/library'
-      ? 'D:/agent/frontend/library.html'
+      ? path.join(__dirname, '../../frontend/library.html')
       : FRONTEND;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(fs.readFileSync(file));

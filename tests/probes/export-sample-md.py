@@ -3,15 +3,17 @@ from __future__ import annotations
 import shutil, sys, tempfile, time
 from pathlib import Path
 
-ROOT = Path(r"D:\agent")
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 import pymupdf  # noqa: E402
 import documents  # noqa: E402
 
 CASES = [
-    (r"C:\Users\13526\Desktop\Hello-Algo.pdf", "Hello-Algo", 30, 59),
-    (r"C:\Users\13526\Desktop\Hello-Agents.pdf", "Hello-Agents", 40, 69),
-    (r"C:\Users\13526\Desktop\第1章 移动通信概述202603101500.pdf", "移动通信", 0, 31),
+    (str(REPO_ROOT / "textbook/Hello-Algo.pdf"), "Hello-Algo", 30, 59),
+    (str(REPO_ROOT / "textbook/Hello-Agents.pdf"), "Hello-Agents", 40, 69),
+    (str(REPO_ROOT / "textbook/2026移动通信/第1章 移动通信概述202603101500.pdf"), "移动通信", 0, 31),
 ]
 
 TMP = Path(tempfile.mkdtemp(prefix="export-sample-"))

@@ -1,7 +1,8 @@
 const http = require('http');
 const fs = require('fs');
+const path = require('path');
 
-const FRONTEND = 'D:/agent/frontend/index.html';
+const FRONTEND = path.join(__dirname, '../../frontend/index.html');
 const PORT = 8767;
 
 let threadId = 't-rewind';

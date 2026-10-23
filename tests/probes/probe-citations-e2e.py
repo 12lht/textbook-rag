@@ -7,7 +7,11 @@ probe- 便于辨认（和历史上其它探针同做法）。
 import asyncio
 import sys
 
-sys.path.insert(0, "D:/agent")
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 
 import service  # noqa: E402
 

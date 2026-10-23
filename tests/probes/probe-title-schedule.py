@@ -12,7 +12,10 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("no_proxy", "*")
-sys.path.insert(0, r"D:\agent")
+
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 
 import service  # noqa: E402
 
@@ -29,7 +32,7 @@ def check(condition: bool, label: str, extra: str = "") -> None:
         failures += 1
 
 
-DATA_DIR = Path(r"D:\agent\data")
+DATA_DIR = REPO_ROOT / "data"
 def snapshot() -> dict[str, int]:
     return {p.name: p.stat().st_mtime_ns for p in DATA_DIR.glob("*") if p.is_file()}
 

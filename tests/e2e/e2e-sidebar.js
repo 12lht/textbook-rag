@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8766';
 
 async function run(browser, width, height, count, label) {
@@ -51,7 +53,7 @@ async function run(browser, width, height, count, label) {
     };
   });
 
-  await page.screenshot({ path: `D:/agent/.workbuddy/tmp/side-${count}-${width}.png` });
+  await page.screenshot({ path: path.join(os.tmpdir(), `side-${count}-${width}.png`) });
   await page.close();
 
   console.log(`\n----- ${label}（${width}x${height}，${count} 个会话）-----`);

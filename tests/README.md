@@ -17,18 +17,24 @@
 
 ## 怎么跑
 
-```bash
-# Python（解释器固定用 agent 环境，别用系统 python）
-cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/probes/test_rewind.py
+所有命令都在**仓库根目录**执行。脚本里的 `REPO_ROOT` 由 `__file__` 反推
+（`tests/probes/x.py` → `parents[2]`，`eval/x.py` → `parents[1]`），
+所以不管仓库放在哪个盘、叫什么名字都能跑，不用改任何路径。
 
-# Node（playwright-core 装在 workbuddy 的 node workspace 里，不在项目内）
-cd /d/agent && NODE_PATH=C:/Users/13526/.workbuddy/binaries/node/workspace/node_modules \
-  node tests/e2e/e2e-cite-popover.js
+```bash
+# Python
+python tests/probes/test_rewind.py
+
+# Node（playwright-core 需要能解析到，可以用 NODE_PATH 指过去）
+NODE_PATH=<你的 node_modules 目录> node tests/e2e/e2e-cite-popover.js
 ```
 
-e2e 脚本里的 Chromium 路径固定为
-`C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe`；
-换机器要改脚本头部的 `CHROME` 常量。
+e2e 脚本的浏览器路径由 `_browser.js` 自己找：先读环境变量 `CHROME_PATH`，没有就在
+playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不用改脚本。
+
+**要读教材 PDF 的探针**（解析、切分、检索那一批）在脚本头部的 `CASES` / `PDF` 常量里
+写的是本机路径，跑之前改成你自己的书；`tests/fixtures/` 里只有一份 `twocol.pdf`，
+够跑双栏排版那几个。
 
 跑 e2e 前先起后端（`uvicorn api:app`），脚本里的 `BASE` 指向对应端口。
 
@@ -261,3 +267,5 @@ e2e 脚本里的 Chromium 路径固定为
    会被清空。
 3. 输出只打印到 stdout。截图、日志、导出的 PDF/Markdown 用完就删——它们是
    验证过程的副产物，不是资产。
+4. **路径不写死**：仓库内的路径一律用 `REPO_ROOT / "..."`，截图这类临时产物写
+   `os.tmpdir()`。写死盘符的脚本换台机器就废，而它不会报错，只会静默跑错目录。

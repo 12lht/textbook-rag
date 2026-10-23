@@ -2,8 +2,8 @@
 
 用法（解释器固定用 agent 环境）：
 
-    cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/bench/bench.py --suite smoke
-    cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/bench/bench.py --suite full --repeat 3
+    python tests/bench/bench.py --suite smoke
+    python tests/bench/bench.py --suite full --repeat 3
 
 产出两份文件（tests/bench/runs/<时间戳>.json / .md）并把 Markdown 摘要打到 stdout。
 

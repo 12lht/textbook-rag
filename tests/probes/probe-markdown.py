@@ -16,6 +16,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pymupdf
@@ -37,7 +39,7 @@ def main() -> None:
     documents.UPLOAD_DIR = tmp / "uploads"
     documents.ASSET_DIR = tmp / "assets"
 
-    src = pymupdf.open("C:/Users/13526/Desktop/Hello-Algo.pdf")
+    src = pymupdf.open(str(REPO_ROOT / "textbook/Hello-Algo.pdf"))
     out = pymupdf.open()
     out.insert_pdf(src, from_page=30, to_page=59)
     sample = tmp / "sample.pdf"

@@ -4,7 +4,7 @@
 2. 检索真的发生且没有跨到别的书
 3. 非聚焦轮（不带 scope）不受上一轮影响
 
-跑法：cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/probes/probe-focus-chat.py
+跑法：python tests/probes/probe-focus-chat.py
 烧 2 次模型调用，临时会话跑完即删。
 """
 from __future__ import annotations

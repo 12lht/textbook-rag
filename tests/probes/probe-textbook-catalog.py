@@ -1,6 +1,6 @@
 """探针：书单有没有进系统提示、格式对不对、没书时是否一个字不加。
 
-跑法：cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/probes/probe-textbook-catalog.py
+跑法：python tests/probes/probe-textbook-catalog.py
 """
 from __future__ import annotations
 

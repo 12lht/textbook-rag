@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8000';
 
 const HISTORY = [
@@ -48,7 +50,7 @@ const HISTORY = [
 
   if (!hasBadge) {
     console.log('FAIL: 页面上没有角标（历史渲染或索引问题）');
-    await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/_popover_no_badge.png', fullPage: true });
+    await page.screenshot({ path: path.join(os.tmpdir(), '_popover_no_badge.png'), fullPage: true });
     await browser.close();
     process.exit(1);
   }
@@ -71,9 +73,9 @@ const HISTORY = [
     const meta = await page.locator('#citePopover .source-meta').textContent();
     console.log('出处行:', meta);
     console.log('视口内可见:', inViewport);
-    await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/_popover_visible.png' });
+    await page.screenshot({ path: path.join(os.tmpdir(), '_popover_visible.png') });
   } else {
-    await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/_popover_missing.png' });
+    await page.screenshot({ path: path.join(os.tmpdir(), '_popover_missing.png') });
   }
   console.log('JS 错误:', errors.length ? errors.join(' | ') : '无');
   await browser.close();

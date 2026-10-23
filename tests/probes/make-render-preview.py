@@ -22,7 +22,7 @@ import pymupdf  # noqa: E402
 
 import documents  # noqa: E402
 
-PDF = Path("C:/Users/13526/Desktop/Hello-Algo.pdf")
+PDF = ROOT / "textbook/Hello-Algo.pdf"
 OUT = ROOT / ".workbuddy/tmp/render-preview.html"
 PAGES = (30, 60)  # 第 31-60 页：正文、图、表格都有（58/59 页是表 2-1）
 

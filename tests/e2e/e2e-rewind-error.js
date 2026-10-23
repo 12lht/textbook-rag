@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8767';
 
 const hintText = () => document.querySelector('.hint').textContent;
@@ -40,7 +42,7 @@ async function reset(page) {
   const errFlag = await page.evaluate(hintIsError);
   const stillThere = await page.evaluate(() => document.querySelectorAll('.message.user').length);
   console.log('[A] 404 时 hint:', JSON.stringify(errText), ' 标红:', errFlag, ' 消息仍在:', stillThere);
-  await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/rewind-404.png' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'rewind-404.png') });
   const passA = errText.includes('404') && errText.includes('重启') && errFlag && stillThere === 2;
 
   await page.unroute('**/rewind');

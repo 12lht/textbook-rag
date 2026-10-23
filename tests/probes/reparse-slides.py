@@ -9,7 +9,11 @@ import sqlite3
 import sys
 import time
 
-sys.path.insert(0, "D:/agent")
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 
 import service  # noqa: E402
 
@@ -17,7 +21,7 @@ USER = "u-671d242584"
 
 
 def slide_doc_ids() -> list[str]:
-    conn = sqlite3.connect("D:/agent/data/documents.sqlite3")
+    conn = sqlite3.connect(str(REPO_ROOT / "data/documents.sqlite3"))
     rows = conn.execute(
         "SELECT DISTINCT d.doc_id FROM documents d JOIN assets a ON a.doc_id = d.doc_id "
         "WHERE a.label LIKE '%整页图示%' AND d.status = 'ready'"
@@ -28,7 +32,7 @@ def slide_doc_ids() -> list[str]:
 async def main():
     doc_ids = slide_doc_ids()
     print(f"待重解析 {len(doc_ids)} 本", flush=True)
-    conn = sqlite3.connect("D:/agent/data/documents.sqlite3")
+    conn = sqlite3.connect(str(REPO_ROOT / "data/documents.sqlite3"))
     conn.executemany(
         "UPDATE documents SET status='pending', error=NULL WHERE doc_id=?",
         [(d,) for d in doc_ids],

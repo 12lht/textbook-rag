@@ -3,14 +3,16 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 
 const require = createRequire(
-  'C:/Users/13526/.workbuddy/binaries/node/workspace/package.json',
+  import.meta.url,
 );
 const { parseHTML } = require('linkedom');
 
-const HTML = readFileSync('D:/agent/frontend/index.html', 'utf8');
+const HTML = readFileSync(new URL('../../frontend/index.html', import.meta.url), 'utf8');
 const script = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 
 const { window, document } = parseHTML(HTML);
+// linkedom 不实现 matchMedia；前端靠它区分手机/桌面，缺了会直接抛
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 globalThis.document = document;
 
 window.fetch = () => new Promise(() => {});

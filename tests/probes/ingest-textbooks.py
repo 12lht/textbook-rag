@@ -9,15 +9,17 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, r"D:/agent")
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 from dotenv import load_dotenv
 
-load_dotenv(r"D:/agent/.env")
+load_dotenv(str(REPO_ROOT / ".env"))
 
 import documents
 import retrieval
 
-ROOT = Path(r"D:/agent/textbook")
+ROOT = REPO_ROOT / "textbook"
 USER = "1"
 
 files = sorted(ROOT.glob("*.pdf"))

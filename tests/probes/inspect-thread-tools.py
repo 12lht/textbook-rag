@@ -12,7 +12,12 @@ import os
 import sys
 
 os.environ.setdefault("no_proxy", "*")
-sys.path.insert(0, r"D:\agent")
+
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 
 from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
 

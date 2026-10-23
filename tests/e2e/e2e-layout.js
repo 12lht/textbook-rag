@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8766';
 
 const probe = () => {
@@ -75,7 +77,7 @@ async function run(page, path, label) {
   });
 
   const p2 = await page.evaluate(probe);
-  await page.screenshot({ path: `D:/agent/.workbuddy/tmp/shot-${path === '/' ? 'fixed' : 'original'}.png` });
+  await page.screenshot({ path: path.join(os.tmpdir(), `shot-${path === '/' ? 'fixed' : 'original'}.png`) });
   return { label, p1, p2, hold, trail };
 }
 

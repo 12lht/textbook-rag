@@ -1,6 +1,6 @@
 const { chromium } = require('playwright-core');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8766';
 
 async function run(browser, width, height, count) {

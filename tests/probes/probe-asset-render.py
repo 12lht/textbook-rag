@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-PDF = Path("C:/Users/13526/Desktop/Hello-Algo.pdf")
+PDF = ROOT / "textbook/Hello-Algo.pdf"
 
 PASS = 0
 FAIL = 0

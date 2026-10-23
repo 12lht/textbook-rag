@@ -1,7 +1,7 @@
 // 移动端抽屉侧栏 e2e：手机视口下侧栏默认藏起、汉堡按钮唤出、选中会话自动收起；桌面视口不受影响。
 const { chromium } = require('playwright-core');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8766';
 
 let ok = true;

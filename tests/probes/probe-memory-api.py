@@ -13,7 +13,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(r"D:/agent")
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 
 import documents  # noqa: E402

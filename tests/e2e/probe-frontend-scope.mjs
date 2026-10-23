@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 
 const require = createRequire(
-  'C:/Users/13526/.workbuddy/binaries/node/workspace/package.json',
+  import.meta.url,
 );
 const { parseHTML } = require('linkedom');
 
@@ -14,7 +14,7 @@ const check = (name, cond, detail = '') => {
 };
 
 // --- index.html：徽标元素存在 + 脚本语法合法 + state 解析 URL ---
-const HTML = readFileSync('D:/agent/frontend/index.html', 'utf8');
+const HTML = readFileSync(new URL('../../frontend/index.html', import.meta.url), 'utf8');
 check('scopeBadge 元素存在', HTML.includes('id="scopeBadge"'));
 
 const script = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
@@ -29,7 +29,7 @@ check('读取 URL 的 scope 参数', script.includes("params.get('scope')"));
 check('退出聚焦清 URL', script.includes('history.replaceState'));
 
 // --- library.html：分类行有「对话」入口 ---
-const LIB = readFileSync('D:/agent/frontend/library.html', 'utf8');
+const LIB = readFileSync(new URL('../../frontend/library.html', import.meta.url), 'utf8');
 check('library 有进入对话入口', LIB.includes("window.location.href = `/?scope="));
 
 console.log();

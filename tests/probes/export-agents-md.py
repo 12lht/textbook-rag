@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 import documents  # noqa: E402
 
-PDF = Path("C:/Users/13526/Desktop/Hello-Agents.pdf")
+PDF = ROOT / "textbook/Hello-Agents.pdf"
 OUT_DIR = ROOT / "out" / "Hello-Agents"
 
 TMP = Path(tempfile.mkdtemp(prefix="export-md-"))

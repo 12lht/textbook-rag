@@ -6,7 +6,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "D:/agent")
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
+sys.path.insert(0, str(REPO_ROOT))
 
 import agent_core  # noqa: E402
 
@@ -68,7 +70,7 @@ check("空题注兜底", agent_core._figure_markdown({"kind": "figure", "asset_i
 
 
 async def history_case():
-    db_path = Path("D:/agent/.workbuddy/tmp/probe-cite-checkpoint.sqlite3")
+    db_path = REPO_ROOT / ".workbuddy/tmp/probe-cite-checkpoint.sqlite3"
     for suffix in ("", "-wal", "-shm"):
         Path(str(db_path) + suffix).unlink(missing_ok=True)
     agent_core.CHECKPOINT_PATH = db_path

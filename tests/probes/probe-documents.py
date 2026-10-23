@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pymupdf
@@ -43,7 +45,7 @@ def main() -> None:
     documents.ASSET_DIR = tmp / "assets"
 
     sample = tmp / "sample.pdf"
-    source = Path("C:/Users/13526/Desktop/Hello-Algo.pdf")
+    source = REPO_ROOT / "textbook/Hello-Algo.pdf"
     make_subset(source, sample, 30, 60)  # 第 31-60 页，有正文有图
 
     data = sample.read_bytes()

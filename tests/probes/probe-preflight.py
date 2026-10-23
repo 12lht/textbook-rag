@@ -38,7 +38,7 @@ documents.DB_PATH = TMP / "documents.sqlite3"
 documents.UPLOAD_DIR = TMP / "uploads"
 documents.ASSET_DIR = TMP / "assets"
 
-ALGO = Path("C:/Users/13526/Desktop/Hello-Algo.pdf")
+ALGO = ROOT / "textbook/Hello-Algo.pdf"
 SCANNED = ROOT / ".workbuddy/tmp/scanned-3p.pdf"
 TWOCOL = ROOT / ".workbuddy/tmp/twocol.pdf"
 
@@ -109,7 +109,7 @@ check("表里已经有了 warning 列", "warning" in columns)
 documents.DB_PATH = TMP / "documents.sqlite3"
 
 print("\n== 5. 上限：97.9MB 的 Hello-Agents 现在能收 ==")
-agents = Path("C:/Users/13526/Desktop/Hello-Agents.pdf")
+agents = ROOT / "textbook/Hello-Agents.pdf"
 size_mb = agents.stat().st_size / 1024 / 1024
 print(f"  文件大小 {size_mb:.1f}MB，上限 {documents.MAX_FILE_BYTES // 1024 // 1024}MB")
 try:

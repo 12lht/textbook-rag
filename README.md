@@ -72,16 +72,16 @@ requirements.txt           固定版本依赖
 
 ## 环境准备
 
-所有命令都要在项目目录下执行。如果之前在用别的地方，先切过来：
+所有命令都在**项目根目录**（这个 README 所在的目录）执行，先切过去：
 
 ```powershell
-cd D:\agent
+cd <你 clone 下来的目录>
 ```
 
-使用 Python 3.11 或更高版本，并安装依赖：
+使用 Python 3.11 或更高版本，并安装依赖（下面的 `python` 指你装好依赖的那个解释器）：
 
 ```powershell
-C:\Users\13526\miniconda3\envs\agent\python.exe -m pip install -r .\requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 在项目根目录创建 `.env`，配置 API Key：
@@ -119,14 +119,13 @@ MODEL_PROVIDER=glm
 ## 启动网页应用
 
 ```powershell
-cd D:\agent
-C:\Users\13526\miniconda3\envs\agent\python.exe -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-不想 `cd` 也可以把项目目录直接告诉 uvicorn：
+不想 `cd` 也可以把项目目录直接告诉 uvicorn（`.` 就是当前目录）：
 
 ```powershell
-C:\Users\13526\miniconda3\envs\agent\python.exe -m uvicorn api:app --app-dir D:\agent --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn api:app --app-dir . --host 127.0.0.1 --port 8000 --reload
 ```
 
 浏览器打开：
@@ -156,8 +155,7 @@ http://127.0.0.1:8000/docs
 ## 启动 CLI
 
 ```powershell
-cd D:\agent
-C:\Users\13526\miniconda3\envs\agent\python.exe .\cli.py
+python cli.py
 ```
 
 CLI 命令：

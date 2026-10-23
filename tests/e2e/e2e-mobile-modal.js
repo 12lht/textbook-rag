@@ -1,5 +1,5 @@
 const { chromium } = require('playwright-core');
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 let ok = true;
 const check = (name, cond, detail = '') => {
   console.log((cond ? '  OK  ' : '  FAIL') + ` ${name}` + (detail ? `  ${detail}` : ''));

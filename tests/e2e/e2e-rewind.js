@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8767';
 
 async function send(page, text) {
@@ -38,7 +40,7 @@ const snapshot = () => ({
   console.log('回退按钮数量:', s.rewindButtons, '（应等于用户消息数）');
   console.log('侧边栏:', s.sidebarCount);
 
-  await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/rewind-before.png' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'rewind-before.png') });
 
   console.log('\n--- 点击第 2 条消息下的「回退到发送这条之前」 ---');
   await page.locator('.message.user').nth(1).locator('.rewind').click();
@@ -50,7 +52,7 @@ const snapshot = () => ({
   console.log('回退按钮数量:', s.rewindButtons);
   console.log('侧边栏:', s.sidebarCount);
   console.log('提示行:', JSON.stringify(s.hint), ' 标红:', s.hintIsError, '（期望回到默认输入提示）');
-  await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/rewind-after.png' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'rewind-after.png') });
 
   const hintRestored = s.hint === 'Enter 发送 · Shift + Enter 换行' && !s.hintIsError;
   const pass1 = s.userMessages.length === 1 && s.inputValue === '第二条消息' && s.rewindButtons === 1 && hintRestored;

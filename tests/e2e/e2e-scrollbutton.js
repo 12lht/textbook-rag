@@ -1,6 +1,8 @@
 const { chromium } = require('playwright-core');
+const path = require('path');
+const os = require('os');
 
-const CHROME = 'C:/Users/13526/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
+const CHROME = require('./_browser');
 const BASE = 'http://127.0.0.1:8766';
 
 const probe = () => {
@@ -36,7 +38,7 @@ const probe = () => {
   const scrolledUp = await page.evaluate(probe);
   console.log('2) 用户上滚到顶部     → 按钮可见:', scrolledUp.visible, ' 距底:', scrolledUp.gap + 'px', ' autoFollow:', scrolledUp.autoFollow);
   console.log('   按钮位置合理:', scrolledUp.buttonInViewport && scrolledUp.buttonAboveComposer, '（在视口内且在输入框上方）');
-  await page.screenshot({ path: 'D:/agent/.workbuddy/tmp/scrollbtn-shown.png' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'scrollbtn-shown.png') });
 
   await page.click('#scrollBottom');
   await page.waitForTimeout(400);

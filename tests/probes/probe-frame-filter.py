@@ -39,8 +39,8 @@ documents.DB_PATH = _TMP / "documents.sqlite3"
 documents.UPLOAD_DIR = _TMP / "uploads"
 documents.ASSET_DIR = _TMP / "assets"
 
-AGENTS = Path("C:/Users/13526/Desktop/Hello-Agents.pdf")
-ALGO = Path("C:/Users/13526/Desktop/Hello-Algo.pdf")
+AGENTS = ROOT / "textbook/Hello-Agents.pdf"
+ALGO = ROOT / "textbook/Hello-Algo.pdf"
 
 
 def count_figures(pdf_path: Path, first: int, last: int) -> tuple[int, int]:

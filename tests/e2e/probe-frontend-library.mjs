@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 
-const require = createRequire('C:/Users/13526/.workbuddy/binaries/node/workspace/package.json');
+const require = createRequire(import.meta.url);
 const { parseHTML } = require('linkedom');
 
-const HTML = readFileSync('D:/agent/frontend/library.html', 'utf8');
+const HTML = readFileSync(new URL('../../frontend/library.html', import.meta.url), 'utf8');
 const script = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
 
 const failures = [];
@@ -127,6 +127,8 @@ function makeServer({ loggedIn }) {
 
 async function boot({ loggedIn, withRenderer = true }) {
   const { window, document } = parseHTML(HTML);
+  // linkedom 不实现 matchMedia；前端靠它区分手机/桌面，缺了会直接抛
+  window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   globalThis.document = document;
   window.document = document;
 
@@ -212,8 +214,8 @@ const settle = async (rounds = 20) => {
     document.querySelectorAll('#catList .cat-count')[1].textContent);
   check('虚拟分类没有改名/删除按钮',
     document.querySelectorAll('#catList .cat')[0].querySelectorAll('.cat-op').length === 0);
-  check('真分类有改名/删除按钮',
-    document.querySelectorAll('#catList .cat')[2].querySelectorAll('.cat-op').length === 2);
+  check('真分类有对话/改名/删除按钮',
+    document.querySelectorAll('#catList .cat')[2].querySelectorAll('.cat-op').length === 3);
 
   check('列出 3 本书', docTitles(document).length === 3, docTitles(document).join('/'));
 
@@ -357,7 +359,8 @@ const settle = async (rounds = 20) => {
   const { document, server } = await boot({ loggedIn: true });
   const target = document.querySelector('[data-category-id="c-1"]');
   check('分类行带 data-category-id', Boolean(target));
-  const remove = target.querySelectorAll('.cat-op')[1];
+  // 按钮顺序：对话 / 改名 / 删除，删除是第 3 个
+  const remove = target.querySelectorAll('.cat-op')[2];
   remove.onclick({ stopPropagation() {} });
   await settle();
   const deletes = server.calls.filter((c) => c.method === 'DELETE');

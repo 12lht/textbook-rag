@@ -6,15 +6,17 @@
 
 ## 怎么跑
 
+在仓库根目录执行（`bench.py` 自己按 `__file__` 找仓库根，不依赖当前目录）：
+
 ```bash
 # 冒烟：3 个场景 × repeat 2 ≈ 6 次模型请求，烧少量配额
-cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/bench/bench.py --suite smoke
+python tests/bench/bench.py --suite smoke
 
 # 全量：6 场景（含 5 轮连续对话、教材检索、关思考对照）
-cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/bench/bench.py --suite full --repeat 3
+python tests/bench/bench.py --suite full --repeat 3
 
 # 只跑指定场景
-cd /d/agent && /c/Users/13526/miniconda3/envs/agent/python.exe tests/bench/bench.py --scenarios chat-5turn,rag-textbook --repeat 2
+python tests/bench/bench.py --scenarios chat-5turn,rag-textbook --repeat 2
 ```
 
 | 标记 | 值 |
