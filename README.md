@@ -1,6 +1,7 @@
 # Agent Workspace
 
-一个基于 LangGraph、DeepSeek、Tavily 和高德地图 API 的 Agent 学习项目。
+一个基于 LangGraph、DeepSeek、Tavily、高德地图和 MinerU 的 Agent 学习项目：
+对话 Agent + 可检索的教材知识库。
 
 当前项目同时提供：
 
@@ -15,6 +16,8 @@
 - SQLite 会话持久化
 - 会话列表、历史消息和 SSE 流式响应
 - 量化评测闭环：金标集 + 指标基线 + 工具录制回放
+- **教材知识库**：上传 PDF 自动解析（MinerU vlm）→ 切段落/抽图配图注 → BM25 + 向量融合检索，
+  回答带页码与插图引用；按分类管理，支持「看原文」直接翻 PDF
 
 ## 项目结构
 
@@ -27,6 +30,10 @@ users.py                   账号与登录：账号表、密码哈希、登录�
 conversations.py           会话元数据：id、标题、重命名标记、会话归属（纯应用层，不依赖 Agent）
 memories.py                跨会话长期记忆：一条事实一行存进 SQLite，去重、清洗、上限（纯应用层，不依赖 Agent）
 limits.py                  配额与限流：按天记用量（SQLite）+ 内存滑窗防刷（纯应用层，不依赖 Agent）
+documents.py               教材库：收文件、解析成 Markdown、切段落、抽图配图注、分类（纯应用层，不依赖 Agent）
+mineru.py                  云端解析客户端：提交 / 轮询 / 分批 / 解压，只负责「PDF → blocks + 图片」
+retrieval.py               检索：BM25 + 向量融合 + 重排，命中段落与同页插图（纯应用层）
+figures.py                 视觉模型调用：灰区判装饰、给无题注图写一句图注
 service.py                 应用层：把上面几层拼成用例（身份收敛/会话用例/回退/对话流/位置收敛/注入记忆后端）
 api.py                     FastAPI 后端
 cli.py                     CLI 调试入口
@@ -37,7 +44,7 @@ eval/baselines/            历史基线 JSON
 eval/cassettes/            录制下来的工具返回值
 frontend/index.html        网页前端（单文件，内联脚本，无构建步骤）
 frontend/library.html      知识库管理页
-frontend/vendor/           marked + DOMPurify（本地化，不再依赖 CDN）
+frontend/vendor/           marked + DOMPurify + KaTeX（本地化，不再依赖 CDN）
 data/                      SQLite（checkpoint / 长期记忆 / 账号 / 教材）和会话元数据 JSON
 scripts/backup.py          备份脚本：走 SQLite 在线备份接口，不是 cp
 Dockerfile                 运行镜像（--workers 1 是硬约束，理由在文件里）
@@ -91,6 +98,12 @@ DEEPSEEK_API_KEY=你的DeepSeek_API_Key
 AMAP_API_KEY=你的高德地图_API_Key
 TAVILY_API_KEY=你的Tavily_API_Key
 MODEL_PROVIDER=deepseek
+
+# 教材知识库（不配也能用站点，只是没有知识库 / 检索退化成字面匹配）
+MINERU_API_KEY=你的MinerU_API_Key        # PDF 解析（按页算额度）
+SILICON_API_KEY=你的SiliconFlow_API_Key  # 视觉模型（图注/判装饰）+ 向量 + rerank
+# 可选：VISION_MODEL / VISION_DESC_MODEL / VISION_BASE_URL
+#       EMBEDDING_MODEL / EMBEDDING_BASE_URL / RERANK_ENABLED
 ```
 
 不要把真实 Key 提交到代码仓库或发送给前端。

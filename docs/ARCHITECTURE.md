@@ -276,7 +276,19 @@ SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘
 
 ## 知识库（教材与分类）
 
-教材存在 `documents.sqlite3` 的四张表里：`documents`（元数据 + 解析出的 Markdown）、`chunks`（切分后的段落）、`assets`（插图）、`categories`（分类）。原文件和图片落在 `data/uploads/<doc_id>/` 与 `data/assets/<doc_id>/`。
+教材存在 `documents.sqlite3` 的四张表里：`documents`（元数据 + 解析出的 Markdown）、`chunks`（切分后的段落）、`assets`（插图）、`categories`（分类）；另有 `meta` 存语料版本号（写 chunks 就换一个，检索侧靠它判断内存索引是否过期）。原文件和图片落在 `data/uploads/<doc_id>/` 与 `data/assets/<doc_id>/`。
+
+**解析链路**：PDF 固定走 MinerU 云端的 `vlm` 模型（自带 OCR 与版面模型，公式/表格/代码都能认），
+超过 200 页或 200MB 自动分批，**每批解压到独立目录**（JSON 和图片都带批次前缀，否则后一批会盖掉
+前一批）。转换在 `documents._elements_from_mineru`：公式块发 `kind=formula`、图表块发 `kind=figure`、
+表格 HTML 转 pipe 表格、页眉页脚页码当噪音丢弃；无题注的图先按几何量判装饰（明确装饰直接丢），
+灰区问一次 VLM，存活的图让 VLM 写一句图注当 chunk 首行。MinerU 会把星平面字符（`𝑂`、`𝑛`）吐成
+U+FFFD，转换时按块 bbox 从 PDF 文字层回填并做 NFKC 归一化。
+
+**检索链路**（`retrieval.py`）：BM25（字符 bigram，管术语/式号/图号）+ 向量（`bge-m3`，管同义改写），
+按问法字面覆盖率动态配权，再进 `bge-reranker-v2-m3` 重排；向量服务不可用时自动退回纯 BM25。
+向量表每行存 `chunk_hash`，**按内容哈希判新鲜度**而不是按 `chunk_id` 是否存在——切分是位置式编号，
+重切后 id 不变但正文可能已经换了。
 
 ```text
 documents.py           存储层：上传、解析、切分、分类（零框架依赖）
@@ -344,7 +356,7 @@ agent_core.py          两个进程内工具：模型自己判断该不该记，
 
 ## 工具
 
-7 个工具，**分两处**：
+8 个工具，**分三处**：
 
 | 工具 | 作用 | 跑在哪 |
 | --- | --- | --- |
@@ -355,8 +367,9 @@ agent_core.py          两个进程内工具：模型自己判断该不该记，
 | `web_extract` | 通过 Tavily 提取网页正文 | MCP 子进程 |
 | `recall_memory` | 读出这个用户的长期记忆 | **Agent 进程内**（要 `user_id`） |
 | `save_memory` | 记下一条长期事实，可用 `replaces` 作废旧条目 | **Agent 进程内**（要 `user_id`） |
+| `search_textbook` | 在学生上传的教材里检索段落（BM25 + 向量融合，可限定书名/分类），命中图会一起返回 | **Agent 进程内**（要 `user_id` 与检索范围） |
 
-前 4 个的实现在 `tools.py`、注册在 `mcp_server.py`，Agent 侧通过 MCP 加载；后 3 个都在 `agent_core.py`。分界依据见上面「什么工具不能放进 MCP」——判据是**返回值只由参数决定就放 MCP，需要本次请求上下文的就留在进程内**。
+前 4 个的实现在 `tools.py`、注册在 `mcp_server.py`，Agent 侧通过 MCP 加载；后 4 个都在 `agent_core.py`（检索本身由 `service._search_textbooks` → `retrieval.search` 完成）。分界依据见上面「什么工具不能放进 MCP」——判据是**返回值只由参数决定就放 MCP，需要本次请求上下文的就留在进程内**。
 
 两个记忆工具**只在注入了存储后端时才注册**（`agent_core.set_memory_backend`，由 `service.py` 调用），系统提示里的记忆说明也只在此时拼上。所以评测环境拿到的工具集与提示词和基线逐字一致。
 

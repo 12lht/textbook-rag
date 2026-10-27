@@ -8,12 +8,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位�
 ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 import pymupdf  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 
 CASES = [
-    (str(REPO_ROOT / "textbook/Hello-Algo.pdf"), "Hello-Algo", 30, 59),
-    (str(REPO_ROOT / "textbook/Hello-Agents.pdf"), "Hello-Agents", 40, 69),
-    (str(REPO_ROOT / "textbook/2026移动通信/第1章 移动通信概述202603101500.pdf"), "移动通信", 0, 31),
+    (str(sample_pdf("Hello-Algo")), "Hello-Algo", 30, 59),
+    (str(sample_pdf("Hello-Agents")), "Hello-Agents", 40, 69),
+    (str(sample_pdf("第1章 移动通信概述")), "移动通信", 0, 31),
 ]
 
 TMP = Path(tempfile.mkdtemp(prefix="export-sample-"))

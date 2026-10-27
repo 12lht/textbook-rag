@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-PDF = ROOT / "textbook/Hello-Algo.pdf"
+PDF = sample_pdf("Hello-Algo")
 
 PASS = 0
 FAIL = 0
@@ -52,7 +52,9 @@ before = real_snapshot()
 
 import pymupdf  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 import users  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="asset-render-"))

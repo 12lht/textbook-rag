@@ -717,9 +717,14 @@ DocumentError = documents.DocumentError
 CategoryExists = documents.CategoryExists
 
 
-def upload_document(user_id: str, filename: str | None, data: bytes) -> dict[str, object]:
-    """收下一个教材文件，立刻返回。**不解析**，解析见 `parse_uploaded_document`。"""
-    return documents.create_upload(user_id, filename or "", data)
+async def upload_document(user_id: str, filename: str | None, data: bytes) -> dict[str, object]:
+    """收下一个教材文件，立刻返回。**不解析**，解析见 `parse_uploaded_document`。
+
+    落盘（最多 250MB 的 `write_bytes`）和写 SQLite 都是阻塞操作，必须在 `to_thread` 里跑：
+    直接在事件循环里做，这块磁盘 I/O 期间**所有**请求都卡住——包括正在流式输出的聊天 SSE，
+    用户看到的就是「回答打到一半不动了」。
+    """
+    return await asyncio.to_thread(documents.create_upload, user_id, filename or "", data)
 
 
 async def parse_uploaded_document(doc_id: str, user_id: str | None = None) -> dict[str, object]:
@@ -833,6 +838,44 @@ def verify_asset(asset_id: str, user_id: str, token: str) -> bool:
     if expires < int(time.time()):
         return False
     return hmac.compare_digest(signature, _asset_hmac(asset_id, user_id, expires))
+
+
+def _document_file_hmac(doc_id: str, user_id: str, expires: int) -> str:
+    """原文件的签名。payload 带 `file:` 前缀，和图、访客 cookie 的签名互不通用。"""
+    payload = f"file:{doc_id}:{user_id}:{expires}".encode()
+    return hmac.new(_ASSET_SECRET.encode(), payload, hashlib.sha256).hexdigest()[:32]
+
+
+def sign_document_file(doc_id: str, user_id: str, ttl: int = ASSET_TOKEN_TTL) -> str:
+    expires = int(time.time()) + ttl
+    return f"{expires}.{_document_file_hmac(doc_id, user_id, expires)}"
+
+
+def verify_document_file(doc_id: str, user_id: str, token: str) -> bool:
+    expires_text, _, signature = (token or "").partition(".")
+    if not expires_text.isdigit() or not signature:
+        return False
+    expires = int(expires_text)
+    if expires < int(time.time()):
+        return False
+    return hmac.compare_digest(signature, _document_file_hmac(doc_id, user_id, expires))
+
+
+async def document_file_url(doc_id: str, user_id: str) -> str | None:
+    """这本书原文件的**可签名地址**（能直接 window.open）。
+
+    浏览器在新标签打开 PDF 时带不上 Authorization，所以和插图一样走签名：
+    `u` 是 user_id，`t` 是 `过期时间.签名`，签名覆盖 doc_id 和 u。
+    """
+    record = await asyncio.to_thread(documents.file_of, doc_id, user_id)
+    if record is None or not record.get("exists"):
+        return None
+    token = sign_document_file(doc_id, user_id)
+    return f"/api/documents/{doc_id}/file/view?u={user_id}&t={token}"
+
+
+async def document_file(doc_id: str, user_id: str) -> dict[str, object] | None:
+    return await asyncio.to_thread(documents.file_of, doc_id, user_id)
 
 
 def _asset_hmac(asset_id: str, user_id: str, expires: int) -> str:

@@ -20,9 +20,11 @@ sys.path.insert(0, str(ROOT))
 
 import pymupdf  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 
-PDF = ROOT / "textbook/Hello-Algo.pdf"
+PDF = sample_pdf("Hello-Algo")
 OUT = ROOT / ".workbuddy/tmp/render-preview.html"
 PAGES = (30, 60)  # 第 31-60 页：正文、图、表格都有（58/59 页是表 2-1）
 

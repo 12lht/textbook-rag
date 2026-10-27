@@ -194,6 +194,12 @@
     .cite-popover .body ul, .cite-popover .body ol { margin: 2px 0; padding-left: 18px; }
     .cite-popover .body li { margin: 0 0 2px; }
     .cite-popover .body img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); margin: 6px 0; }
+    /* MinerU 的表格是真 pipe 表格，marked 会渲染成 <table>；不压一下在 430px 宽的小窗里
+       会横着撑开、字挤成一团。 */
+    .cite-popover .body table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; font-size: 12px; }
+    .cite-popover .body th, .cite-popover .body td { padding: 3px 6px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .cite-popover .body th { background: #fbfcf8; font-weight: 600; }
+    .cite-popover .body .katex { font-size: 1.02em; }
     .cite-code { flex: none; padding: 1px 6px; border-radius: 5px; color: var(--accent-dark); background: #fff0eb; font: 11px "DM Mono", monospace; }
     .composer-wrap { position: relative; flex: none; width: min(900px, 100%); margin: 0 auto; padding: 0 34px 30px; }
     .scroll-bottom { position: absolute; right: 34px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(255,255,255,.95); box-shadow: 0 6px 18px rgba(45,69,51,.16); font-size: 16px; line-height: 1; }
@@ -723,6 +729,46 @@
       })[character]);
     }
 
+    // MinerU 解析出来的公式是**单 `$..$`**，而模型自己写的是 `$$` / `\(..\)`。单 `$` 不能
+    // 无条件认（「花了 $5」会变公式），所以只在内容确实像 LaTeX 时才改写成 `\(..\)`——
+    // 改写后复用现有定界符，auto-render 不用再加 `$`，货币也不会被误伤。
+    function looksLikeMath(body) {
+      if (!body || body.length > 300) return false;
+      if (/\\[a-zA-Z]{2,}/.test(body)) return true;              // \frac \sqrt \pi
+      if (/\^|_/.test(body)) return true;                        // x^2、a_{n}
+      if (/[{}]/.test(body) && /[=<>+\-]/.test(body)) return true;
+      // 教材里最常见的「单字母变量」：$x$、$n$、$f(x)$、$x+y$。
+      // 必须以字母开头，`$5`、`$5.00` 这类金额（数字开头）绝不会命中。
+      if (/^[A-Za-z]$/.test(body)) return true;                    // x
+      if (/^[A-Za-z][A-Za-z0-9]{0,3}$/.test(body)) return true;     // ab、x1
+      if (/^[A-Za-z]\s*\([^()]{0,40}\)$/.test(body)) return true;    // f(x)、P(A)
+      if (/^[A-Za-z](\s*[-+*/=<>]\s*[A-Za-z0-9]+)+$/.test(body)) return true;  // x+y、n-1
+      return false;
+    }
+
+    // 行内代码和围栏代码块都要先护住：代码里的 `$`、`\(` 都不该当公式。
+    // 围栏必须在最前面——`\`\`\`` 里可以跨行，行内代码那条 [^`\n] 匹配不到它。
+    const MATH_MASK =
+      /(```[\s\S]*?```)|(`[^`\n]*`)|(\$\$[\s\S]+?\$\$)|(\\\[[\s\S]+?\\\])|(\\\([\s\S]+?\\\))|(\$(?![\s$])((?:[^$\\\n]|\\.){1,300}?)(?<![\s\\])\$)/g;
+
+    function maskMath(text) {
+      const stash = [];
+      const masked = String(text ?? '').replace(
+        MATH_MASK,
+        (match, fence, code, block, bracket, paren, inline, body) => {
+          if (fence || code) return match;
+          if (inline !== undefined) {
+            if (!looksLikeMath(body)) return match;
+            stash.push(`\\(${body}\\)`);
+            return `@@MATH${stash.length - 1}@@`;
+          }
+          stash.push(match);
+          return `@@MATH${stash.length - 1}@@`;
+        },
+      );
+      return { masked, stash };
+    }
+
     function renderMarkdown(content) {
       const text = String(content ?? '');
       if (!window.marked || !window.DOMPurify) {
@@ -731,11 +777,7 @@
       // 数学段先抽离成占位符：marked 会把 \( 和 \[ 当转义吃掉反斜杠，
       // KaTeX 就找不到定界符了。占位符是纯文本，能原样穿过 sanitize，
       // 渲染完再把原文（HTML 转义后）放回，交给 renderMathInElement 处理。
-      const stash = [];
-      const masked = text.replace(
-        /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g,
-        (match) => { stash.push(match); return `@@MATH${stash.length - 1}@@`; },
-      );
+      const { masked, stash } = maskMath(text);
       const html = DOMPurify.sanitize(marked.parse(masked, { breaks: true, gfm: true }));
       return html.replace(/@@MATH(\d+)@@/g, (_, index) => escapeHtml(stash[Number(index)] ?? ''));
     }
@@ -762,10 +804,22 @@
     }
 
     // 引用条目的一行摘要：书名 · 章节 · 第 X 页 · 图。页码起止相同只写一个。
+    // 章节名来自 MinerU 的 title 块，可能带 `<sup>` 之类内联标记，摘要是纯文本，得剥掉。
+    function plainLabel(value) {
+      return String(value ?? '')
+        .replace(/<sup>(.*?)<\/sup>/gi, '^$1')
+        .replace(/<sub>(.*?)<\/sub>/gi, '_$1')
+        .replace(/<[^>]{1,20}>/g, '')
+        .replace(/\$/g, '')
+        .trim();
+    }
+
     function sourceMetaText(item) {
       const parts = [];
-      if (item.doc_title) parts.push(item.doc_title);
-      if (item.chapter) parts.push(item.chapter);
+      const title = plainLabel(item.doc_title);
+      const chapter = plainLabel(item.chapter);
+      if (title) parts.push(title);
+      if (chapter) parts.push(chapter);
       if (item.page_start) {
         parts.push(item.page_end && item.page_end !== item.page_start
           ? `第 ${item.page_start}-${item.page_end} 页`
@@ -833,6 +887,19 @@
         // 实时条目的图引用还是占位文件名，用条目自带的签名 URL 换掉；
         // 历史条目的图已被服务端内联成真 URL，这里原样通过。
         body.innerHTML = renderMarkdown(inlineAssets(decorateCiteCodes(text), buildAssetMap([item])));
+        // MinerU 的公式是单 $..$，要靠 KaTeX 才成公式——正文章节渲染完都会走
+        // beautifyMath，小窗以前漏了这一步，原文里的公式一直是裸 LaTeX。
+        beautifyMath(body);
+        pop.appendChild(body);
+      } else if (item.asset_url) {
+        // MinerU 的 figure 块可能是纯图无题注，content 为空：直接把图放出来，
+        // 否则点开是一块空白，等于「引用了但看不到东西」。
+        const body = document.createElement('div');
+        body.className = 'body';
+        const img = document.createElement('img');
+        img.src = item.asset_url;
+        img.alt = `第 ${item.page_start || '?'} 页的插图`;
+        body.appendChild(img);
         pop.appendChild(body);
       }
       document.body.appendChild(pop);

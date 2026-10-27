@@ -28,7 +28,6 @@ services:
       - ./out:/app/out
       - ./backups:/app/backups
       # 教材原件。只读挂载——应用只读它，写坏了就是丢原始数据。
-      - ./textbook:/app/textbook:ro
 
     # 单本 250MB 的 PDF 解析（pymupdf 渲染插图）是内存大头，
     # 峰值大约「文件大小 + 200MB」。低于 1G 容易被 OOM killer 挑中。

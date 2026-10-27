@@ -15,9 +15,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位�
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import pymupdf
+from dotenv import load_dotenv  # noqa: E402
 
-import documents
+load_dotenv(REPO_ROOT / ".env")  # MinerU 的 key 在 .env 里
+
+import pymupdf  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 
 failures: list[str] = []
 
@@ -45,7 +51,7 @@ def main() -> None:
     documents.ASSET_DIR = tmp / "assets"
 
     sample = tmp / "sample.pdf"
-    source = REPO_ROOT / "textbook/Hello-Algo.pdf"
+    source = sample_pdf("Hello-Algo")
     make_subset(source, sample, 30, 60)  # 第 31-60 页，有正文有图
 
     data = sample.read_bytes()

@@ -96,15 +96,19 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 
 ## 三、解析与切分（PDF → Markdown → chunk）
 
+> **样本 PDF 从哪来**：`textbook/` 已移出仓库，探针统一用 `tests/probes/_sample.py` 找样本
+> （先看环境变量 `SAMPLE_PDF`，再退回 `data/uploads/<doc_id>/source.pdf`）。找不到就**报错退出**，
+> 不再 `exit(0)` 假装通过。
+
 | 脚本 | 用途 | 调模型 |
 |---|---|---|
 | `probe-agents-full.py` | Hello-Agents 整本（720 页）跑一遍：耗时、段数、图数 | 否 |
 | `probe-algo-code.py` | 在 Hello-Algo（LaTeX 排版）上验证同一套规则 | 否 |
-| `probe-documents.py` | 教材摄取（M1）在真实 PDF 上的表现 | 否 |
-| `probe-formats.py` | PDF / PPTX / DOCX 三种格式都能走完摄取 | 否 |
-| `probe-preflight.py` | 解析前预检 + warning 列 + 上传上限 | 否 |
+| `probe-documents.py` | 教材摄取（M1）在真实 PDF 上的表现 | **是**（花约 30 页 MinerU 额度） |
+| `probe-formats.py` | PDF / PPTX / DOCX 三种格式都能走完摄取 | **是**（PDF 部分花 MinerU 额度） |
+| `probe-upload.py` | 上传闸门：上限 / 去重 / 老库迁移 / 删除 | 否（只走 `create_upload`，不解析） |
 | `probe-producer.py` | PDF 产地：Producer / Creator / 页面尺寸 / 每页字数 | 否 |
-| `probe-markdown.py` | Markdown 中间态长什么样 | 否 |
+| `probe-markdown.py` | Markdown 中间态长什么样 | **是**（花约 30 页 MinerU 额度，不在 `run-offline.py` 里） |
 | `probe-parse-after.py` | 改动后的实际产出：段长分布、代码块数、样例 | 否 |
 | `audit-ingest.py` | 三本基线书重跑解析 + 切分，输出可量化脏点 | 否 |
 | `audit-md.py` | 审计 `data/` 里已 ready 书的解析成品质量 | 否 |
@@ -138,11 +142,23 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-superscript-all.py` | 全本跑 `_line_text`，列出所有还原出的上标 | 否 |
 | `probe-page-region.py` | 打印某页某 y 区间的所有 line | 否 |
 | `probe-script-shape.py` | 扫描「小字号 + 基线偏移」片段，评估误伤面 | 否 |
-| `probe-frame-filter.py` | 排版框不许把插图吞掉（回归） | 否 |
 | `probe-frame-origin.py` | 矢量矩形里有多少被判定成排版框 | 否 |
 | `probe-ppt-layout.py` | PPT 页的 block 结构与图形覆盖面积 | 否 |
 | `probe-ppt-figure.py` | 逐页量：文本量、矢量占比、位图数量 | 否 |
-| `reparse-slides.py` | 重解析全部幻灯片版式的书（让修复落到已入库的书） | 否 |
+
+> 2026-10-25 起 PDF 解析只剩 MinerU 一条路，上表里量版面几何、判断排版框、重解析幻灯片
+> 的那几个（`probe-frame-filter` / `reparse-slides` / `probe-weknora*`）已随本地引擎删除，
+> 换引擎前的结论留在 `compare/` 与 `learning-notes.md`。新增两个针对 MinerU 的：
+
+| 脚本 | 用途 | 调模型 |
+|---|---|---|
+| `probe-mineru.py` | 链路直连：上传 → 轮询 → 解压 → content_list 结构 | 否（花 MinerU 额度） |
+| `probe-astral-repair.py` | 星平面字符（U+1D400 起）从 PDF 文字层回填，全离线 | 否 |
+| `probe-figure-filter.py` | 装饰图三档判定（keep / drop / 灰区问 VLM），逐张导出 + HTML 对照（验课件类 PDF 才有意义） | 灰区才调（花 MinerU 额度） |
+| `probe-mineru-batches.py` | **离线**回归：多批解析不串页（每批独立目录、图片不互相覆盖）、4xx 立即失败 | 否（网络全是桩） |
+| `probe-chunking.py` | **离线**回归：空锚点段 / 超短碎片 / 超长代码块 | 否 |
+| `probe-inline-math.py` | **离线**回归：裸 LaTeX 包裹（表格行不许动、代码块不许动） | 否 |
+| `probe-vectors.py` | **离线**回归：改 Markdown 后向量必须失效重算、索引签名要变 | 否（embedding 被替换） |
 
 ## 四、检索与评测
 
@@ -158,7 +174,6 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-prod-verify.py` | 生产改动落地：TARGET=250 + rerank + 邻居扩展 | 否 |
 | `probe-citations.py` | 引用溯源后端：解析函数、`get_history` 重建 | 否 |
 | `probe-asset-render.py` | Markdown 图引用能不能真渲染（`?render=1`） | 否 |
-| `probe-weknora.py` | WeKnora 默认参数搬到本项目语料上跑 | 待确认 |
 | `probe-search-variance.py` | web_search 结果长度波动拆成「MCP 包装」与「网页内容」 | 是 |
 | `eval-baseline-off.py` | 关掉上标还原后跑评测，重建改动前基线 | 是 |
 
@@ -230,11 +245,10 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 
 | 脚本 | 用途 | 调模型 |
 |---|---|---|
-| `ingest-textbooks.py` | 把 `textbook/` 的 26 个 PDF 走生产链路入库 | 否 |
+| `ingest-textbooks.py` | **已停用**：`textbook/` 移出仓库后扫不到文件，现在直接报错退出（入库走网页上传） | 否 |
 | `export-agents-md.py` | Hello-Agents 整本导出成一份可直接打开的 Markdown | 否 |
 | `export-sample-md.py` | 导出一段含图的 Markdown，肉眼验收解析质量 | 否 |
 | `make-render-preview.py` | 解析 → Markdown → 渲染，导出成自包含 HTML 快照 | 否 |
-| `recount-forecast02.py` | 把 `allow_tools` 改动套用到历史基线上重算 | 否 |
 
 ## 十、前端 e2e
 
@@ -251,6 +265,7 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `e2e-conversation-menu.js` | 会话右键菜单 | 否 |
 | `e2e-favicon.js` | favicon 加载 | 否 |
 | `e2e-cite-popover.js` | 引用角标小窗（mock 接口 + 真实页面） | 否 |
+| `e2e-katex.js` | KaTeX 公式渲染与引用小窗（8 条断言，含 `$5` 不误伤） | 否 |
 | `_frontend_check.js` | 前端整体自检 | 否 |
 | `mock-server.js` | mock 后端（e2e 依赖） | 否 |
 | `mock-conversations.js` | mock 会话数据 | 否 |

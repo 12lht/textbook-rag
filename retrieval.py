@@ -6,8 +6,10 @@
 分开的理由和「解析 / 切分分开」是同一条：换排序策略不该重解析一本书（解析几十秒，
 调权重几毫秒）。
 
-没有 embedding 服务，所以是 BM25 + 字符 n-gram：它对术语、式号、图号这类精确串比向量准。
-代价是不懂同义改写（「抽样定理」和「采样定理」是两个词），靠模型查前自己换一次说法兜。
+两路并用：**BM25（字符 n-gram）** 管术语、式号、图号这类精确串；**向量（bge-m3）** 管同义改写
+（「抽样定理」对「采样定理」）。按问法动态配权——问法字面覆盖够高就偏 BM25（0.75/0.25），
+否则对半（0.5/0.5）——再进 rerank。向量服务不可用（没配 key / 调用失败）时自动退回纯 BM25，
+不是硬依赖。
 
 中文不引分词库，用二元字符组：
 
@@ -19,6 +21,7 @@ bigram 让「定理」不命中「定义」，unigram 兜住只对一个字的�
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -33,6 +36,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+import logging
 
 import documents
 
@@ -223,17 +228,25 @@ class _Index:
         if np is None or not embedding_enabled() or not self.docs:
             return
         doc_ids = sorted({str(doc.meta.get("doc_id")) for doc in self.docs})
-        stored = _existing_vectors(doc_ids)
+        stored = _vector_rows(doc_ids)
         if not stored:
             return
         vectors: list = []
         positions: list[int] = []
-        for chunk_id, (_dim, blob) in stored.items():
+        stale = 0
+        for chunk_id, (blob, chunk_hash) in stored.items():
             position = self.position_of.get(chunk_id)
             if position is None:
                 continue
+            # **只收新鲜向量**：正文改过但向量还没重算时，宁可这条只走 BM25，
+            # 也不要塞一条「上一版正文算出来的向量」进矩阵（那是看不见的语义错配）
+            if chunk_hash != _chunk_hash(self.docs[position].meta):
+                stale += 1
+                continue
             vectors.append(np.frombuffer(blob, dtype="float32"))
             positions.append(position)
+        if stale:
+            _log.warning("有 %d 条向量与正文不一致，本次跳过（跑 ensure_vectors 补齐）", stale)
         if vectors:
             self.matrix = np.vstack(vectors)
             self.vector_positions = positions
@@ -321,6 +334,11 @@ class _Index:
 
 VECTOR_DB = Path(__file__).with_name("data") / "vectors.sqlite3"
 
+
+def vector_db_path() -> Path:
+    """向量库位置。模块变量可以被探针/归档脚本改掉，读写都走这里，别直接引用 `VECTOR_DB`。"""
+    return Path(VECTOR_DB)
+
 EMBEDDING_BATCH = 32
 
 _VECTOR_DEPTH = 40
@@ -361,13 +379,21 @@ def embedding_enabled() -> bool:
 
 
 def _connect_vectors() -> sqlite3.Connection:
-    VECTOR_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(VECTOR_DB)
+    path = vector_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS vectors ("
         " chunk_id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, model TEXT NOT NULL,"
-        " dim INTEGER NOT NULL, vec BLOB NOT NULL, created_at TEXT NOT NULL)"
+        " dim INTEGER NOT NULL, vec BLOB NOT NULL, created_at TEXT NOT NULL,"
+        " chunk_hash TEXT NOT NULL DEFAULT '')"
     )
+    # 老库补列：`CREATE TABLE IF NOT EXISTS` 不会给已存在的表加字段，
+    # 而「有没有这条向量」不能再只按 chunk_id 判（见 `_chunk_hash`）。
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(vectors)")}
+    if "chunk_hash" not in columns:
+        conn.execute("ALTER TABLE vectors ADD COLUMN chunk_hash TEXT NOT NULL DEFAULT ''")
+        conn.commit()
     return conn
 
 
@@ -425,23 +451,79 @@ def _vector_text(chunk: dict) -> str:
     return f"{chapter}\n{content}" if chapter else content
 
 
-def _existing_vectors(doc_ids: list[str]) -> dict[str, tuple[int, bytes]]:
+def _vector_rows(doc_ids: list[str]) -> dict[str, tuple[bytes, str]]:
+    """{chunk_id: (向量字节, chunk_hash)}，建内存索引时用（要真的向量）。"""
     model = _embedding_model()
     placeholders = ",".join("?" * len(doc_ids))
     conn = _connect_vectors()
     try:
         rows = conn.execute(
-            f"SELECT chunk_id, dim, vec FROM vectors WHERE model = ?"
+            f"SELECT chunk_id, vec, chunk_hash FROM vectors WHERE model = ?"
             f" AND doc_id IN ({placeholders})",
             (model, *doc_ids),
         ).fetchall()
     finally:
         conn.close()
-    return {row[0]: (row[1], row[2]) for row in rows}
+    return {row[0]: (row[1], row[2] or "") for row in rows}
+
+
+def _chunk_hash(chunk: dict) -> str:
+    """段落「送去算向量的那段文字」的内容指纹。
+
+    用 `_vector_text`（含章节前缀）而不是裸 content：章节标题进了向量，它变了向量也该变。
+    """
+    return hashlib.sha1(_vector_text(chunk).encode("utf-8")).hexdigest()
+
+
+def _existing_vectors(doc_ids: list[str]) -> dict[str, tuple[int, str]]:
+    """返回 {chunk_id: (dim, chunk_hash)}。
+
+    只取这两个字段，不取 `vec`：8926 条向量约 60MB，每次补向量都读一遍纯属浪费。
+    """
+    model = _embedding_model()
+    placeholders = ",".join("?" * len(doc_ids))
+    conn = _connect_vectors()
+    try:
+        rows = conn.execute(
+            f"SELECT chunk_id, dim, chunk_hash FROM vectors WHERE model = ?"
+            f" AND doc_id IN ({placeholders})",
+            (model, *doc_ids),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0]: (row[1], row[2] or "") for row in rows}
+
+
+def _backfill_hashes(stale: list[tuple[str, str]]) -> None:
+    """把老库里 `chunk_hash=''` 的向量补上当前内容的哈希。
+
+    **只在迁移那一刻可信**：这些行的向量是按当时的段落正文算的，库里内容恰好还是那一版。
+    不补的话，第一次跑 `ensure_vectors` 会把整库 8926 条重算一遍（几十块 + 十几分钟），
+    而它们本来就是新鲜的。
+
+    真正的风险是被重切过、但 chunk_hash 还空着的行——那种行会在库里留下「新旧混装」，
+    所以迁移只能做一次，之后任何写 chunks 的路径都必须 bump 语料版本。
+    """
+    if not stale:
+        return
+    conn = _connect_vectors()
+    try:
+        conn.executemany(
+            "UPDATE vectors SET chunk_hash = ? WHERE chunk_id = ? AND chunk_hash = ''",
+            stale,
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def ensure_vectors(user_id: str, *, limit_batches: int | None = None) -> dict:
-    """把这个用户**缺的**向量补齐（阻塞，调用方要丢后台）。按 chunk 增量补，重复调用很便宜。
+    """把这个用户**缺的或过期的**向量补齐（阻塞，调用方要丢后台）。增量、重复调用很便宜。
+
+    「过期」的判据是内容哈希，不是「有没有这个 chunk_id」：`chunk_id` 是位置式编号
+    （`{doc_id}-{seq:04d}`），重切会删掉再插入**同样的 id**，正文却可能已经换了。
+    只按 id 判断的话，改过图注/包过公式的段落会一直用旧向量参与语义检索——不报错、
+    只是答案慢慢变错（`fill-concepts` 那次就是这么漏的）。
 
     **不能放在提问路径上**：一本 700 页的书几千段，一次补完要一两分钟。
     """
@@ -454,9 +536,36 @@ def ensure_vectors(user_id: str, *, limit_batches: int | None = None) -> dict:
 
     doc_ids = sorted({str(chunk["doc_id"]) for chunk in chunks})
     have = _existing_vectors(doc_ids)
-    missing = [chunk for chunk in chunks if str(chunk["chunk_id"]) not in have]
+    current = {str(chunk["chunk_id"]): _chunk_hash(chunk) for chunk in chunks}
+    # 老库补哈希：先做一次，免得整库重算。**补完要同步改内存里的 have**，
+    # 否则下面按 have 判「有没有过期」时它们还是空串，整库照样重算一遍。
+    backfilled = {
+        chunk_id: current[chunk_id]
+        for chunk_id, (_, stored) in have.items()
+        if not stored and chunk_id in current
+    }
+    if backfilled:
+        _backfill_hashes([(value, key) for key, value in backfilled.items()])
+        have = {
+            chunk_id: (dim, backfilled.get(chunk_id, stored))
+            for chunk_id, (dim, stored) in have.items()
+        }
+    missing = [
+        chunk for chunk in chunks
+        if have.get(str(chunk["chunk_id"]), (0, ""))[1] != current[str(chunk["chunk_id"])]
+    ]
+    # 重切会把段数变少，多出来的向量行就成了死数据（实测一轮清理留下 250 行）。
+    # 按 chunk_id 清掉——**只清这次涉及的 doc**，别人的库不碰。
+    orphans = [chunk_id for chunk_id in have if chunk_id not in current]
+    if orphans:
+        conn = _connect_vectors()
+        try:
+            conn.executemany("DELETE FROM vectors WHERE chunk_id = ?", [(cid,) for cid in orphans])
+            conn.commit()
+        finally:
+            conn.close()
     if not missing:
-        return {"embedded": 0, "total": len(chunks)}
+        return {"embedded": 0, "total": len(chunks), "pruned": len(orphans)}
 
     dim = next((item[0] for item in have.values()), 0)
     done = 0
@@ -478,14 +587,15 @@ def ensure_vectors(user_id: str, *, limit_batches: int | None = None) -> dict:
                         len(array),
                         array.tobytes(),
                         datetime.now().isoformat(timespec="seconds"),
+                        current[str(chunk["chunk_id"])],
                     )
                 )
             conn = _connect_vectors()
             try:
                 conn.executemany(
                     "INSERT OR REPLACE INTO vectors"
-                    " (chunk_id, doc_id, model, dim, vec, created_at)"
-                    " VALUES (?,?,?,?,?,?)",
+                    " (chunk_id, doc_id, model, dim, vec, created_at, chunk_hash)"
+                    " VALUES (?,?,?,?,?,?,?)",
                     rows,
                 )
                 conn.commit()
@@ -497,12 +607,12 @@ def ensure_vectors(user_id: str, *, limit_batches: int | None = None) -> dict:
         return {"embedded": done, "total": len(chunks), "error": str(exc)[:200]}
 
     clear_cache(user_id)
-    return {"embedded": done, "total": len(chunks)}
+    return {"embedded": done, "total": len(chunks), "pruned": len(orphans)}
 
 
 def forget_document(doc_id: str) -> None:
     """删书时清掉它的向量。不清理的话，几本删过的书会留下几十 MB 的死数据。"""
-    if not VECTOR_DB.exists():
+    if not vector_db_path().exists():
         return
     conn = _connect_vectors()
     try:
@@ -543,20 +653,29 @@ _cache: dict[str, _Index] = {}
 
 
 def _signature(user_id: str) -> tuple:
-    """语料指纹：书、段数、更新时间。任何一个变了就重建索引。
+    """语料指纹：书、段数、更新时间、**语料版本**、**向量模型名**。
+
+    前三个抓不住两类变化，都会让内存索引拿着旧正文服务：
+    - **同数量重切**、**同一秒内两次重切**（`updated_at` 只到秒）；
+    - **换了 embedding 模型**（向量空间变了，余弦不再可比）。
+    所以补上 `documents.corpus_version()`（任何写 chunks 的路径都会 bump）和模型名。
     """
     documents_list = documents.list_documents(user_id)
-    return tuple(
-        sorted(
-            (
-                item["doc_id"],
-                item["status"],
-                item.get("chunk_count"),
-                item.get("updated_at"),
+    return (
+        documents.corpus_version(),
+        _embedding_model() if embedding_enabled() else "",
+        tuple(
+            sorted(
+                (
+                    item["doc_id"],
+                    item["status"],
+                    item.get("chunk_count"),
+                    item.get("updated_at"),
+                )
+                for item in documents_list
+                if item["status"] == documents.STATUS_READY
             )
-            for item in documents_list
-            if item["status"] == documents.STATUS_READY
-        )
+        ),
     )
 
 

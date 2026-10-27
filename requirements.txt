@@ -29,6 +29,10 @@ aiosqlite==0.22.1
 pymupdf==2.0.0
 python-pptx==1.0.2
 python-docx==1.2.0
+# MinerU 云端解析（mineru.py）：requests 走 HTTP，
+# pillow 把云端返回的 jpg 转存成 PNG——`render_markdown` 固定按 `.png` 拼引用。
+requests==2.34.2
+pillow==13.0.0
 
 # 教材检索的向量打分（retrieval.py）。只用来算「一条查询 × 几千条向量」的点积：
 # 纯 Python 循环要几秒，numpy 十几毫秒。**也是可选依赖**——没装就退回纯 BM25，

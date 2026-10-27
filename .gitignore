@@ -22,9 +22,9 @@ backups/
 
 # 教材原件：26 个 PDF 共 461M，属于输入数据不是源码。
 # 曾经因为没忽略，反复 git add 大 PDF 中断，在 .git/objects 里留下 36G 临时对象。
-textbook/
 
-# 解析产物：随时能从 textbook/ 重新生成，和 data/ 同理。
+# 解析产物（out/ 等）。注意 textbook/ 已移出仓库：原文件只存在 data/uploads/，
+# 丢了只能让用户重新上传，不能靠「重新解析」找回。
 out/
 
 # bench 基准输出：每次跑都生成新报告，历史结果留在本机即可。

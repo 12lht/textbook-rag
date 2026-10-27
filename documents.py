@@ -17,14 +17,22 @@ page_end 两个，跨页 chunk 只记一个必然错。
 """
 from __future__ import annotations
 
+import base64
+import difflib
 import hashlib
+import html.parser
+import io
 import json
 import logging
 import os
 import re
 import secrets
 import sqlite3
+import sys
+import tempfile
 import threading
+import time
+import unicodedata
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -54,6 +62,8 @@ STALE_PARSING_MINUTES = 30
 TARGET_CHARS = 250
 MAX_CHARS = 900
 MIN_CHARS = 80
+# 比这还短的正文段一定是碎片（「开始」「则」「–结尾:」），再被图/公式夹着也要就近并掉
+_TINY_CHARS = 10
 
 _CAPTION_RE = re.compile(
     r"^\s*(图|表|Figure|Fig\.?|Table)\s*[（(]?\s*"
@@ -65,14 +75,12 @@ _CAPTION_VERBS = (
     "所示", "中", "为", "是", "表示", "展示", "给出", "描述", "说明", "显示",
     "列出", "对比", "描绘", "列举", "呈现", "可见", "反映了", "是一种",
 )
-_FORMULA_NO_RE = re.compile(r"^\s*[（(]\s*([0-9]+(?:\s*[-－.．–—‑]\s*[0-9]+)+)\s*[)）]\s*$")
 _HEADING_RE = re.compile(
     r"^\s*(第\s*[0-9一二三四五六七八九十百]+\s*[章节篇部]"
     r"|[0-9]+(\.[0-9]+){1,2}\s*[、.．]?\s*\S"
     r"|Chapter\s+[0-9]+)",
     re.IGNORECASE,
 )
-_PAGE_NO_RE = re.compile(r"^\s*[-—–]?\s*[0-9]{1,4}\s*[-—–]?\s*$|^\s*第\s*[0-9]{1,4}\s*页\s*$|^\s*[0-9]{1,4}\s*/\s*[0-9]{1,4}\s*$")
 
 
 _SCHEMA = """
@@ -140,10 +148,16 @@ CREATE TABLE IF NOT EXISTS categories (
 -- 同一个人的分类不许重名（换个人可以有同名分类，各自的库互不可见）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name ON categories(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id, created_at);
+
+-- 语料版本：段落内容一变就换一个随机值。检索侧靠它判断内存索引是否过期——
+-- 只看「段数 + updated_at」抓不住「同数量重切」和「同一秒内两次重切」（时间戳只到秒）。
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 _init_lock = threading.Lock()
-
 
 
 def _now() -> str:
@@ -151,15 +165,15 @@ def _now() -> str:
 
 
 def _schema_ready(conn: sqlite3.Connection) -> bool:
-    """四张表都在才算就绪。加新表必须同步加进来：建表只在「不就绪」时跑，只判一部分的话
+    """五张表都在才算就绪。加新表必须同步加进来：建表只在「不就绪」时跑，只判一部分的话
     老库永远进不了建表分支（同样的坑踩过三次）。
     """
-    expected = {"documents", "chunks", "assets", "categories"}
+    expected = {"documents", "chunks", "assets", "categories", "meta"}
     found = {
         row[0]
         for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
-            " AND name IN ('documents', 'chunks', 'assets', 'categories')"
+            " AND name IN ('documents', 'chunks', 'assets', 'categories', 'meta')"
         )
     }
     return found == expected
@@ -195,7 +209,31 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE documents ADD COLUMN warning TEXT")
     if "category_id" not in columns:
         conn.execute("ALTER TABLE documents ADD COLUMN category_id TEXT")
+    # 语料版本初始化：空串会被误读成「从来没有写过」，给一个初值再说
+    if conn.execute("SELECT 1 FROM meta WHERE key = 'chunks'").fetchone() is None:
+        _bump_corpus(conn)
     conn.commit()
+
+
+def _bump_corpus(conn: sqlite3.Connection) -> None:
+    """段落内容变了就换一个语料版本号。**每个写 chunks 的地方都要调**：
+    检索侧的内存索引、向量新鲜度都靠它判断（详见 `retrieval._signature`）。
+
+    为什么不能只靠 `updated_at`：它只精确到秒，同一秒里连做两次重切看起来一模一样；
+    而「段数不变、内容换了」正是补图注、包公式这些操作的标准形态。
+    """
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('chunks', ?)"
+        " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (secrets.token_hex(8),),
+    )
+
+
+def corpus_version() -> str:
+    """当前语料版本。读不到（老库刚建表）就返回空串。"""
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key = 'chunks'").fetchone()
+    return str(row[0]) if row else ""
 
 
 def _row_to_doc(row: sqlite3.Row) -> dict[str, object]:
@@ -223,7 +261,6 @@ class DocumentError(Exception):
     和「代码 bug」分开，因为这些错**要原样告诉用户**（写进 `documents.error`
     并在列表里显示），而不是吞掉或 500。
     """
-
 
 
 def create_upload(user_id: str, filename: str, data: bytes) -> dict[str, object]:
@@ -294,7 +331,6 @@ def _new_doc_id(conn: sqlite3.Connection) -> str:
     raise DocumentError("生成教材编号失败，请重试。")
 
 
-
 @dataclass
 class _Element:
     """切分前的中间形态：一段正文、一张图、或一个公式编号。
@@ -321,10 +357,14 @@ class _Parsed:
     toc: list[list] = field(default_factory=list)
     warning: str | None = None
     section_per_page: bool = False
+    # 图片 sha1 → asset_id，只在单次解析内用来去重，不入库
+    asset_hashes: dict[str, str] = field(default_factory=dict)
 
 
 def parse_document(doc_id: str) -> dict[str, object]:
     """把一本 pending 的书解析完，返回最终记录。
+
+    PDF 固定走 MinerU（`_parse_pdf` 里没有第二条路），失败即报错、不回退。
 
     阻塞（CPU + 磁盘），调用方必须丢线程池。失败时写 `documents.error` 并置 failed，不抛异常
     （调用它的后台任务没人接）。产出 `documents.markdown` + 从它切出的 chunks——**切分只读
@@ -372,6 +412,10 @@ def rechunk(doc_id: str) -> dict[str, object]:
     """只重切、不重解析，用于调完切分参数后批量重跑。这是 Markdown 中间态带来的能力：
     解析要几十秒还要原文件，重切只要读一列文本 + 一遍正则。不碰 `assets`（图是解析产物，
     重切只改「怎么分段」）。
+
+    **重切完必须让向量跟上**（`_sync_vectors`）：`chunk_id` 是位置式编号，重切后 id 不变
+    但正文可能已经换了，`ensure_vectors` 不看内容就以为「已经有了」。以前靠调用方自觉补
+    这一步，`scripts/fill-concepts.py` 就是漏的那个——图 chunk 的向量一直指向「第 N 页 插图」。
     """
     with _connect() as conn:
         row = conn.execute(
@@ -410,8 +454,233 @@ def rechunk(doc_id: str) -> dict[str, object]:
             "UPDATE documents SET chunk_count = ?, updated_at = ? WHERE doc_id = ?",
             (len(chunks), _now(), doc_id),
         )
+        _bump_corpus(conn)
         conn.commit()
+    _sync_vectors(doc_id)
     return {"doc_id": doc_id, "chunk_count": len(chunks)}
+
+
+def _sync_vectors(doc_id: str) -> dict | None:
+    """让这本书的向量跟上当前段落。**失败只记日志**——向量是增强项，不能让重切失败。
+
+    按内容哈希只补「变了或没有」的那些（见 `retrieval.ensure_vectors`），所以重复调用
+    很便宜；`forget_document` 那种「全删重算」只在删书时用。
+    """
+    import retrieval
+
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM documents WHERE doc_id = ?", (doc_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    user_id = str(row["user_id"])
+    if Path(DB_PATH).parent.resolve() != retrieval.vector_db_path().parent.resolve():
+        # 文档库和向量库不在同一个目录 = 有人把库指到了临时目录（探针、离线实验）。
+        # 这时候同步向量等于往真库里塞临时书的数据，直接跳过。
+        _log.debug("文档库与向量库不同目录，跳过后台补向量 doc=%s", doc_id)
+        return None
+    try:
+        result = retrieval.ensure_vectors(user_id)
+        retrieval.clear_cache(user_id)  # 段落变了，内存索引必须重建
+        if result.get("reason") or result.get("error"):
+            # 「没配 key」也算失败：向量停在旧正文上，检索会慢慢变错而且完全不报错
+            _log.warning("重切后向量没补齐 doc=%s：%s", doc_id, result)
+        return result
+    except Exception:  # noqa: BLE001 - 向量服务挂了不该影响切分结果
+        _log.warning("重切后补向量失败 doc=%s", doc_id, exc_info=True)
+        return None
+
+
+_PLACEHOLDER_ALT_RE = re.compile(r"!\[第 (\d+) 页 插图\]\((as_[0-9a-f]{4,})\.png\)")
+
+# ── 存量修复：把正文里的裸 LaTeX 包成 `$..$` ───────────────────────────────────
+# 老解析把 MinerU 的 `equation_inline` 直接拼成文本（整库 5749 处），前端不渲染、检索是噪声。
+# 代码已修（`_inline_text` 现在会包），这里只处理**已入库的 Markdown**：重新解析一轮太贵，
+# 而这些片段在中文正文里几乎不会与其他东西混淆，所以用边界扫描找回公式的边界。
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.S)
+_BLOCK_MATH_RE = re.compile(r"\$\$.*?\$\$", re.S)
+_INLINE_MATH_RE = re.compile(r"\$[^$\n]+\$")
+# 图片引用必须整段保护：`![图注](as_x.png)` 里既有 `]` 又有 `(`，
+# 公式边界一跨过去就会包成 `$...](as_x.png)$`，前端渲染直接报红（11_隐马尔科夫-I 踩过）。
+_IMAGE_REF_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_LATEX_CMD_RE = re.compile(r"\\[a-zA-Z]{2,}")
+_CJK_PUNCT = set("，。；：、！？（）《》「」【】…—·～“”‘’")
+
+
+def _is_stop(ch: str) -> bool:
+    """公式片段到这里就结束：汉字、中文标点、换行、反引号，以及被保护起来的占位符。"""
+    if ch in "\x00\n`":
+        return True
+    if ch in _CJK_PUNCT:
+        return True
+    return "\u4e00" <= ch <= "\u9fff" or "\u3000" <= ch <= "\u303f" or "\uff00" <= ch <= "\uffef"
+
+
+def wrap_inline_math(markdown: str) -> tuple[str, int]:
+    """把正文里裸的 LaTeX 片段包成 `$..$`，返回 (新文本, 包裹了几处)。
+
+    先保护掉代码块、`$$..$$`、已有的 `$..$`（换成占位符），再以每个 `\\命令` 为锚点向左右
+    扩到边界，重叠区间合并后一次性重建。**表格行整行跳过**——`|` 既是列分隔又可能是
+    `\\left| x \\right|`，分不清就别动。
+    """
+    stash: list[str] = []
+
+    def protect(match: re.Match) -> str:
+        stash.append(match.group(0))
+        return f"\x00{len(stash) - 1}\x00"
+
+    text = markdown
+    for pattern in (_CODE_FENCE_RE, _IMAGE_REF_RE, _BLOCK_MATH_RE, _INLINE_MATH_RE):
+        text = pattern.sub(protect, text)
+
+    spans: list[tuple[int, int]] = []
+    for match in _LATEX_CMD_RE.finditer(text):
+        start, end = match.start(), match.end()
+        if spans and start < spans[-1][1]:
+            continue
+        left = start
+        while left > 0 and not _is_stop(text[left - 1]):
+            left -= 1
+        right = end
+        while right < len(text) and not _is_stop(text[right]):
+            right += 1
+        segment = text[left:right]
+        left += len(segment) - len(segment.lstrip())
+        right -= len(segment) - len(segment.rstrip())
+        if right <= left:
+            continue
+        # 表格行：这一行的第一个非空白字符是 `|` 就整行不动。
+        # **不能拿 `text[line_start:left]` 判**：`|` 不是停止符，第一格以 `\left\| x`
+        # 开头时 left 会一路退到行首，`lstrip().startswith("|")` 就变成「不以 | 开头」，
+        # 整行被包成 `$| \left\| x \right\| |$`，表格结构直接毁掉。
+        line_start = text.rfind("\n", 0, left) + 1
+        line_end = text.find("\n", right)
+        line = text[line_start: line_end if line_end >= 0 else len(text)]
+        first_char = next((ch for ch in line if not ch.isspace()), "")
+        if first_char == "|":
+            continue
+        if spans and left <= spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], right))
+        else:
+            spans.append((left, right))
+
+    if not spans:
+        return markdown, 0
+
+    parts: list[str] = []
+    cursor = 0
+    for left, right in spans:
+        parts.append(text[cursor:left])
+        parts.append(f"${text[left:right]}$")
+        cursor = right
+    parts.append(text[cursor:])
+    wrapped = "".join(parts)
+    for index, original in enumerate(stash):
+        wrapped = wrapped.replace(f"\x00{index}\x00", original)
+    return wrapped, len(spans)
+
+
+
+def fix_inline_math(doc_id: str) -> dict[str, object]:
+    """把存量 Markdown 里的裸 LaTeX 包成 `$..$` 并重切。**不重解析**。
+
+    改完 chunk 正文就变了，所以调用方必须跟一步 `retrieval.forget_document` + `ensure_vectors`
+    ——`chunk_id` 不变、`ensure_vectors` 会以为「已经有了」直接跳过，语义检索就会对着旧文本算。
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT markdown, status FROM documents WHERE doc_id = ?", (doc_id,)
+        ).fetchone()
+    if row is None:
+        raise KeyError(doc_id)
+    if row["status"] != STATUS_READY or not row["markdown"]:
+        raise DocumentError("这本书还没有解析完成。")
+
+    updated, wrapped = wrap_inline_math(row["markdown"])
+    if not wrapped:
+        return {"doc_id": doc_id, "wrapped": 0}
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE documents SET markdown = ?, updated_at = ? WHERE doc_id = ?",
+            (updated, _now(), doc_id),
+        )
+        conn.commit()
+    rechunk(doc_id)
+    return {"doc_id": doc_id, "wrapped": wrapped}
+
+
+def describe_placeholders(doc_id: str, *, limit: int = 200) -> dict[str, object]:
+    """把「第 N 页 插图」这种占位图注换成模型写的一句话，**不重解析**。
+
+    走的是 Markdown 中间态那条路：改文本 → 重切。所以既不烧 MinerU 额度，也不要原文件。
+    图注写不出来就保持占位——这是个纯优化，任何一张失败都不该让整本书失败。
+    """
+    import figures
+
+    if not figures.available():
+        return {"doc_id": doc_id, "filled": 0, "total": 0, "reason": "未配置视觉模型"}
+
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT markdown, status FROM documents WHERE doc_id = ?", (doc_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(doc_id)
+        if row["status"] != STATUS_READY or not row["markdown"]:
+            raise DocumentError("这本书还没有解析完成。")
+        paths = {
+            item["asset_id"]: item["file_path"]
+            for item in conn.execute(
+                "SELECT asset_id, file_path FROM assets WHERE doc_id = ?", (doc_id,)
+            )
+        }
+
+    markdown = row["markdown"]
+    total = len(set(_PLACEHOLDER_ALT_RE.findall(markdown)))
+    if not total:
+        return {"doc_id": doc_id, "filled": 0, "total": 0, "reason": "没有占位图注"}
+
+    filled: dict[str, str] = {}
+    failures = 0
+    for _, asset_id in _PLACEHOLDER_ALT_RE.findall(markdown):
+        if len(filled) >= limit or failures >= _VLM_FAIL_LIMIT:
+            break
+        if asset_id in filled:
+            continue
+        path = paths.get(asset_id)
+        if not path:
+            continue
+        # 和解析链路一样节流：全库补图注是连着打几百次，不打间隔会被服务端限流
+        # （实测响应从 4s 掉到 40s，接着就触发熔断，剩下的全成占位）
+        time.sleep(_VLM_INTERVAL)
+        text = figures.describe(Path(path))
+        if text:
+            filled[asset_id] = text
+            failures = 0
+        else:
+            failures += 1
+
+    if not filled:
+        return {"doc_id": doc_id, "filled": 0, "total": total, "reason": "模型没写出图注"}
+
+    def swap(match: re.Match) -> str:
+        text = filled.get(match.group(2))
+        return f"![{text}]({match.group(2)}.png)" if text else match.group(0)
+
+    updated = _PLACEHOLDER_ALT_RE.sub(swap, markdown)
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE documents SET markdown = ?, updated_at = ? WHERE doc_id = ?",
+            (updated, _now(), doc_id),
+        )
+        conn.executemany(
+            "UPDATE assets SET caption = ? WHERE asset_id = ?",
+            [(text, asset_id) for asset_id, text in filled.items()],
+        )
+        conn.commit()
+    rechunk(doc_id)
+    return {"doc_id": doc_id, "filled": len(filled), "total": total}
 
 
 def _set_status(doc_id: str, status: str, error: str | None = None) -> None:
@@ -490,6 +759,7 @@ def _store(doc_id: str, parsed: _Parsed, markdown: str, chunks: list[dict]) -> N
                 doc_id,
             ),
         )
+        _bump_corpus(conn)
         conn.commit()
 
 
@@ -508,7 +778,6 @@ def reconcile_pending() -> int:
         return cursor.rowcount
 
 
-
 def list_documents(user_id: str) -> list[dict[str, object]]:
     with _connect() as conn:
         rows = conn.execute(
@@ -516,7 +785,6 @@ def list_documents(user_id: str) -> list[dict[str, object]]:
             (user_id,),
         ).fetchall()
     return [_row_to_doc(row) for row in rows]
-
 
 
 MAX_CATEGORY_NAME = 40
@@ -689,6 +957,7 @@ def delete_document(doc_id: str, user_id: str) -> bool:
         conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
         conn.execute("DELETE FROM assets WHERE doc_id = ?", (doc_id,))
         conn.execute("DELETE FROM documents WHERE doc_id = ?", (doc_id,))
+        _bump_corpus(conn)
         conn.commit()
 
     for directory in (UPLOAD_DIR / doc_id, ASSET_DIR / doc_id):
@@ -743,6 +1012,38 @@ def chunks_of_user(user_id: str) -> list[dict[str, object]]:
     return [dict(row) for row in rows]
 
 
+def _resolve_asset_file(stored: str, doc_id: str) -> str:
+    """库里的绝对路径可能来自旧机器（换盘、搬目录后整批失效，实测 916/916 全断）。
+    先认存的；不认就退回 `ASSET_DIR/<doc_id>/<文件名>`——那是图唯一合法的落点。
+    不在库里改写路径：换一次机器就要改一次，改在读取侧只需一次。"""
+    path = Path(stored or "")
+    if path.is_file():
+        return str(path)
+    fallback = ASSET_DIR / doc_id / path.name
+    return str(fallback if fallback.is_file() else path)
+
+
+def file_of(doc_id: str, user_id: str) -> dict[str, object] | None:
+    """取一本书的原始上传文件。**归属检查在这一层**（doc → user 一次 SQL）。
+
+    原来只给前端看解析出的 Markdown，现在普通用户直接看 PDF 原文——
+    渲染那套（KaTeX、分块、折叠）留给开发者/管理员，普通用户不需要它。
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT doc_id, title, filename, kind, status, file_path FROM documents"
+            " WHERE doc_id = ? AND user_id = ?",
+            (doc_id, user_id),
+        ).fetchone()
+    if row is None:
+        return None
+    record = dict(row)
+    path = Path(str(record.get("file_path") or ""))
+    record["path"] = path
+    record["exists"] = path.is_file()
+    return record
+
+
 def asset_of(asset_id: str, user_id: str) -> dict[str, object] | None:
     """取一张图。**三级越权检查**：asset → doc → user，一次 SQL 走完。"""
     with _connect() as conn:
@@ -752,7 +1053,11 @@ def asset_of(asset_id: str, user_id: str) -> dict[str, object] | None:
             " WHERE a.asset_id = ? AND d.user_id = ?",
             (asset_id, user_id),
         ).fetchone()
-    return dict(row) if row else None
+    if row is None:
+        return None
+    record = dict(row)
+    record["file_path"] = _resolve_asset_file(str(record.get("file_path") or ""), str(record["doc_id"]))
+    return record
 
 
 #     ![图 3-4 抽样过程的示意](as_77.png)
@@ -783,6 +1088,50 @@ def normalize_bullets(text: str) -> str:
     )
 
 
+"""Symbol 字体（SymbolMT 等）排的数学符号没有 ToUnicode，两个引擎都原样吐出 U+F0xx，
+编辑器里显示成空白——不映射就等于符号全丢。下面是 Adobe Symbol 的内建编码（0x20-0xFE）。"""
+_SYMBOL_GREEK_UP = "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ"
+_SYMBOL_GREEK_LO = "αβχδεφγηιϕκλμνοπθρστυϖωξψζ"
+_SYMBOL_MAP = {
+    0x20: " ", 0x21: "!", 0x22: "∀", 0x23: "#", 0x24: "∃", 0x25: "%", 0x26: "&",
+    0x27: "∋", 0x28: "(", 0x29: ")", 0x2A: "∗", 0x2B: "+", 0x2C: ",", 0x2D: "−",
+    0x2E: ".", 0x2F: "/", 0x3A: ":", 0x3B: ";", 0x3C: "<", 0x3D: "=", 0x3E: ">",
+    0x3F: "?", 0x40: "≅", 0x5B: "[", 0x5C: "∴", 0x5D: "]", 0x5E: "⊥", 0x5F: "_",
+    0x60: "‾", 0x7B: "{", 0x7C: "|", 0x7D: "}", 0x7E: "∼",
+    0xA0: "€", 0xA1: "ϒ", 0xA2: "′", 0xA3: "≤", 0xA4: "⁄", 0xA5: "∞", 0xA6: "ƒ",
+    0xA7: "♣", 0xA8: "♦", 0xA9: "♥", 0xAA: "♠", 0xAB: "↔", 0xAC: "←", 0xAD: "↑",
+    0xAE: "→", 0xAF: "↓", 0xB0: "°", 0xB1: "±", 0xB2: "″", 0xB3: "≥", 0xB4: "×",
+    0xB5: "∝", 0xB6: "∂", 0xB7: "•", 0xB8: "÷", 0xB9: "≠", 0xBA: "≡", 0xBB: "≈",
+    0xBC: "…", 0xBD: "⏐", 0xBE: "⎯", 0xBF: "↵", 0xC0: "ℵ", 0xC1: "ℑ", 0xC2: "ℜ",
+    0xC3: "℘", 0xC4: "⊗", 0xC5: "⊕", 0xC6: "∅", 0xC7: "∩", 0xC8: "∪", 0xC9: "⊃",
+    0xCA: "⊇", 0xCB: "⊄", 0xCC: "⊂", 0xCD: "⊆", 0xCE: "∈", 0xCF: "∉", 0xD0: "∠",
+    0xD1: "∇", 0xD2: "®", 0xD3: "©", 0xD4: "™", 0xD5: "∏", 0xD6: "√", 0xD7: "·",
+    0xD8: "¬", 0xD9: "∧", 0xDA: "∨", 0xDB: "⇔", 0xDC: "⇐", 0xDD: "⇑", 0xDE: "⇒",
+    0xDF: "⇓", 0xE0: "◊", 0xE1: "⟨", 0xE5: "∑", 0xF1: "⟩", 0xF2: "∫", 0xF3: "⌠",
+    0xF4: "⎮", 0xF5: "⌡",
+}
+# 矩阵/分式的括号拼块（0xE6-0xEF、0xF6-0xFE）本身没有语义，留着只是噪音
+_SYMBOL_BOX_CODES = (0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE,
+                     0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE)
+
+
+def _build_symbol_table() -> dict[int, str]:
+    table = {0xF000 + code: ch for code, ch in _SYMBOL_MAP.items()}
+    table.update({0xF030 + i: chr(0x30 + i) for i in range(10)})
+    table.update({0xF041 + i: ch for i, ch in enumerate(_SYMBOL_GREEK_UP)})
+    table.update({0xF061 + i: ch for i, ch in enumerate(_SYMBOL_GREEK_LO)})
+    table.update({0xF000 + code: " " for code in _SYMBOL_BOX_CODES})
+    return table
+
+
+_SYMBOL_TABLE = _build_symbol_table()
+
+
+def fix_symbol_font(text: str) -> str:
+    if not text:
+        return text
+    return text.translate(_SYMBOL_TABLE)
+
 
 def render_markdown(elements: list[_Element]) -> str:
     """元素流 → 带锚点的 Markdown，解析的唯一出口。
@@ -799,15 +1148,39 @@ def render_markdown(elements: list[_Element]) -> str:
             parts.append(f"<!-- page:{element.page} -->")
             last_page = element.page
         if element.kind in {"figure", "formula"} and element.asset_id:
-            parts.append(f"![{element.content}]({element.asset_id}.png)")
+            # 图号要写回 alt：markdown_elements 会把 `图 2-5 题注` 拆成 label + 题注，
+            # 这里不拼回去的话，渲染→解析一来回图号就丢了。
+            # **只拼带数字的 label**——`插图` 是没号时的兜底文案，拼进去会变成「插图 OFDM…」。
+            alt = element.content
+            numbered = element.label and any(ch.isdigit() for ch in element.label)
+            if numbered and element.label not in element.content:
+                alt = f"{element.label} {element.content}"
+            parts.append(f"![{alt}]({element.asset_id}.png)")
             continue
         if element.kind == "code":
-            parts.append(f"```{element.label or ''}\n{element.content.rstrip()}\n```")
+            # `rstrip("\n")` 而不是 `rstrip()`：后者会把最后一行行尾的空格也吃掉，
+            # render → parse → render 一次就少一个字符（probe-markdown 的往返断言会红）
+            parts.append(f"```{element.label or ''}\n{element.content.rstrip(chr(10))}\n```")
             continue
-        body = normalize_bullets(element.content.strip())
+        body = normalize_bullets(fix_symbol_font(element.content.strip()))
         if body:
             parts.append(body)
     return "\n\n".join(parts)
+
+
+def _image_element(alt: str, path: str, page: int, chapter: str | None) -> _Element:
+    """`![alt](as_x.png)` → 元素。alt 里带「图 3-4 题注」时要拆开：label 记图号，
+    题注才拿去检索——整句塞进 content 会让引用重复编号。"""
+    asset_id = path.rsplit(".", 1)[0]
+    hit = _match_caption(alt)
+    return _Element(
+        kind="formula" if alt.startswith("式") else "figure",
+        content=(hit[1] if hit else alt),
+        page=page,
+        chapter=chapter,
+        asset_id=asset_id,
+        label=(hit[0] if hit else None),
+    )
 
 
 def markdown_elements(markdown: str) -> list[_Element]:
@@ -833,8 +1206,20 @@ def markdown_elements(markdown: str) -> list[_Element]:
 
     in_code = False
     code_lang = ""
+    in_formula = False
     for raw in markdown.splitlines():
         stripped = raw.lstrip()
+        if in_formula:
+            # $$ 块可能跨行（MinerU 的长公式），一直吃到收尾的 $$
+            buffer.append(raw.rstrip())
+            if raw.rstrip().endswith("$$"):
+                text = "\n".join(buffer)
+                elements.append(
+                    _Element(kind="formula", content=text, page=page, chapter=chapter)
+                )
+                buffer = []
+                in_formula = False
+            continue
         if stripped.startswith("```"):
             if in_code:
                 text = "\n".join(buffer)
@@ -857,8 +1242,29 @@ def markdown_elements(markdown: str) -> list[_Element]:
                 in_code = True
             continue
         if in_code:
-            buffer.append(raw.rstrip())
-            continue
+            anchor_line = raw.rstrip()
+            if not (
+                _PAGE_ANCHOR_RE.match(anchor_line) or _CHAPTER_ANCHOR_RE.match(anchor_line)
+            ):
+                buffer.append(raw)  # 代码块里的行尾空格是内容的一部分，别 rstrip
+                continue
+            # **围栏没闭合时不能一路吞到文件尾**：MinerU 偶尔给出不成对的 ```，
+            # 旧逻辑会把后面几十页全当代码（Hello-Agents 因此产出一条 36106 字的 code chunk，
+            # 里面混着页码锚点和整段正文）。页码/章节锚点是硬边界，遇到先把代码收尾。
+            text = "\n".join(buffer)
+            if text.strip():
+                elements.append(
+                    _Element(
+                        kind="code",
+                        content=text,
+                        page=page,
+                        chapter=chapter,
+                        label=code_lang or None,
+                    )
+                )
+            buffer = []
+            code_lang = ""
+            in_code = False
 
         line = raw.rstrip()
         anchor = _PAGE_ANCHOR_RE.match(line)
@@ -869,26 +1275,52 @@ def markdown_elements(markdown: str) -> list[_Element]:
         anchor = _CHAPTER_ANCHOR_RE.match(line)
         if anchor:
             flush()
-            chapter = anchor.group(1)
+            # 顺手洗一遍：老文档的 md 里章节还带着 `<sup>` 之类标记，rechunk 就能修好
+            chapter = _clean_heading(anchor.group(1)) or anchor.group(1)
             continue
         if not line.strip():
             flush()
             continue
 
+        # 行间公式：MinerU 的 equation_interline 转成了 `$$..$$`，这里必须认回来，
+        # 否则过一遍 md 就退化成正文，引用里也不会标「公式」
+        if line.startswith("$$"):
+            flush()
+            if len(line.strip()) > 2 and line.strip().endswith("$$"):
+                elements.append(
+                    _Element(kind="formula", content=line.strip(), page=page, chapter=chapter)
+                )
+            else:
+                buffer = [line]
+                in_formula = True
+            continue
+
         image = _IMAGE_LINE_RE.match(line)
         if image:
             flush()
-            alt, path = image.group(1), image.group(2)
-            asset_id = path.rsplit(".", 1)[0]
-            elements.append(
-                _Element(
-                    kind="formula" if alt.startswith("式") else "figure",
-                    content=alt,
-                    page=page,
-                    chapter=chapter,
-                    asset_id=asset_id,
-                )
-            )
+            elements.append(_image_element(image.group(1), image.group(2), page, chapter))
+            continue
+
+        if "![" in line and _IMAGE_REF_RE.search(line):
+            # 图片夹在正文同一行（MinerU 偶尔给 `…如图 ![图 2-3 x](as_1.png) 所示…`）。
+            # 不拆开的话这条 `![](as_x.png)` 永远进不了独立 chunk，`assets` 里那张图
+            # 就成了「不在任何 chunk 里」的孤儿（实测 106 张），figures_by_doc 也看不到。
+            cursor = 0
+            for match in _IMAGE_REF_RE.finditer(line):
+                head = line[cursor:match.start()].strip()
+                if head:
+                    if buffer_kind == "table":
+                        flush()
+                    buffer.append(head)
+                flush()
+                whole = match.group(0)
+                alt = whole[2:whole.index("]")]
+                path = whole[whole.index("](") + 2:-1]
+                elements.append(_image_element(alt, path, page, chapter))
+                cursor = match.end()
+            tail = line[cursor:].strip()
+            if tail:
+                buffer.append(tail)
             continue
 
         if line.startswith("|"):
@@ -918,13 +1350,42 @@ def markdown_elements(markdown: str) -> list[_Element]:
     return elements
 
 
-
 def cut_chunks(markdown: str, doc_id: str, *, section_per_page: bool = False) -> list[dict]:
     """Markdown → 段落列表，只读文本、不碰解析器。
     `section_per_page`（每页必须断开，只有 PPT 用）是切分策略而不是元素属性——挂在元素上
     过一遍 `render_markdown` 就丢了，PPT 的三页又会被合并成一条。
     """
     return _cut_chunks(markdown_elements(markdown), doc_id, section_per_page=section_per_page)
+
+
+_ANCHOR_ONLY_RE = re.compile(r"^(?:\s*<!--\s*(?:page|chapter):[^>]*-->\s*)+$")
+MAX_CODE_CHARS = 1600  # 代码块超过这么长就按行切开：36k 一条的向量等于什么都搜不到
+
+
+def _split_code(text: str, limit: int = MAX_CODE_CHARS) -> list[str]:
+    """按行切代码，每块尽量接近 `limit`。**不切断行**（单行超长才硬切）。
+
+    代码块原来整块成一条 chunk（不经过 `_split_long`，因为切开会破坏语法）。可实测最坏
+    36106 字一条，向量被稀释得几乎没用，上下文窗口也会被它吃掉大半；按行切成 1.6k 左右
+    既不破坏语法，也让每块有独立语义。
+    """
+    if len(text) <= limit:
+        return [text]
+    pieces: list[str] = []
+    current: list[str] = []
+    size = 0
+    for line in text.splitlines(keepends=True):
+        if size + len(line) > limit and current:
+            pieces.append("".join(current))
+            current, size = [], 0
+        while len(line) > limit:  # 单行超长：硬切，否则永远攒不下一块
+            pieces.append(line[:limit])
+            line = line[limit:]
+        current.append(line)
+        size += len(line)
+    if current:
+        pieces.append("".join(current))
+    return [piece for piece in pieces if piece.strip()]
 
 
 def _cut_chunks(
@@ -938,6 +1399,7 @@ def _cut_chunks(
     3. 到 TARGET 且刚好在句末就断，到 MAX 无条件断（尽量在句号处断，别给半句话）。
 
     表格是原子块：不能被 _split_long 切开（markdown 表格拦腰截断就是乱码），放不下就 flush。
+    代码块按行切开（见 `_split_code`）：既保住语法，又不让单条长到几万字。
     """
     chunks: list[dict] = []
     buffer: list[_Element] = []
@@ -951,7 +1413,7 @@ def _cut_chunks(
         if not buffer:
             return
         text = _join_elements(buffer)
-        if text.strip():
+        if text.strip() and not _ANCHOR_ONLY_RE.match(text):
             kind = "table" if all(item.kind == "table" for item in buffer) else "text"
             chunks.append(_make_chunk(doc_id, chunks, buffer, text, kind=kind))
         buffer = []
@@ -974,9 +1436,10 @@ def _cut_chunks(
 
         if element.kind == "code":
             flush()
-            chunks.append(
-                _make_chunk(doc_id, chunks, [element], element.content, kind="code")
-            )
+            for piece in _split_code(element.content):
+                chunks.append(
+                    _make_chunk(doc_id, chunks, [element], piece, kind="code")
+                )
             continue
 
         if section_per_page and element.page != current_page and buffer:
@@ -1007,9 +1470,15 @@ def _cut_chunks(
 
 
 def _merge_short(chunks: list[dict]) -> list[dict]:
-    """把过短的正文片段并进前一条，然后重排序号。
-    短片段（图前最后一句、章尾几行）单独成条时检索能命中但答不出东西，还白占引用编号。
-    只合并正文：图的 content 是题注，并进正文会让 asset 引用出现在一段无关的文字里；跨章不合并。
+    """把过短的正文片段并进相邻段落，然后重排序号。
+
+    短片段（图前最后一句、章尾几行、被 OCR 切出来的「故」「则」「即」）单独成条时检索能
+    命中但答不出东西，还白占引用编号。两遍：
+    1. **向前并**——最常见，碎片本来就是上一段的尾巴；
+    2. **向后并**——上一段是图/表/公式时向前并不了（图注不是正文），只能挂到下一段开头。
+
+    只合并正文：图的 content 是题注，并进正文会让 asset 引用出现在一段无关的文字里；
+    跨章不合并（章节是引用的定位单元）。
     """
     merged: list[dict] = []
     for chunk in chunks:
@@ -1027,10 +1496,67 @@ def _merge_short(chunks: list[dict]) -> list[dict]:
             continue
         merged.append(chunk)
 
-    for index, chunk in enumerate(merged):
-        chunk["seq"] = index
-        chunk["chunk_id"] = chunk["chunk_id"].rsplit("-", 1)[0] + f"-{index:04d}"
-    return merged
+    # 第二遍：向前并不掉的，试着挂到下一段开头
+    folded: list[dict] = []
+    index = 0
+    while index < len(merged):
+        chunk = merged[index]
+        following = merged[index + 1] if index + 1 < len(merged) else None
+        if (
+            following is not None
+            and chunk["kind"] == "text"
+            and following["kind"] == "text"
+            and len(chunk["content"]) < MIN_CHARS
+            and len(chunk["content"]) + len(following["content"]) <= MAX_CHARS
+            and chunk["chapter"] == following["chapter"]
+        ):
+            following["content"] = f"{chunk['content']}\n\n{following['content']}"
+            following["page_start"] = min(chunk["page_start"], following["page_start"])
+            index += 2
+            continue
+        folded.append(chunk)
+        index += 1
+
+    # 第三遍：被图/公式夹住的碎片（一张流程图拆成「开始」「初始化」「判断」几行，
+    # 每行前后都是图），前两遍都够不着正文。就近并进 3 条以内最近的正文段。
+    index = 0
+    while index < len(folded):
+        chunk = folded[index]
+        if chunk["kind"] != "text" or len(chunk["content"]) >= _TINY_CHARS:
+            index += 1
+            continue
+        target = None
+        for distance in (1, 2, 3):
+            for offset in (-distance, distance):
+                candidate = index + offset
+                if not 0 <= candidate < len(folded):
+                    continue
+                other = folded[candidate]
+                if (
+                    other["kind"] == "text"
+                    and other["chapter"] == chunk["chapter"]
+                    and len(other["content"]) + len(chunk["content"]) + 2 <= MAX_CHARS
+                ):
+                    target = candidate
+                    break
+            if target is not None:
+                break
+        if target is None:
+            index += 1
+            continue
+        other = folded[target]
+        if target < index:
+            other["content"] = f"{other['content']}\n\n{chunk['content']}"
+            other["page_end"] = max(other["page_end"], chunk["page_end"])
+        else:
+            other["content"] = f"{chunk['content']}\n\n{other['content']}"
+            other["page_start"] = min(other["page_start"], chunk["page_start"])
+        del folded[index]
+
+    for position, chunk in enumerate(folded):
+        chunk["seq"] = position
+        chunk["chunk_id"] = chunk["chunk_id"].rsplit("-", 1)[0] + f"-{position:04d}"
+    return folded
 
 
 def _make_chunk(
@@ -1081,7 +1607,6 @@ def _split_long(text: str) -> list[str]:
     return pieces
 
 
-
 def _require(module: str, hint: str):
     """延迟 import 第三方解析库。缺了给出**能照做的**提示，而不是 ModuleNotFoundError。"""
     try:
@@ -1090,1098 +1615,534 @@ def _require(module: str, hint: str):
         raise DocumentError(f"缺少解析依赖 {module}，请先安装：{hint}") from exc
 
 
-def _looks_two_column(blocks: list, width: float) -> bool:
-    """这一页是不是双栏：看文字块左边缘有没有明显分界缝，不看「有没有两列文字」。
-
-    门槛缺一不可：块数 ≥ 6（太少时居中图注就能造出间隙）、间隙 > 页宽 15%、
-    左边贴页边距且右边落在右半页（排除「居中大标题 + 正文」）。
-    """
-    if len(blocks) < 6:
-        return False
-    xs = sorted(float(block[0]) for block in blocks)
-    gap, split = 0.0, None
-    for left, right in zip(xs, xs[1:]):
-        if right - left > gap:
-            gap, split = right - left, (left, right)
-    if split is None or gap < width * 0.15:
-        return False
-    left_count = sum(1 for x in xs if x <= split[0])
-    if left_count < 2 or len(xs) - left_count < 2:
-        return False
-    return split[0] < width * 0.25 and split[1] > width * 0.4
-
-
-def _pdf_preflight(pdf, pymupdf) -> dict[str, object]:
-    """解析前体检，返回 text_ratio（有文字层的页占比）和 columns（1 或 2）。
-
-    必须先探再解析：这两个条件不成立时解析器不报错，会安安静静产出一份读不通的文本、
-    状态还是 ready（3 页纯图 PDF 得到「已就绪 · 0 段」）。宁可拒绝，也别给一份假成品。
-    """
-    pages = int(pdf.page_count)
-    if pages <= 0:
-        return {"text_ratio": 0.0, "columns": 1, "probed": 0}
-
-    start = min(2, pages - 1)
-    span = pages - start
-    wanted = min(5, span)
-    indexes = sorted({
-        start + round(i * (span - 1) / max(wanted - 1, 1)) for i in range(wanted)
-    })
-    with_text = 0
-    two_column = 0
-    for index in indexes:
-        page = pdf[index]
-        blocks = [block for block in page.get_text("blocks") if block[4].strip()]
-        if blocks:
-            with_text += 1
-        if _looks_two_column(blocks, page.rect.width):
-            two_column += 1
-
-    slides = False
-    if pages >= 3:
-        rect = pdf[0].rect
-        if rect.height > 0 and rect.width / rect.height > 1.1:
-            chars = sorted(
-                len(pdf[index].get_text("text").strip()) for index in indexes
-            )
-            slides = chars[len(chars) // 2] < 500
-
-    return {
-        "text_ratio": with_text / len(indexes),
-        "columns": 2 if two_column * 2 >= len(indexes) else 1,
-        "probed": len(indexes),
-        "slides": slides,
-    }
-
-
 def _parse_pdf(data: bytes, asset_dir: Path) -> _Parsed:
-    pymupdf = _require("pymupdf", "pip install pymupdf")
-    pdf = pymupdf.open(stream=data, filetype="pdf")
-    try:
-        page_count = pdf.page_count
-        toc = pdf.get_toc(simple=True) or []
-        junk = _pdf_junk_lines(pdf)
-        parsed = _Parsed(page_count=page_count, toc=toc)
+    """PDF 解析入口：只有 MinerU 一条路。
 
-        preflight = _pdf_preflight(pdf, pymupdf)
-        if float(preflight["text_ratio"]) < 0.2:
-            raise DocumentError(
-                f"抽样的 {preflight['probed']} 页里只有 "
-                f"{float(preflight['text_ratio']):.0%} 有文字层，基本可以确定是扫描版"
-                "（整页都是图片）。当前版本不做 OCR，请换一本带文字层的 PDF。"
-            )
-        if preflight["slides"]:
-            parsed.section_per_page = True
-        if int(preflight["columns"]) == 2:
-            parsed.warning = (
-                "检测到双栏排版，当前按单栏解析，跨栏的段落顺序可能错乱；"
-                "正文仍可检索，但引用时请核对原文"
-            )
-
-        has_toc = any(len(entry) >= 3 and isinstance(entry[2], int) for entry in toc)
-        body_size = _pdf_body_size(pdf)
-        heading_size = 0.0 if has_toc else body_size
-        body_left = _pdf_body_left(pdf)
-        chapter: str | None = None
-        template_images = (
-            frozenset(_pdf_template_images(pdf)) if parsed.section_per_page else frozenset()
-        )
-
-        for page_index in range(page_count):
-            page = pdf[page_index]
-            page_no = page_index + 1
-            lines = _pdf_page_lines(page, junk, tight_cross_block=parsed.section_per_page)
-            if has_toc:
-                from_toc = _chapter_at(toc, page_no)
-                if from_toc:
-                    chapter = from_toc
-
-            elements, chapter = _pdf_page_elements(
-                parsed,
-                page,
-                page_no,
-                lines,
-                chapter,
-                asset_dir,
-                body_size=body_size,
-                body_left=body_left,
-                heading_size=heading_size,
-                skip_images=template_images,
-            )
-            parsed.elements.extend(elements)
-        parsed.toc = [
-            [int(entry[0]), str(entry[1]), int(entry[2])]
-            for entry in toc
-            if len(entry) >= 3 and isinstance(entry[2], int)
-        ]
-        return parsed
-    finally:
-        pdf.close()
-
-
-def _pdf_template_images(pdf, ratio: float = 0.3) -> set[int]:
-    """反复出现在大多数页上的位图：母版背景、校徽、装饰条。
-    当成插图抽出来等于每页凭空多一张没有信息的图。真正的内容图只出现在一两页，
-    按「出现页数占全本的比例」就能分开，不需要认图。
+    **不设本地兜底**——没有 OCR、没有公式结构的备用管线，兜出来的结果只会让人以为解析成功了。
+    本地两档的实现在 `D://pdf解析` 备份着，刻意不 import，免得又把分支带回来。
     """
-    counts: Counter[int] = Counter()
-    for page_index in range(pdf.page_count):
-        try:
-            xrefs = {int(image[0]) for image in pdf[page_index].get_images(full=True)}
-        except Exception:  # noqa: BLE001 - 畸形 PDF 的图字典可能是空的
-            continue
-        counts.update(xrefs)
-    if pdf.page_count < 3:
-        return set()
-    limit = max(2.0, pdf.page_count * ratio)
-    return {xref for xref, pages in counts.items() if pages >= limit}
+    return _parse_pdf_mineru(data, asset_dir)
+
+def _clean_heading(text: str) -> str:
+    """章节名要纯文本：MinerU 的标题里会夹 `<sup>` 标记和 `$`，直接进引用摘要会显示成
+    `指数阶 O(2<sup>n</sup>)`。这里转成 `^` / `_` 的写法，正文元素本身不动（前端能渲染）。"""
+    text = re.sub(r"<sup>(.*?)</sup>", r"^\1", text or "")
+    text = re.sub(r"<sub>(.*?)</sub>", r"_\1", text)
+    text = re.sub(r"<[^>]{1,20}>", "", text).replace("$", "")
+    return re.sub(r"\s{2,}", " ", text).strip()
 
 
-def _pdf_body_size(pdf, sample_pages: int = 40) -> float:
-    """正文字号：抽前若干页，取出现次数最多的字号。
+_INLINE_MATH_TYPES = {"equation_inline", "inline_equation", "equation", "math"}
 
-    只抽前 40 页是为了快——全本扫一遍在 300 页的书上要多花一秒，
-    而字号在一本书里是全局一致的，抽样足够。
+
+def _inline_text(items: list | None) -> str:
+    r"""v2 的行内元素是 `[{type, content}]`，拼成一行文本。
+
+    **`equation_inline` 是裸 LaTeX 源码**，不包 `$` 的话前端不渲染、检索里全是反斜杠噪声
+    （实测整库 5749 处，`\boldsymbol`、`\sqrt` 满屏）。包成 `$..$` 交给 marked + KaTeX。
     """
-    counter: Counter[float] = Counter()
-    for page_index in range(min(sample_pages, pdf.page_count)):
-        page = pdf[page_index]
-        for line in _pdf_raw_lines(page):
-            text = line[4].strip()
-            if len(text) >= 8:  # 太短的行（标题、页码）不参与统计
-                counter[round(line[5], 1)] += 1
-    if not counter:
-        return 0.0
-    return counter.most_common(1)[0][0]
-
-
-def _pdf_body_left(pdf, sample_pages: int = 40) -> float:
-    """正文左边缘：抽若干页取出现次数最多的行左边缘（一本书的正文列全局一致）。
-    用来分开代码块和行内代码：代码块整体比正文右移一个内边距，行内代码就贴在正文列上。
-    """
-    counter: Counter[float] = Counter()
-    for page_index in range(min(sample_pages, pdf.page_count)):
-        for line in _pdf_raw_lines(pdf[page_index]):
-            if len(line[4].strip()) >= 8:
-                counter[round(line[0], 0)] += 1
-    if not counter:
-        return 0.0
-    return counter.most_common(1)[0][0]
-
-
-_MONO_HINTS = (
-    "menlo", "mono", "consol", "courier", "code", "hack", "fira",
-    "jetbrains", "cascadia", "sarasa", "inconsolata", "sourcecodepro",
-)
-
-
-def _mono_share(line: dict) -> float:
-    """一行里等宽字体占的字符比例。
-    不能按「主字体」判断：两本书的正文恰好相反（一个 Type3 碎字体、一个 NotoSansSC 整块覆
-    中文），按比例算才不会两个方向都踩。
-    """
-    mono = total = 0
-    for span in line.get("spans", []):
-        count = len(span.get("text", ""))
-        total += count
-        if any(hint in span.get("font", "").lower() for hint in _MONO_HINTS):
-            mono += count
-    return (mono / total) if total else 0.0
-
-
-_OPEN_BRACKETS = "([{"
-_BRACKET_PAIRS = (("(", ")"), ("[", "]"), ("{", "}"))
-
-
-def _unbalanced(code: str) -> bool:
-    text = code.replace('"""', "").replace("'''", "")
-    if any(text.count(opening) != text.count(closing) for opening, closing in _BRACKET_PAIRS):
-        return True
-    return text.count('"') % 2 == 1
-
-
-_HEADING_STRONG_RE = re.compile(
-    r"^\s*(第\s*[0-9一二三四五六七八九十百]+\s*[章篇部]"
-    r"|\d+\s*\.\s*\d+"
-    r"|Chapter\s+\d+)",
-    re.IGNORECASE,
-)
-_PANEL_LABEL_RE = re.compile(
-    r"^\s*(Tip|Note|Question|Warning|Abstract|Summary|Example|Attention)\b", re.IGNORECASE
-)
-
-
-def _looks_heading(text: str, size: float, body_size: float) -> bool:
-    """没有目录时判断一行是不是章节标题。
-
-    只认编号形式（「第 3 章」「2.3.1」）。靠字号猜会造出大量假标题（提示框标签、表注、
-    公式行、编号列表项），危害是它后面的正文全归到它名下，引用时「出自哪一节」整段错。
-    无编号的必须字号明显更大且极短才收（兜住「尾递归」这类二级标题）。
-    """
-    if body_size <= 0 or size < body_size * 1.12:
-        return False
-    stripped = text.strip()
-    if not (2 <= len(stripped) <= 40):
-        return False
-    if "，" in stripped or "。" in stripped:
-        return False
-    if stripped.endswith(("。", "！", "？", "，", "、", "；", "：", ":", ")", "）")):
-        return False
-    if _PANEL_LABEL_RE.match(stripped):
-        return False
-    if _match_caption(stripped) is not None:
-        return False
-    if re.search(r"[=<>≤≥]", stripped) and not re.search(r"[\u4e00-\u9fff]{2,}", stripped):
-        return False
-    if re.match(r"^[‧·•●○▪◆\-—*=+]", stripped):
-        return False
-    if _PAGE_NO_RE.match(stripped):
-        return False
-    if _HEADING_STRONG_RE.match(stripped):
-        return True
-    if re.match(r"^\d+\s*[.、)]", stripped):
-        return False
-    return size >= body_size * 1.3 and len(stripped) <= 16
-
-
-def _norm_line(text: str) -> str:
-    """页眉页脚比对用的归一化：数字变 `#`、去空白。
-
-    这样「第 3 章 抽样定理 12」和「第 3 章 抽样定理 13」会被认成同一行，
-    而不同页的页码 `12` / `13` 也归一化成同一个 `#`——两者都正是要删的。
-    """
-    return re.sub(r"\s+", "", re.sub(r"[0-9０-９]+", "#", text))
-
-
-def _pdf_junk_lines(pdf) -> set[str]:
-    """找出页眉页脚的文本（归一化后），供逐页过滤。
-
-    判据是「在同侧边缘反复出现」。单页出现一次的边缘文本不算——很多教材首页
-    顶部是书名，只有一页，删了会丢信息。所以阈值是 `max(3, 25% 页数)`。
-    """
-    counter: Counter[str] = Counter()
-    pages = pdf.page_count
-    for page_index in range(pages):
-        page = pdf[page_index]
-        height = page.rect.height
-        for line in _pdf_raw_lines(page):
-            y0, y1 = line[1], line[3]
-            if y1 <= height * 0.09 or y0 >= height * 0.91:
-                counter[_norm_line(line[4])] += 1
-    threshold = max(3, int(pages * 0.25))
-    return {key for key, count in counter.items() if count >= threshold}
-
-
-def _sanitize_surrogates(text: str) -> str:
-    """修复 PDF ToUnicode CMap 缺页产生的孤立 UTF-16 代理对。
-    数学字母（U+1D400-U+1D7FF）在坏映射下被拆成高低两个孤立代理码点，str 里合法、
-    encode 成 UTF-8 就 UnicodeEncodeError，整本书解析失败。能配对的重新合成，配不上的丢弃。
-    """
-    if not any(0xD800 <= ord(c) <= 0xDFFF for c in text):
-        return text
-    out: list[str] = []
-    i = 0
-    n = len(text)
-    while i < n:
-        o = ord(text[i])
-        if 0xD800 <= o <= 0xDBFF and i + 1 < n and 0xDC00 <= ord(text[i + 1]) <= 0xDFFF:
-            out.append(chr(0x10000 + ((o - 0xD800) << 10) + (ord(text[i + 1]) - 0xDC00)))
-            i += 2
-            continue
-        if not (0xD800 <= o <= 0xDFFF):
-            out.append(text[i])
-        i += 1
-    return "".join(out)
-
-
-def _sanitize_page_dict(data: dict) -> dict:
-    """对 `get_text("dict")` 的结果就地清洗所有 span 文本。"""
-    for block in data.get("blocks", []):
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                if "text" in span:
-                    span["text"] = _sanitize_surrogates(span["text"])
-    return data
-
-
-def _pdf_raw_lines(page) -> list[tuple[float, float, float, float, str, float]]:
-    """一页的所有文本行：`(x0, y0, x1, y1, text, max_font_size)`。"""
-    result = []
-    data = _sanitize_page_dict(page.get_text("dict"))
-    for block in data.get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            text = "".join(span.get("text", "") for span in line.get("spans", []))
-            text = text.replace("\u200b", "").replace("\ufeff", "")
-            if not text.strip():
-                continue
-            bbox = line.get("bbox", (0, 0, 0, 0))
-            size = max((float(span.get("size", 0)) for span in line.get("spans", [])), default=0.0)
-            result.append((bbox[0], bbox[1], bbox[2], bbox[3], text, size))
-    return result
-
-
-def _dominant_size(line: dict) -> float:
-    """一行的主字号：按字符数取最多的那个 span 的字号。
-    不能用 `max()`：正文夹一个公式字符就把整行字号抬上去，而段落合并靠字号相同判「同一段」，
-    一抬高就和相邻行对不上，一句话被切成两段。
-    """
-    counter: Counter[float] = Counter()
-    for span in line.get("spans", []):
-        counter[round(float(span.get("size", 0)), 1)] += len(span.get("text", ""))
-    return counter.most_common(1)[0][0] if counter else 0.0
-
-
-_SCRIPT_TEXT_RE = re.compile(r"[0-9A-Za-z+\-−=/.]{1,4}")
-
-_SCRIPT_BASE_RE = re.compile(r"[0-9A-Za-z\u0370-\u03ff\U0001D400-\U0001D7FF)]")
-
-
-def _is_superscript(span: dict, previous: dict, baseline: float, base_size: float) -> bool:
-    """这个 span 是不是前一个字符的上标。三条几何特征同时成立：
-
-    - 字号比前一个 span 小：比值 ≤ 0.85（和前一个 span 比，不能和行主字号比）；
-    - 基线比本行主基线高：≥ 0.25 × 主字号；
-    - 与前一个 span 水平紧贴：间隙 ≤ 0.15 × 主字号。
-    """
-    text = span.get("text", "").strip()
-    if not text or not _SCRIPT_TEXT_RE.fullmatch(text):
-        return False
-    if base_size <= 0:
-        return False
-    size = float(span.get("size", 0.0))
-    previous_size = float(previous.get("size", 0.0))
-    if previous_size <= 0 or size > previous_size * 0.85:
-        return False
-    rise = baseline - float(span.get("origin", (0.0, 0.0))[1])
-    if rise < 0.25 * base_size:
-        return False
-    gap = float(span.get("bbox", (0, 0, 0, 0))[0]) - float(
-        previous.get("bbox", (0, 0, 0, 0))[2]
-    )
-    if gap > 0.15 * base_size:
-        return False
-    previous_text = previous.get("text", "").rstrip()
-    return bool(previous_text) and bool(_SCRIPT_BASE_RE.fullmatch(previous_text[-1]))
-
-
-def _line_text(line: dict) -> str:
-    """一行的文本：span 按顺序拼接，上标还原成 `^x`。
-    `O(n2)` 和 `O(n²)` 提取出来都是 `O(n2)`，读的人、检索、模型都分不出。单字符不加括号，
-    多字符用 `^(2i/d)` 括起来，避免 `10000^2i/d` 这种「谁是上标」的歧义。
-    """
-    spans = line.get("spans", [])
-    if not spans:
-        return ""
-    base_size = _dominant_size(line)
-    baseline_counter: Counter[float] = Counter()
-    for span in spans:
-        baseline_counter[round(float(span.get("origin", (0.0, 0.0))[1]), 1)] += len(
-            span.get("text", "")
-        )
-    baseline = baseline_counter.most_common(1)[0][0] if baseline_counter else 0.0
-
     parts: list[str] = []
-    previous = None
-    for span in spans:
-        text = span.get("text", "")
-        if text.strip() and previous is not None and _is_superscript(
-            span, previous, baseline, base_size
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("content", ""))
+        if (
+            item.get("type") in _INLINE_MATH_TYPES
+            and text.strip()
+            and not text.strip().startswith("$")
         ):
-            parts.append("^" + (text.strip() if len(text.strip()) == 1 else f"({text.strip()})"))
-        else:
-            parts.append(text)
-        if text.strip():
-            previous = span
-    return "".join(parts)
+            text = f"${text.strip()}$"
+        parts.append(text)
+    return "".join(parts).strip()
 
 
-def _pdf_page_lines(
-    page, junk: set[str], tight_cross_block: bool = False
-) -> list[tuple[float, float, float, float, str, float, int, bool]]:
-    """过滤页眉页脚和纯页码，给每行带上 block 序号与「是否等宽字体」。
-    同一基线上的多段要先合并成一行：行尾注释在 PDF 里是两个独立 line 对象（y 相同、x 不同），
-    不合并会按 x 算出几十个空格的缩进。
+class _HtmlTable(html.parser.HTMLParser):
+    """MinerU 的表格以 HTML 给出，转成 markdown pipe 表格才能进 chunk。
+
+    必须展开 `rowspan`：MinerU 把「整数」在 4 行上写成 `rowspan="4"`，不展开就会让后面
+    每行少一格、整表左移一列（`short` 的「2 字节」跑到「符号」列）。
     """
-    height = page.rect.height
-    data = _sanitize_page_dict(page.get_text("dict"))
-    lines: list[list] = []
-    for block_index, block in enumerate(data.get("blocks", [])):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            text = _line_text(line)
-            text = text.replace("\u200b", "").replace("\ufeff", "")
-            if not text.strip():
-                continue
-            bbox = line.get("bbox", (0, 0, 0, 0))
-            y0, y1 = bbox[1], bbox[3]
-            at_edge = y1 <= height * 0.09 or y0 >= height * 0.91
-            if at_edge and (_norm_line(text) in junk or _PAGE_NO_RE.match(text)):
-                continue
-            size = _dominant_size(line)
-            lines.append(
-                [bbox[0], y0, bbox[2], y1, text, size, block_index, _mono_share(line)]
-            )
 
-    lines.sort(key=lambda item: (round(item[1], 1), item[0]))
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: dict[int, str] | None = None
+        self._cell: list[str] | None = None
+        self._rowspan = 1
+        self._carry: dict[int, list] = {}
+        self._cursor = 0
 
-    bands: list[list[list]] = []
-    for item in lines:
-        if bands and _same_band(bands[-1], item):
-            bands[-1].append(item)
-        else:
-            bands.append([item])
+    def handle_starttag(self, tag, attrs):
+        if tag in ("sup", "sub"):
+            # 表格里的指数写在 <sup> 里，只收文本会把 2^63 变成 263（等于改错数据）。
+            # 标签原样留给 marked 渲染成真上标，和正文里 MinerU 给的写法保持一致。
+            if self._cell is not None:
+                self._cell.append(f"<{tag}>")
+        elif tag == "tr":
+            self._row = {}
+            for col in list(self._carry):
+                value, left = self._carry[col]
+                self._row[col] = value
+                if left <= 1:
+                    del self._carry[col]
+                else:
+                    self._carry[col][1] = left - 1
+            self._cursor = 0
+        elif tag in ("td", "th"):
+            self._cell = []
+            self._rowspan = 1
+            for key, value in attrs:
+                if key == "rowspan" and value and value.isdigit():
+                    self._rowspan = max(1, int(value))
 
-    out: list[tuple] = []
-    for band in bands:
-        for visual_row in _split_by_gap(band, tight_cross_block):
-            out.append(_merge_row(visual_row))
-    return out
+    def handle_endtag(self, tag):
+        if tag in ("sup", "sub") and self._cell is not None:
+            self._cell.append(f"</{tag}>")
+        elif tag == "tr" and self._row is not None:
+            width = (max(self._row) + 1) if self._row else 0
+            self.rows.append([self._row.get(i, "") for i in range(width)])
+            self._row = None
+        elif tag in ("td", "th") and self._cell is not None:
+            if self._row is not None:
+                while self._cursor in self._row:
+                    self._cursor += 1
+                value = "".join(self._cell).strip()
+                self._row[self._cursor] = value
+                if self._rowspan > 1:
+                    self._carry[self._cursor] = [value, self._rowspan - 1]
+                self._cursor += 1
+            self._cell = None
 
-
-def _same_band(band: list[list], item: list) -> bool:
-    """是否落在同一个「行带」里（只比 y，不比 x）。
-
-    0.7 倍字号是从上下标量出来的：变量比正文大一号、下标再往下沉，最远到
-    5.6pt（字号 9.8 时约 0.57 倍）；而相邻正文行的行距在 17pt 以上。
-    """
-    top = min(entry[1] for entry in band)
-    size = max((entry[5] for entry in band), default=0.0)
-    return item[1] - top < 0.7 * max(size, 1.0)
-
-
-def _split_by_gap(band: list[list], tight_cross_block: bool = False) -> list[list[list]]:
-    """行带内按 x 切成视觉行：间隙超过阈值就断开（默认 2 倍字号）。
-
-    2 倍够用：上下标留的空位约 1.4 倍要接上，并排元素的间隙是几倍到几十倍。
-    tight_cross_block 只给幻灯片用，阈值收到 0.35 倍——图内标注和正文挤在同一基线，
-    2 倍会把它吞进句子；正文书不能收，Word 的行内公式两侧各留 0.5~1 倍，收了句子就断。
-    """
-    band.sort(key=lambda entry: (entry[0], entry[1]))
-    groups: list[list[list]] = [[band[0]]] if band else []
-    for entry in band[1:]:
-        previous = groups[-1][-1]
-        size = max(entry[5], 1.0)
-        gap = max(entry[0] - previous[2], previous[0] - entry[2])
-        limit = 0.35 if tight_cross_block and entry[6] != previous[6] else 2.0
-        if gap < limit * size:
-            groups[-1].append(entry)
-        else:
-            groups.append([entry])
-    return groups
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
 
 
-def _merge_row(row: list[list]) -> tuple:
-    """一个视觉行内的片段 → 一行（按 x 拼接）。"""
-    row.sort(key=lambda entry: (entry[0], entry[1]))
-    parts: list[str] = []
-    previous_end: float | None = None
-    for entry in row:
-        if previous_end is not None:
-            gap = entry[0] - previous_end
-            if gap > 0.6 * max(entry[5], 1.0) and parts and not parts[-1].endswith(
-                (" ", "\u3000")
-            ):
-                parts.append(" ")
-        parts.append(entry[4])
-        previous_end = entry[2] if previous_end is None else max(previous_end, entry[2])
-
-    weights: Counter[float] = Counter()
-    mono_total = 0
-    char_total = 0
-    for entry in row:
-        count = len(entry[4])
-        weights[entry[5]] += count
-        mono_total += entry[7] * count
-        char_total += count
-    size = weights.most_common(1)[0][0] if weights else 0.0
-    mono = (mono_total / char_total) if char_total else 0.0
-
-    first = row[0]
-    return (
-        min(entry[0] for entry in row),
-        min(entry[1] for entry in row),
-        max(entry[2] for entry in row),
-        max(entry[3] for entry in row),
-        "".join(parts),
-        size,
-        first[6],
-        mono,
-    )
-
-
-def _pdf_page_elements(
-    parsed: _Parsed,
-    page,
-    page_no: int,
-    lines: list[tuple[float, float, float, float, str, float, int, bool]],
-    chapter: str | None,
-    asset_dir: Path,
-    *,
-    body_size: float = 0.0,
-    body_left: float = 0.0,
-    heading_size: float = 0.0,
-    skip_images: frozenset = frozenset(),
-) -> tuple[list[_Element], str | None]:
-    """一页 → 元素流（正文段落 + 表格 + 图 + 公式编号），按版面从上到下。
-    图和公式要插回版面上的位置，不能统一堆到页尾——回答里「如图 3-4」的位置就该是那张图的
-    位置。返回 (元素, 本页最后的章节名)：章节是跨页连续的状态，不能按页各算各的。
-    """
-    elements: list[_Element] = []
-
-    table_rects: list[tuple[float, float, float, float]] = []
-    for markdown_table, bbox in _pdf_tables(page):
-        table_rects.append(bbox)
-        elements.append(
-            _Element(
-                kind="table",
-                content=markdown_table,
-                page=page_no,
-                y=bbox[1],
-                chapter=chapter,
-            )
-        )
-
-    figure_rects = _pdf_graphic_rects(page)
-    consumed: set[tuple[float, float, str]] = set()
-    for line in lines:
-        x0, y0, x1, y1, text, _size, _block, _mono = line
-        caption = _match_caption(text)
-        if caption is None:
-            continue
-        label, caption_text = caption
-        if label.startswith("表"):
-            continue
-        rect = (
-            _slide_figure_rect(figure_rects, (x0, y0, x1, y1), page)
-            if parsed.section_per_page
-            else _nearest_graphic_above(figure_rects, (x0, y0, x1, y1))
-        )
-        if rect is None:
-            continue
-        asset = _save_clip(page, rect, asset_dir, parsed, label, caption_text, page_no, "figure")
-        if asset is None:
-            continue
-        consumed.add((x0, y0, text))
-        elements.append(
-            _Element(
-                kind="figure",
-                content=_figure_chunk_text(label, caption_text),
-                page=page_no,
-                y=rect.y0,
-                asset_id=asset["asset_id"],
-                label=label,
-                chapter=chapter,
-                bbox=(rect.x0, rect.y0, rect.x1, rect.y1),
-            )
-        )
-        figure_rects = _drop_inside(figure_rects, rect)
-
-    figure_boxes = [item.bbox for item in elements if item.kind == "figure" and item.bbox]
-    body_lines = [
-        line
-        for line in lines
-        if (line[0], line[1], line[4]) not in consumed
-        and not (table_rects and _center_in(line[:4], table_rects))
-        and not (
-            parsed.section_per_page
-            and figure_boxes
-            and _is_slide_label(line, figure_boxes)
-        )
-    ]
-
-    def is_code(line) -> bool:
-        if body_left <= 0 and body_size <= 0:
-            return False
-        return _is_code_line(line, body_left, body_size)
-
-    ordered: list[_Element] = []
-    rejected: list = []
-    cursor = 0
-    while cursor < len(body_lines):
-        if not is_code(body_lines[cursor]):
-            cursor += 1
-            continue
-        block: list = []
-        while cursor < len(body_lines) and is_code(body_lines[cursor]):
-            block.append(body_lines[cursor])
-            cursor += 1
-        if not _looks_like_code(block, body_size):
-            rejected.extend(block)
-            continue
-        code = _code_block_text(block)
-        if code:
-            ordered.append(
-                _Element(
-                    kind="code",
-                    content=code,
-                    page=page_no,
-                    y=min(item[1] for item in block),
-                    chapter=chapter,
-                    label=_code_language(code) or None,
-                )
-            )
-
-    prose_lines = sorted(
-        [line for line in body_lines if not is_code(line)] + rejected,
-        key=lambda item: (round(item[1], 1), item[0]),
-    )
-    if parsed.section_per_page:
-        paragraphs = _ppt_paragraphs(prose_lines)
-    else:
-        paragraphs = _pdf_paragraphs(prose_lines)
-
-    for group in paragraphs:
-        text = _join_lines([item[4] for item in group])
-        if not text.strip():
-            continue
-        y0 = min(item[1] for item in group)
-        size = max(item[5] for item in group)
-        if _looks_heading(text, size, heading_size):
-            chapter = text.strip()[:80]
-        ordered.append(
-            _Element(kind="text", content=text, page=page_no, y=y0, chapter=chapter)
-        )
-    elements.extend(ordered)
-
-    if (
-        parsed.section_per_page
-        and not any(item.kind == "figure" for item in elements)
-        and sum(len(line[4]) for line in body_lines) < _PPT_FIGURE_MAX_CHARS
-        and (
-            _pdf_graphic_cover(page) >= _PPT_FIGURE_COVER
-            or (
-                sum(len(line[4]) for line in body_lines) < _PPT_FIGURE_MIN_CHARS
-                and _pdf_shape_count(page) >= _PPT_FIGURE_MIN_SHAPES
-            )
-        )
-    ):
-        whole = page.rect  # pymupdf 的 Rect，整页范围
-        label = f"第 {page_no} 页 整页图示"
-        asset = _save_clip(page, whole, asset_dir, parsed, label, "", page_no, "figure")
-        if asset is not None:
-            elements.append(
-                _Element(
-                    kind="figure",
-                    content=_figure_chunk_text(label, ""),
-                    page=page_no,
-                    y=whole.y0,
-                    asset_id=asset["asset_id"],
-                    label=label,
-                    chapter=chapter,
-                    bbox=(whole.x0, whole.y0, whole.x1, whole.y1),
-                )
-            )
-
-    if (
-        parsed.section_per_page
-        and skip_images is not None
-        and not any(item.kind == "figure" for item in elements)
-    ):
-        page_area = page.rect.width * page.rect.height
-        picked: list[int] = []
-        try:
-            images = page.get_images(full=True)
-        except Exception:  # noqa: BLE001 - 畸形 PDF 的图字典可能是空的
-            images = []
-        for image in images:
-            xref = int(image[0])
-            if xref in skip_images or xref in picked:
-                continue
-            for rect in page.get_image_rects(xref):
-                if page_area <= 0 or rect.width * rect.height < 0.06 * page_area:
-                    continue
-                label = f"第 {page_no} 页 插图"
-                asset = _save_clip(page, rect, asset_dir, parsed, label, "", page_no, "figure")
-                if asset is None:
-                    continue
-                picked.append(xref)
-                elements.append(
-                    _Element(
-                        kind="figure",
-                        content=_figure_chunk_text(label, ""),
-                        page=page_no,
-                        y=rect.y0,
-                        asset_id=asset["asset_id"],
-                        label=label,
-                        chapter=chapter,
-                        bbox=(rect.x0, rect.y0, rect.x1, rect.y1),
-                    )
-                )
-                break
-
-    for line in lines:
-        x0, y0, x1, y1, text, _size, _block, _mono = line
-        match = _FORMULA_NO_RE.match(text)
-        if match is None:
-            continue
-        rect = _formula_rect(page, (x0, y0, x1, y1))
-        label = f"式 ({match.group(1).replace(' ', '')})"
-        asset = _save_clip(page, rect, asset_dir, parsed, label, "", page_no, "formula")
-        if asset is None:
-            continue
-        elements.append(
-            _Element(
-                kind="formula",
-                content=label,
-                page=page_no,
-                y=rect.y0,
-                asset_id=asset["asset_id"],
-                label=label,
-                chapter=chapter,
-                bbox=(rect.x0, rect.y0, rect.x1, rect.y1),
-            )
-        )
-
-    if parsed.section_per_page:
-        elements = _ppt_page_order(elements)
-    else:
-        elements.sort(key=lambda item: item.y)
-
-    anchors = [
-        (item.y, item.chapter) for item in elements if item.kind == "text" and item.chapter
-    ]
-    for item in elements:
-        if item.kind == "text" or not anchors:
-            continue
-        above = [chapter for y, chapter in anchors if y <= item.y]
-        if above:
-            item.chapter = above[-1]
-
-    return elements, chapter
-
-_PROSE_PUNCT_RE = re.compile(r"[，。？！；：]")
-
-
-def _is_code_line(line, body_left: float, body_size: float) -> bool:
-    """单行是不是代码。三个条件任一成立即可，各对着一种排版：
-
-    - 左边缘缩进超过正文列；
-    - 几乎全是等宽字体（顶格的代码行只能靠它）；
-    - 字号明显小于正文。
-
-    正文里夹的行内代码三样都不满足。三个都要，缺一个就有一类书解不出来。
-    """
-    share = line[7]
-    if share <= 0.05:
-        return False
-    size = max(line[5], 1.0)
-    if body_left > 0 and line[0] >= body_left + 0.4 * size:
-        return True
-    if share > 0.8:
-        return True
-    return body_size > 0 and size < body_size - 1.2
-
-
-def _looks_like_code(block: list, body_size: float = 0.0) -> bool:
-    """一组候选行到底是不是代码块。优先级是字号：明显小于正文的行即使全是中文也是代码
-    注释；字号相同才看句读（单行正文多是以「？」「。」收尾的思考题）。多行块看过半数的行。
-    """
-    if len(block) == 1:
-        item = block[0]
-        if body_size > 0 and item[5] < body_size - 1.2:
-            return True
-        return not _PROSE_PUNCT_RE.search(item[4])
-    prose_rows = sum(1 for item in block if _PROSE_PUNCT_RE.search(item[4]))
-    return prose_rows * 2 <= len(block)
-
-
-_FILE_HINT_RE = re.compile(r"\^\^=\s*File:\s*(\S+?)\s*\^\^=")
-
-_LANG_BY_EXT = {
-    "py": "python", "js": "javascript", "ts": "typescript", "jsx": "jsx",
-    "tsx": "tsx", "sh": "bash", "bash": "bash", "zsh": "bash", "md": "markdown",
-    "java": "java", "go": "go", "rs": "rust", "c": "c", "h": "c", "cpp": "cpp",
-    "cc": "cpp", "hpp": "cpp", "cs": "csharp", "rb": "ruby", "php": "php",
-    "json": "json", "yml": "yaml", "yaml": "yaml", "toml": "toml", "sql": "sql",
-    "html": "html", "css": "css", "xml": "xml", "kt": "kotlin", "swift": "swift",
-}
-
-
-def _code_language(code: str) -> str:
-    """从代码块里找出语言，认不出来就返回空串（围栏不带语言也能渲染）。"""
-    match = _FILE_HINT_RE.search(code)
-    if match is None:
+def _html_table_to_markdown(body: str) -> str:
+    if not body or "<t" not in body.lower():
         return ""
-    extension = match.group(1).rsplit(".", 1)[-1].lower()
-    return _LANG_BY_EXT.get(extension, "")
+    parser = _HtmlTable()
+    parser.feed(body)
+    rows = [row for row in parser.rows if any(cell for cell in row)]
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+
+    def cell(value: str) -> str:
+        return value.replace("|", "\\|").replace("\n", " ").strip()
+
+    lines = ["| " + " | ".join(cell(v) for v in rows[0]) + " |", "|" + "---|" * width]
+    for row in rows[1:]:
+        lines.append("| " + " | ".join(cell(v) for v in row) + " |")
+    return "\n".join(lines)
 
 
-def _code_block_text(block: list) -> str:
-    """一组代码行 → 带原始缩进的多行代码。
+def _caption_label(caption: str) -> str:
+    """题注 → 图号。不能按空格切：`图0-1 本书主要内容` 切成 `图0-1`，
+    但 `图 2-7 算法…` 会只剩一个 `图`——同一套 `_match_caption` 才稳。"""
+    if not caption:
+        return ""
+    hit = _match_caption(caption)
+    return hit[0] if hit else "插图"
 
-    缩进要还原：PDF 没有空格字符，缩进体现在左边缘，所以用 x0 减本块基准列、再按
-    0.6 × 本行字号折回空格数。折行要接回去但多行结构不能接：判据是「上一行括号/引号
-    没闭合 **且** 本行不更靠右」——只判括号会把多行字典误合并。
+
+# 装饰图的几何判据。阈值是拿课件样本量的：装饰 193–296px / 占页面 1.2%–2.9%，
+# 真插图最小 606px / 6.5%，中间那段（320–450px、4%–8%）就是「判不了」的灰区。
+_DECOR_SHORT_SIDE = 320
+_DECOR_AREA_RATIO = 0.04
+_DECOR_ASPECT = 8.0
+# 灰区的另一头：够大就别问了，直接当插图（一次 VLM 调用 ≈2.3s，全书问一遍比解析还贵）
+_ILLUS_SHORT_SIDE = 450
+_ILLUS_AREA_RATIO = 0.08
+_VLM_ASK_BUDGET = 30  # 单本最多问几次「是不是装饰」；超预算一律保留
+_VLM_DESC_BUDGET = 500  # 单本最多生成几条图注；超了退「第 N 页 插图」
+_VLM_INTERVAL = 0.3  # 每次调用前的间隔（秒），连着打会被服务端限流
+_VLM_FAIL_LIMIT = 5  # 连续失败几次就整本停掉（熔断）；3 太急，一次限流就全军覆没
+
+
+def _mineru_image_path(media_dir: Path, rel_path: str | None) -> Path | None:
+    """MinerU 块里的图片引用 → 真实文件。
+
+    `media_dir` 是**整个临时目录**（每批一个 `batch_N/images/` 子目录），块里的路径形如
+    `batch_2/images/xxx.jpg`，所以要先按相对路径找，找不到再退回按文件名找（兼容老格式）。
+    不能只取 `Path(rel).name`：MinerU 每批从 0 重新编号，不同批的同名图会被后一批盖掉。
     """
-    base = min(item[0] for item in block)
-    char_width = max(block[0][5] * 0.6, 1.0)
-    lines: list[str] = []
-    last_x: float | None = None
-    for item in block:
-        indent = max(0, round((item[0] - base) / char_width))
-        if lines and _unbalanced(lines[-1]) and last_x is not None \
-                and item[0] <= last_x + 0.5 * char_width:
-            tail = lines[-1].rstrip()
-            joiner = "" if tail[-1:] in _OPEN_BRACKETS else " "
-            lines[-1] = tail + joiner + item[4].strip()
+    if not rel_path:
+        return None
+    parts = [
+        part for part in str(rel_path).replace("\\", "/").split("/")
+        if part not in ("", ".", "..")
+    ]
+    if not parts:
+        return None
+    for candidate in (media_dir.joinpath(*parts), media_dir / parts[-1]):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _image_size(media_dir: Path, rel_path: str | None) -> tuple[int, int] | None:
+    src = _mineru_image_path(media_dir, rel_path)
+    if src is None:
+        return None
+    try:
+        from PIL import Image
+
+        with Image.open(src) as img:
+            return img.size
+    except Exception:  # noqa: BLE001 - 读不出尺寸就当不知道，别因此丢图
+        return None
+
+
+def _bbox_area(bbox) -> float:
+    """bbox 是 0-1000 归一化坐标，面积占比直接就能算，不需要真实页面尺寸。"""
+    if not bbox or len(bbox) < 4:
+        return 1.0
+    x0, y0, x1, y1 = (float(v) for v in bbox[:4])
+    return max(0.0, (x1 - x0) / 1000) * max(0.0, (y1 - y0) / 1000)
+
+
+def _figure_verdict(width: int, height: int, area: float, caption: str) -> str:
+    """三档：`keep` 明确是插图、`drop` 明确是装饰、`ask` 判不了（交给 VLM）。
+
+    灰区才值得花一次模型调用——大多数图靠几何量就够了。有题注的永远 keep：
+    作者写了图号就是插图，这一条不需要问模型。
+    """
+    if caption:
+        return "keep"
+    short, long = min(width, height), max(width, height)
+    if long / max(1, short) >= _DECOR_ASPECT:
+        return "drop"  # 分隔条、页边竖线
+    # **两个条件必须同时成立**：单看尺寸会误杀窄高的真流程图，单看面积会误杀整页大图里的居中小图
+    if short < _DECOR_SHORT_SIDE and area < _DECOR_AREA_RATIO:
+        return "drop"
+    if short >= _ILLUS_SHORT_SIDE or area >= _ILLUS_AREA_RATIO:
+        return "keep"
+    return "ask"
+
+
+def _looks_decorative(width: int, height: int, area: float, caption: str) -> bool:
+    """几何上能确定的装饰图。灰区算 False——它问的是「确定是装饰吗」，不是「像不像」。"""
+    return _figure_verdict(width, height, area, caption) == "drop"
+
+
+def _save_mineru_image(
+    media_dir: Path, asset_dir: Path, rel_path: str | None, parsed: _Parsed,
+    page: int, caption: str,
+) -> str | None:
+    """MinerU 的图是 jpg，但 `render_markdown` 固定按 `.png` 拼引用，统一转存 PNG。
+
+    **同一本书里字节相同的图只存一份**：课件/教材里同一张图常出现多次（页眉示意图、
+    重复的流程框图），实测 Hello-Algo 一本书就有 148 张重复、49.5MB。重复的判定用 PNG
+    字节的 sha1，所以 `_Parsed.asset_hashes` 只在单次解析内有效——重解析会重新算。
+    """
+    src = _mineru_image_path(media_dir, rel_path)
+    if src is None:
+        return None
+    try:
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        with Image.open(src) as img:
+            rgb = img.convert("RGB")
+            rgb.save(buffer, format="PNG")
+            width, height = rgb.size
+        blob = buffer.getvalue()
+    except Exception:  # noqa: BLE001 - 坏图不该让整本失败
+        return None
+
+    digest = hashlib.sha1(blob).hexdigest()
+    existing = parsed.asset_hashes.get(digest)
+    if existing:
+        return existing
+
+    asset_id = f"as_{secrets.token_hex(4)}"
+    dst = asset_dir / f"{asset_id}.png"
+    dst.write_bytes(blob)
+    parsed.asset_hashes[digest] = asset_id
+    label = _caption_label(caption)
+    if label == "插图":
+        # `assets.label` 只放**图号**。「插图」是没编号时的兜底文案，写进库就是 795 行
+        # 字面量重复（既不能按图号导航，也看不出区别）；没有编号就留空。
+        label = ""
+    parsed.assets.append({
+        "asset_id": asset_id,
+        "kind": "figure",
+        "label": label or None,
+        "caption": caption or None,
+        "page": page,
+        "file_path": str(dst),
+        "width": width,
+        "height": height,
+    })
+    return asset_id
+
+
+_MINERU_NOISE = {"page_header", "page_number", "page_footer", "header", "footer", "aside_text"}
+
+
+def _vision_budget():
+    """两个模型的闸门：`ask` 判灰区图是不是装饰，`describe` 给无题注图写一句图注。
+
+    两件事都会失败（网络、额度、回答跑偏、服务端限流），处理方式不同：
+    - `ask` 拿不到答案 → 保留图（删错了补不回来）
+    - `describe` 拿不到答案 → 退回「第 N 页 插图」（至少 chunk 不是空的）
+
+    三个兜底，缺一个都会让解析变慢或变脏：
+    - **次数上限**：一本 200 页的课件可能上百张图，不限的话解析会被模型拖到十几分钟；
+    - **轻微节流**：连着打会被服务端限流，实测响应从 4s 掉到 40s；
+    - **连续失败熔断**：连着 3 张拿不到结果就整本停掉，剩下的一律走占位——
+      否则限流时 40 张各等 30s，光等就是 20 分钟。
+    """
+    import figures
+
+    if not figures.available():
+        return None, None
+    asks, descriptions, failures = [_VLM_ASK_BUDGET], [_VLM_DESC_BUDGET], [0]
+
+    def _call(func, path: Path):
+        if failures[0] >= _VLM_FAIL_LIMIT:
+            return None
+        time.sleep(_VLM_INTERVAL)
+        result = func(path)
+        failures[0] = 0 if result is not None else failures[0] + 1
+        return result
+
+    def ask(path: Path) -> bool:
+        if asks[0] <= 0:
+            return False
+        asks[0] -= 1
+        return _call(figures.judge, path) is False
+
+    def describe(path: Path) -> str | None:
+        if descriptions[0] <= 0:
+            return None
+        descriptions[0] -= 1
+        return _call(figures.describe, path)
+
+    return ask, describe
+
+
+def _parse_pdf_mineru(data: bytes, asset_dir: Path) -> _Parsed:
+    """走 MinerU 云端，再把 v2 blocks 折成本项目的元素流。"""
+    import pymupdf
+
+    import mineru as mineru_client
+
+    if not mineru_client.available():
+        raise DocumentError("没配 MINERU_API_KEY")
+    # 每次全新临时目录：清理想做但做不成时（宿主批量删除保护）也不会读到上一轮的旧 json
+    workdir = Path(tempfile.mkdtemp(prefix="mineru_parse_"))
+    try:
+        payload = mineru_client.parse(
+            data, "document.pdf", workdir, model=os.getenv("MINERU_MODEL", "vlm")
+        )
+        pdf = pymupdf.open(stream=data, filetype="pdf")
+        try:
+            def repair(page_index: int, bbox, text: str) -> str:
+                if not 0 <= page_index < pdf.page_count:
+                    return text
+                return _astral_repair(text, pdf[page_index], bbox)
+
+            ask, describe = _vision_budget()
+            return _elements_from_mineru(
+                payload, asset_dir, repair=repair, ask=ask, describe=describe)
+
+        finally:
+            pdf.close()
+    finally:
+        # 解压出来的 json + 原图有几十 MB，图已转存到 asset_dir，原件不必留
+        mineru_client.purge_dir(workdir)
+
+
+_UFFFD = "\ufffd"
+
+
+def _astral_repair(text: str, page, bbox) -> str:
+    """MinerU 把**星平面字符**（U+1D400 起的数学斜体字母等，UTF-16 要两个码元）一律吐成 U+FFFD，
+    `𝑂(2𝑛)` 变成 `�(2�)`。PDF 文字层里这些字符还在，按块 bbox 取回、NFKC 归一化后回填。
+
+    先按 difflib 对齐填；对齐覆盖不到的再用剩余字符按顺序兜。填不上就原样留着，
+    宁可留个 U+FFFD 也不猜错——猜错等于把符号改成了另一个变量。
+    """
+    if not text or _UFFFD not in text or page is None or not bbox:
+        return text
+    import pymupdf
+
+    try:
+        width, height = page.rect.width, page.rect.height
+        x0, y0, x1, y1 = (float(value) for value in bbox[:4])
+        clip = pymupdf.Rect(
+            x0 / 1000 * width - 2, y0 / 1000 * height - 2,
+            x1 / 1000 * width + 2, y1 / 1000 * height + 2,
+        )
+        reference = page.get_text("text", clip=clip)
+    except Exception:  # noqa: BLE001 - 取不到文字层就保持原样
+        return text
+    pool = [
+        unicodedata.normalize("NFKC", char)
+        for char in reference
+        if ord(char) > 0xFFFF and unicodedata.normalize("NFKC", char)
+    ]
+    if not pool:
+        return text
+
+    out: list[str] = []
+    used = 0
+    matcher = difflib.SequenceMatcher(None, text, reference, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        segment = text[i1:i2]
+        if tag == "equal" or _UFFFD not in segment:
+            out.append(segment)
+            continue
+        candidates = [
+            c for c in reference[j1:j2]
+            if ord(c) > 0xFFFF and unicodedata.normalize("NFKC", c)
+        ]
+        candidates = [unicodedata.normalize("NFKC", c) for c in candidates]
+        cursor = 0
+        for char in segment:
+            if char == _UFFFD and cursor < len(candidates):
+                out.append(candidates[cursor])
+                cursor += 1
+                used += 1
+            else:
+                out.append(char)
+    repaired = "".join(out)
+
+    spare = pool[used:]
+    if _UFFFD in repaired and spare:
+        filled, cursor = [], 0
+        for char in repaired:
+            if char == _UFFFD and cursor < len(spare):
+                filled.append(spare[cursor])
+                cursor += 1
+            else:
+                filled.append(char)
+        repaired = "".join(filled)
+    return repaired
+
+
+def _elements_from_mineru(
+    payload: dict, asset_dir: Path, repair=None, ask=None, describe=None,
+) -> _Parsed:
+    parsed = _Parsed(page_count=int(payload["page_count"]))
+    media_dir: Path = payload["images_dir"]  # 临时目录根，每批一个 batch_N/images/
+    chapter: str | None = None
+    for block in payload["blocks"]:
+        kind = block.get("type")
+        if not kind or kind in _MINERU_NOISE:
+            continue
+        page = int(block.get("page_idx", 0)) + 1
+        content = block.get("content") or {}
+        raw_bbox = block.get("bbox")
+        bbox = tuple(float(v) for v in raw_bbox) if raw_bbox else None
+
+        def fix(value: str) -> str:
+            return repair(page - 1, bbox, value) if repair else value
+
+        if kind == "title":
+            text = fix(_inline_text(content.get("title_content")))
+            if not text:
+                continue
+            # 云端会把「图 2-2 是该嵌套循环的流程框图。」这类正文句也标成标题
+            if text.endswith(("。", "；", "：")) and len(text) > 20:
+                parsed.elements.append(_Element(
+                    kind="text", content=text, page=page, chapter=chapter, bbox=bbox))
+                continue
+            chapter = _clean_heading(text) or text
+            parsed.elements.append(_Element(
+                kind="text", content=text, page=page, chapter=chapter, bbox=bbox))
+        elif kind == "paragraph":
+            text = fix(_inline_text(content.get("paragraph_content")))
+            if text:
+                parsed.elements.append(_Element(
+                    kind="text", content=text, page=page, chapter=chapter, bbox=bbox))
+        elif kind == "list":
+            items = [
+                fix(_inline_text(item.get("item_content")))
+                for item in content.get("list_items") or []
+            ]
+            text = "\n".join(f"- {item}" for item in items if item)
+            if text:
+                parsed.elements.append(_Element(
+                    kind="text", content=text, page=page, chapter=chapter, bbox=bbox))
+        elif kind in {"code", "algorithm"}:
+            body = fix(_inline_text(
+                content.get("code_content") or content.get("algorithm_content")
+            ))
+            if not body:
+                continue
+            label = content.get("code_language") or ""
+            parsed.elements.append(_Element(
+                kind="code", content=body, page=page, label=str(label),
+                chapter=chapter, bbox=bbox))
+        elif kind == "table":
+            markdown = _html_table_to_markdown(str(content.get("html") or ""))
+            if not markdown:
+                # 复杂表只给了截图、没给 HTML：退化成图，别整块消失
+                if content.get("image_source"):
+                    kind = "image"
+                else:
+                    _log.debug("表格既没有 html 也没有截图，跳过（第 %d 页）", page)
+                    continue
+            else:
+                # 表格里的 U+FFFD 也要回填：MinerU 会把 `𝑂(2𝑛)` 这类星平面字符吐成替换符，
+                # 表格行同样中招（Hello-Algo 就有）
+                caption = fix(_inline_text(content.get("table_caption")))
+                text = f"{caption}\n\n{fix(markdown)}" if caption else fix(markdown)
+                parsed.elements.append(_Element(
+                    kind="table", content=text, page=page, label=caption or None,
+                    chapter=chapter, bbox=bbox))
+                continue
+
+        if kind == "image" or kind == "chart":
+            # chart 是「算法画的图」，和 image 同构（都有 image_source + 题注），
+            # 早先没接这一类，等于整张图连同题注一起消失。
+            source = content.get("image_source") or {}
+            rel = source.get("path")
+            caption = fix(_inline_text(
+                content.get("image_caption") or content.get("chart_caption")))
+            path = _mineru_image_path(media_dir, rel)
+            if not caption and path is not None:
+                size = _image_size(media_dir, rel)
+                if size:
+                    verdict = _figure_verdict(size[0], size[1], _bbox_area(bbox), caption)
+                    if verdict == "drop":
+                        continue  # 明确的装饰：不存图、不产 chunk、不占 assets
+                    if verdict == "ask" and ask and ask(path):
+                        continue  # 灰区被判成装饰
+                # 无题注的真插图：先让模型写一句「这图讲什么」，写不出来再退占位。
+                # 占位能救「chunk 正文为空」，但没有语义，模型看不出该不该展示这张图。
+                if describe:
+                    caption = describe(path) or ""
+                if not caption:
+                    caption = f"第 {page} 页 插图"
+            asset_id = _save_mineru_image(
+                media_dir, asset_dir, rel, parsed, page, caption)
+            parsed.elements.append(_Element(
+                kind="figure", content=caption, page=page, asset_id=asset_id,
+                label=_caption_label(caption) or None,
+                chapter=chapter, bbox=bbox))
+        elif kind in {"equation_interline", "equation", "inline_equation"}:
+            # 行间公式是独立块（`math_content` 是 LaTeX 源码），之前没有分支，
+            # 整条公式直接丢了。包成 `$$..$$` 才能被前端和切分当成公式。
+            latex = str(content.get("math_content") or content.get("equation_content") or "").strip()
+            if not latex:
+                continue
+            latex = fix(latex)
+            if not latex.startswith("$"):
+                latex = f"$${latex}$$"
+            parsed.elements.append(_Element(
+                kind="formula", content=latex, page=page, chapter=chapter, bbox=bbox))
         else:
-            lines.append(" " * indent + item[4].rstrip())
-        last_x = item[0]
-    return "\n".join(lines).rstrip()
+            # 静默丢弃会让「少了一块」永远查不出来，至少留个线索
+            _log.debug("MinerU 未处理的块类型：%s", kind)
+    return parsed
 
 
 _SENTENCE_END = "。！？；：.!?;:"
-
-_BULLET_RE = re.compile(r"^\s*([-*•·▪◦‣]|\d+[.)、]\s?|[（(]\d+[)）]|[a-z][.)]\s)")
-
-
-_PPT_COLUMN_GAP = 48.0
-
-_PPT_BULLET_RE = re.compile(r"^[\s\u200b]*[\uf000-\uf8ff➢➤►▶▸◆◇▪▫●○•·❖]")
-
-_PPT_FIGURE_COVER = 0.5
-_PPT_FIGURE_MAX_CHARS = 320
-
-_PPT_FIGURE_MIN_CHARS = 60
-_PPT_FIGURE_MIN_SHAPES = 20
-
-
-def _has_side_by_side(box: list) -> bool:
-    """框里是否有一行**并排排了两格以上**（两条行的 y 相差不到半个字高）。
-
-    容差必须按字号算：表格里同一行的两格基线常有 2~3pt 的差（字号不同、
-    对齐方式不同），按「y 完全相同」判会漏。
-    """
-    size = max(box[0][5], 1.0)
-    heights = sorted(item[1] for item in box)
-    return any(
-        current - previous < 0.5 * size
-        for previous, current in zip(heights, heights[1:])
-    )
-
-
-def _ppt_continues(previous: list, box: list) -> bool:
-    """box 是不是接着 previous 那段话往下写的另一个文本框（PPT 独有：写到右边界溢出的
-    部分在 PDF 里是另一个 block）。四条同时成立：
-
-    1. 上一块最后一行没有句末标点；
-    2. 那一行是本块最宽的一行（顶到右边界才被切断）；
-    3. 本块首行比上一块首行更靠右；
-    4. 本块首行不以条目符号开头，且横向落在上一块范围内。
-    """
-    tail = previous[-1]
-    head = box[0]
-    if tail[4].rstrip()[-1:] in _SENTENCE_END:
-        return False
-    if _has_side_by_side(box):
-        return False
-    if tail[2] < max(item[2] for item in previous) - 1.0:
-        return False
-    if _PPT_BULLET_RE.match(head[4]):
-        return False
-    size = max(head[5], tail[5], 1.0)
-    indent = head[0] - tail[0]
-    if not 0.2 * size <= indent <= 2.5 * size:
-        return False
-    low = min(item[0] for item in previous) - size
-    high = max(item[2] for item in previous) + size
-    if not low <= head[0] <= high:
-        return False
-    return -0.5 * size <= head[1] - tail[3] <= 1.5 * size
-
-
-def _ppt_columns(ranges: list[tuple[float, float]]) -> list[int]:
-    """给每个文本框判栏号：先按中心 x 的间隔粗分（48pt），再把「嵌在栏里的窄框」并回去。
-
-    第二遍按横向重叠判：窄框有 70% 落在某栏范围内就归该栏。否则宽右栏里嵌着的小框会被
-    当成独立一栏，读起来就成了「左栏 → 性能评价 → 右栏」。
-    """
-    centers = sorted({round((low + high) / 2, 0) for low, high in ranges})
-    column_of: dict[float, int] = {}
-    column = 0
-    for position, center in enumerate(centers):
-        if position and center - centers[position - 1] > _PPT_COLUMN_GAP:
-            column += 1
-        column_of[center] = column
-
-    spans: dict[int, list[float]] = {}
-    for low, high in ranges:
-        span = spans.setdefault(column_of[round((low + high) / 2, 0)], [low, high])
-        span[0] = min(span[0], low)
-        span[1] = max(span[1], high)
-
-    merged: list[list] = []  # [low, high, [原栏号...]]
-    for key in sorted(spans):
-        low, high = spans[key]
-        if merged:
-            wider = merged[-1]
-            overlap = min(high, wider[1]) - max(low, wider[0])
-            narrower = min(high - low, wider[1] - wider[0])
-            if narrower > 0 and overlap / narrower >= 0.5:
-                wider[0] = min(wider[0], low)
-                wider[1] = max(wider[1], high)
-                wider[2].append(key)
-                continue
-        merged.append([low, high, [key]])
-
-    final: dict[int, int] = {}
-    for index, (_low, _high, keys) in enumerate(merged):
-        for key in keys:
-            final[key] = index
-    return [final[column_of[round((low + high) / 2, 0)]] for low, high in ranges]
-
-
-def _ppt_paragraphs(lines: list) -> list[list]:
-    """PPT 的段落重建：按文本框分组，再按「先左后右、再上到下」排。
-
-    不能按几何行合并：一页常是几个并列文本框，同高度的行会被串成一句。三步：合并续写框
-    （_ppt_continues）→ 框内按条目符号切段 → 按栏优先排序（_ppt_columns）。
-
-    只给 PPT 用：正文书 93% 的行各自一个 block，按 block 聚合等于一行一段。
-    """
-    boxes: dict[int, list] = {}
-    for line in lines:
-        boxes.setdefault(int(line[6]), []).append(line)
-    ordered = [
-        sorted(box, key=lambda item: (round(item[1], 1), item[0]))
-        for box in boxes.values()
-    ]
-    ordered.sort(key=lambda box: (round(box[0][1], 1), box[0][0]))
-
-    groups: list[list] = []
-    for box in ordered:
-        for group in reversed(groups):
-            if _ppt_continues(group, box):
-                group.extend(box)
-                break
-        else:
-            groups.append(box)
-
-    paragraphs: list[list] = []
-    for group in groups:
-        current: list = []
-        for line in group:
-            if current and _PPT_BULLET_RE.match(line[4]):
-                paragraphs.append(current)
-                current = []
-            current.append(line)
-        if current:
-            paragraphs.append(current)
-
-    ranges = [
-        (min(item[0] for item in group), max(item[2] for item in group))
-        for group in paragraphs
-    ]
-    columns = _ppt_columns(ranges)
-    order = sorted(
-        range(len(paragraphs)),
-        key=lambda index: (columns[index], round(paragraphs[index][0][1], 1)),
-    )
-    return [paragraphs[index] for index in order]
-
-
-def _ppt_page_order(elements: list[_Element]) -> list[_Element]:
-    """PPT 一页的元素顺序：正文保持 `_ppt_paragraphs` 的阅读顺序，只决定图和式插在哪两段之间
-    （按「它上方有几段正文」定位，页首大图自然排到最前面）。
-
-    不能按 y 重排：右栏的 y 比左栏末段还小，重排会把两栏又串成一条。
-    """
-    body = [item for item in elements if item.kind in {"text", "code"}]
-    if not body:
-        return sorted(elements, key=lambda item: item.y)
-    pending = sorted(
-        (item for item in elements if item.kind not in {"text", "code"}),
-        key=lambda item: item.y,
-    )
-    ordered: list[_Element] = []
-    for item in body:
-        while pending and pending[0].y <= item.y:
-            ordered.append(pending.pop(0))
-        ordered.append(item)
-    ordered.extend(pending)
-    return ordered
-
-
-def _pdf_shape_count(page) -> int:
-    """一页的矢量图形条数。用来认「文字只剩几个标签、图形却几十条」的示意图页。"""
-    try:
-        return len(page.get_drawings())
-    except Exception:  # noqa: BLE001 - 畸形页面取不到图形，按「没有图」处理
-        return 0
-
-
-def _pdf_graphic_cover(page) -> float:
-    """一页里**最大一块图形**占页面面积的比例。
-
-    用来判断「这一页其实是一张图」。幻灯片上的图是几十条矢量线加若干文字块，
-    `get_images` 拿不到（它会返回空），只能看 `get_drawings` 合并后的簇。
-    """
-    try:
-        rects = _pdf_graphic_rects(page)
-    except Exception:  # noqa: BLE001 - 畸形页面取不到图形，按「不是图」处理
-        return 0.0
-    if not rects:
-        return 0.0
-    area = page.rect.width * page.rect.height
-    if area <= 0:
-        return 0.0
-    widest = max(rects, key=lambda rect: rect.width * rect.height)
-    return (widest.width * widest.height) / area
-
-
-def _pdf_paragraphs(lines: list) -> list[list]:
-    """把版面上一行行的文字合并成段落，不看 block 序号。
-
-    不同工具链切 block 的方式完全相反：浏览器打印的 PDF 93% 是一行一个 block，LaTeX 一个
-    block 能装 7 行——block 边界只是生成器的内部选择。能跨工具链通用的只有几何：
-    行距 + 字号 + 标点 + 左边缘。
-    """
-    groups: list[list] = []
-    current: list = []
-    for item in lines:
-        if not current:
-            current = [item]
-            continue
-        previous = current[-1]
-        size = max(previous[5], 1.0)
-        gap = item[1] - previous[3]
-        same_size = abs(item[5] - previous[5]) < 0.6
-        tight = -0.3 * size <= gap <= 0.75 * size
-        open_tail = previous[4].rstrip()[-1:] not in _SENTENCE_END
-        indented = item[0] - previous[0] > 1.5 * size
-        starts_list = bool(_BULLET_RE.match(item[4]))
-        if same_size and tight and open_tail and not indented and not starts_list:
-            current.append(item)
-        else:
-            groups.append(current)
-            current = [item]
-    if current:
-        groups.append(current)
-    return groups
-
-
-def _join_lines(parts: list[str]) -> str:
-    """把同一段里的多行拼成一行：西文断词去掉连字符直接接，西文句子之间补空格，中文直接接。
-    **中文不补空格**是硬要求——补了会得到「抽样 定理」，检索按词匹配会全部失配。
-    """
-    text = ""
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        if not text:
-            text = part
-            continue
-        if text.endswith("-") and part[:1].isalpha():
-            text = text[:-1] + part
-        elif re.search(r"[A-Za-z0-9,;:.)]$", text) and re.match(r"[A-Za-z0-9(]", part):
-            text = f"{text} {part}"
-        else:
-            text = text + part
-    return text
 
 
 def _match_caption(text: str) -> tuple[str, str] | None:
@@ -2207,372 +2168,6 @@ def _match_caption(text: str) -> tuple[str, str] | None:
         return None
     prefix = "图" if kind.lower().startswith(("图", "fig")) else "表"
     return f"{prefix} {number.replace(' ', '')}", caption
-
-
-def _center_in(bbox: tuple[float, float, float, float], rects: list) -> bool:
-    """这个文字行的中心点落在某个矩形里吗。用来判断「这行字属于表格」。"""
-    x = (bbox[0] + bbox[2]) / 2
-    y = (bbox[1] + bbox[3]) / 2
-    return any(rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3] for rect in rects)
-
-
-def _pdf_tables(page) -> list[tuple[str, tuple[float, float, float, float]]]:
-    """找出这一页的表格，返回 (markdown 表格, bbox)。用 find_tables()，靠线条和对齐找
-    网格，无边框表格会漏（不致命，文字仍会作为正文进去，只是失去行列对齐）。
-
-    丢掉三种：少于 2 列或 2 行；面积超整页 75%（双栏正文被框成「表格」）；清洗后不足 2 行。
-    """
-    try:
-        found = page.find_tables()
-    except Exception:  # noqa: BLE001 - 畸形页面/空页面
-        return []
-    page_area = page.rect.width * page.rect.height
-    result: list[tuple[str, tuple[float, float, float, float]]] = []
-    for table in getattr(found, "tables", []):
-        bbox = getattr(table, "bbox", None)
-        if bbox is None:
-            continue
-        bbox = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
-        area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        if getattr(table, "col_count", 0) < 2 or getattr(table, "row_count", 0) < 2:
-            continue
-        if area > page_area * 0.75:
-            continue
-        try:
-            rows = _clean_table(table.extract())
-        except Exception:  # noqa: BLE001
-            continue
-        if len(rows) < 2:
-            continue
-        result.append((_rows_to_markdown(rows), bbox))
-    return result
-
-
-def _clean_table(rows: list[list[str | None]]) -> list[list[str]]:
-    """把 extract() 的原始网格清洗成 markdown 表格。治三个毛病：
-
-    单元格内换行被拆成新行（超过一半格子为空 → 是上一行的续行，拼回去）；
-    合并单元格无值（第一列空而上一行有值 → 继承）；自动列名 Col1 / Col3 是噪音。
-
-    清洗是有损的（−2⁷ 会拼成 −27），引用时用「原书第 N 页」让人能回原文核对。
-    """
-    grid: list[list[str]] = []
-    for row in rows:
-        cells = [_sanitize_surrogates((cell or "")).strip() for cell in row]
-        cells = [re.sub(r"^Col\d+$", "", cell) for cell in cells]
-        grid.append(cells)
-    grid = [row for row in grid if any(cell for cell in row)]
-    if not grid:
-        return []
-    cols = max(len(row) for row in grid)
-    grid = [row + [""] * (cols - len(row)) for row in grid]
-
-    cleaned: list[list[str]] = []
-    for row in grid:
-        if cleaned and not row[0] and cleaned[-1][0]:
-            row = [cleaned[-1][0], *row[1:]]
-        filled = sum(1 for cell in row if cell)
-        if cleaned and filled * 2 <= cols:
-            merged = False
-            for index, cell in enumerate(row):
-                if cell:
-                    cleaned[-1][index] = _append_cell(cleaned[-1][index], cell)
-                    merged = True
-            if merged:
-                continue
-        cleaned.append(row)
-    return cleaned
-
-
-def _append_cell(left: str, right: str) -> str:
-    """把续行的两截拼成一格。中文直接接，西文补空格（和拼行是同一个规则）。"""
-    if not left:
-        return right
-    if re.search(r"[A-Za-z0-9,;:.)]$", left) and re.match(r"[A-Za-z0-9(]", right):
-        return f"{left} {right}"
-    return left + right
-
-
-def _rows_to_markdown(rows: list[list[str]]) -> str:
-    """二维数组 → markdown 表格。单元格里的 `|` 要转义，否则表格会多出一列。"""
-    if not rows:
-        return ""
-
-    def cell(value: str) -> str:
-        return value.replace("|", "\\|").replace("\n", " ").strip()
-
-    width = len(rows[0])
-    lines = ["| " + " | ".join(cell(value) for value in rows[0]) + " |"]
-    lines.append("|" + "---|" * width)
-    for row in rows[1:]:
-        lines.append("| " + " | ".join(cell(value) for value in row) + " |")
-    return "\n".join(lines)
-
-
-def _is_layout_frame(rect, page_rect, text_rects: list) -> bool:
-    """这个矩形是不是页面排版框（边距框 / 背景框），不是插图。
-
-    两条同时成立：宽高都 ≥ 页面 60%，且半数以上文字块（90% 面积）落在它里面。
-    必须排掉：它一旦进图形列表，会把真正的插图合并成整页大簇，导致全书一张图都配不上。
-    放在收集阶段过滤，合并之后就分不出来了。
-    """
-    if rect.width < page_rect.width * 0.6 or rect.height < page_rect.height * 0.6:
-        return False
-    inside = sum(
-        1 for block in text_rects if (block & rect).get_area() > block.get_area() * 0.9
-    )
-    return inside >= max(3, len(text_rects) // 2)
-
-
-_SLIDE_ICON_TEXTS = {"play"}
-
-
-def _is_slide_label(line, boxes: list) -> bool:
-    """这一行是不是幻灯片上的**图内标注**（`A`、`f1`、`发射机`）。四条同时成立：
-    落在某张图的截图范围里、短（≤ 20 字）、不是一句话、不是条目（`➢` 开头的是真要点）。
-
-    只认「真的截下来的那张图」，不认图形簇——簇在排版宽松的页上会长得很大，把正文圈进去。
-    """
-    text = line[4].strip()
-    if text.lower() in _SLIDE_ICON_TEXTS:
-        return True
-    if not text or len(text) > 20:
-        return False
-    if text[-1] in _SENTENCE_END:
-        return False
-    if _PPT_BULLET_RE.match(text):
-        return False
-    center_x = (line[0] + line[2]) / 2
-    center_y = (line[1] + line[3]) / 2
-    return any(
-        box[0] <= center_x <= box[2] and box[1] <= center_y <= box[3] for box in boxes
-    )
-
-
-def _pdf_graphic_rects(page) -> list:
-    """一页里所有「可能是插图」的版面矩形，位图和矢量图两路都收。
-
-    只做位图会一张图都抽不到：扫描 / 重排过的教材图是线条画出来的，get_images 返回空。
-    两路都过滤装饰元素：太小的（图标、分数线）、贯穿整页的细横线（页眉分隔线）。
-    """
-    pymupdf = _require("pymupdf", "pip install pymupdf")
-    rects = []
-    page_rect = page.rect
-    try:
-        for image in page.get_images(full=True):
-            for rect in page.get_image_rects(image[0]):
-                if rect.width >= 40 and rect.height >= 30:
-                    rects.append(rect)
-    except Exception:  # noqa: BLE001 - 畸形 PDF 的图字典可能是空的或类型不对
-        pass
-    try:
-        text_rects = [
-            pymupdf.Rect(block[:4]) for block in page.get_text("blocks") if block[4].strip()
-        ]
-    except Exception:  # noqa: BLE001
-        text_rects = []
-    try:
-        for drawing in page.get_drawings():
-            rect = drawing.get("rect")
-            if rect is None:
-                continue
-            if rect.width < 20 or rect.height < 12:
-                continue
-            if rect.height < 4 and rect.width > page_rect.width * 0.5:
-                continue
-            if _is_layout_frame(rect, page_rect, text_rects):
-                continue
-            rects.append(rect)
-    except Exception:  # noqa: BLE001
-        pass
-    return _merge_clusters(rects)
-
-
-def _merge_clusters(rects: list, gap: float = 24.0) -> list:
-    """把相邻的图形元素合成一个簇，返回簇的外包框。
-
-    一张图在 PDF 里常常是几十条线加上几个文字块（轴标签），不合并的话
-    会得到几十个碎片，截图只能截到其中一条线。
-    """
-    if not rects:
-        return []
-    ordered = sorted(rects, key=lambda r: (r.y0, r.x0))
-    clusters: list[list] = [[ordered[0]]]
-    for rect in ordered[1:]:
-        current = clusters[-1]
-        y_max = max(r.y1 for r in current)
-        x_min = min(r.x0 for r in current)
-        x_max = max(r.x1 for r in current)
-        if rect.y0 - y_max <= gap and rect.x0 <= x_max + gap and rect.x1 >= x_min - gap:
-            current.append(rect)
-        else:
-            clusters.append([rect])
-    merged = []
-    for cluster in clusters:
-        box = cluster[0]
-        for rect in cluster[1:]:
-            box = box | rect
-        merged.append(box)
-    return merged
-
-
-def _drop_inside(rects: list, box) -> list:
-    """候选里已经被截进 `box` 的簇全部去掉。书页截的是一个簇，按相等剔除就够；幻灯片截的是
-    若干簇的并集，得按「有没有一半落在里面」判，否则同页第二个题注会把第一张图再截一遍。
-    """
-    kept = []
-    for rect in rects:
-        area = (rect.x1 - rect.x0) * (rect.y1 - rect.y0)
-        overlap = (min(box.x1, rect.x1) - max(box.x0, rect.x0)) * (
-            min(box.y1, rect.y1) - max(box.y0, rect.y0)
-        )
-        if area > 0 and overlap > 0 and overlap / area >= 0.5:
-            continue
-        kept.append(rect)
-    return kept
-
-
-def _slide_figure_rect(rects: list, caption_bbox: tuple[float, float, float, float], page):
-    """幻灯片上「题注上方」的截图范围：从题注往上逐段生长，再求并集。
-
-    幻灯片不能只取最近的簇：连线、箭头、虚框各自成簇，最近的常只有 30×30pt。
-    间隔 60pt 是「图里相邻部件」和「图与上一块文字」的分界。窗口下界取 -30 而不是 0，
-    因为幻灯片的图常把题注包在自己里面。
-    """
-    picked = [
-        rect
-        for rect in rects
-        if -30 <= caption_bbox[1] - rect.y1 <= 60 and _column_near(rect, caption_bbox)
-    ]
-    cursor = min((rect.y0 for rect in picked), default=caption_bbox[1])
-    while picked:
-        box = None
-        for rect in picked:
-            box = rect if box is None else box | rect
-        grown = [
-            rect
-            for rect in rects
-            if rect not in picked
-            and -30 <= cursor - rect.y1 <= 60
-            and _column_near(rect, (box.x0, box.y0, box.x1, box.y1))
-        ]
-        if not grown:
-            break
-        picked.extend(grown)
-        cursor = min(rect.y0 for rect in grown)
-    if not picked:
-        return None
-    box = picked[0]
-    for rect in picked[1:]:
-        box = box | rect
-    if box.width * box.height < 0.15 * page.rect.width * page.rect.height:
-        return None
-    return box
-
-
-def _column_near(rect, caption_bbox: tuple[float, float, float, float], margin: float = 40.0) -> bool:
-    """横向和题注沾边：否则收到的是隔壁栏的图。"""
-    return rect.x1 >= caption_bbox[0] - margin and rect.x0 <= caption_bbox[2] + margin
-
-
-def _nearest_graphic_above(rects: list, caption_bbox: tuple[float, float, float, float]):
-    """图注上方的图形簇。教材图题在图下方是惯例，所以只往上找。
-
-    距离限制 340pt（约半页）是必须的：不限制的话，某页只有一个图注但上方
-    有整页表格的线框，会把表格截成「图」。
-    """
-    caption_top = caption_bbox[1]
-    caption_left, caption_right = caption_bbox[0], caption_bbox[2]
-    best = None
-    best_gap = 340.0
-    for rect in rects:
-        gap = caption_top - rect.y1
-        if gap < -4 or gap > best_gap:
-            continue
-        if rect.x1 < caption_left - 30 or rect.x0 > caption_right + 30:
-            continue
-        if rect.height < 20:
-            continue
-        best, best_gap = rect, gap
-    return best
-
-
-def _formula_rect(page, line_bbox: tuple[float, float, float, float]):
-    """公式的截图范围：编号所在行往上扩 46pt。不做公式识别（书上什么样就显示什么样），
-    宁可多截一点带上下文，也别截掉上半截式子。
-    """
-    pymupdf = _require("pymupdf", "pip install pymupdf")
-    x0, y0, x1, y1 = line_bbox
-    width = page.rect.width
-    return pymupdf.Rect(
-        max(width * 0.08, x0 - 80),
-        max(0, y0 - 46),
-        min(width * 0.94, x1 + 80),
-        min(page.rect.height, y1 + 6),
-    )
-
-
-def _save_clip(
-    page,
-    rect,
-    asset_dir: Path,
-    parsed: _Parsed,
-    label: str,
-    caption: str,
-    page_no: int,
-    kind: str,
-) -> dict | None:
-    """把一块版面截成 PNG 存盘，返回资产记录。
-
-    用 `get_pixmap(clip=...)` 而不是「把图对象抽出来」：矢量图根本没有图对象，
-    只有渲染后的像素。**统一走「渲染一块区域」**，位图和矢量图就只需要一条路径。
-    """
-    try:
-        pixmap = page.get_pixmap(clip=rect, dpi=150)
-    except Exception:  # noqa: BLE001 - 空区域/越界区域渲染会失败
-        return None
-    if pixmap.width < 40 or pixmap.height < 30:
-        return None
-    asset_id = f"as_{secrets.token_hex(4)}"
-    path = asset_dir / f"{asset_id}.png"
-    pixmap.save(str(path))
-    record = {
-        "asset_id": asset_id,
-        "kind": kind,
-        "label": label,
-        "caption": caption or None,
-        "page": page_no,
-        "file_path": str(path),
-        "width": pixmap.width,
-        "height": pixmap.height,
-    }
-    parsed.assets.append(record)
-    return record
-
-
-def _figure_chunk_text(label: str, caption: str) -> str:
-    """图对应的 chunk 内容 = 编号 + 题注。只有编号没有题注的图也保留——「第 3 章有图 3-4」
-    这个事实能让检索说清「书上有这张图」。
-    """
-    return f"{label} {caption}".strip()
-
-
-def _chapter_at(toc: list, page_no: int) -> str | None:
-    """按书签目录算某一页属于哪一章，取最深一级的标题。
-
-    目录页码与 `page_no` 同口径（都 1-based），直接比即可。没有目录返回 None——宁可不标，
-    也不用字号猜一个错的（C2 要求页码章节与书一致）。
-    """
-    best: tuple[int, str] | None = None
-    for entry in toc:
-        if len(entry) < 3:
-            continue
-        level, title, page = entry[0], entry[1], entry[2]
-        if isinstance(page, int) and 0 < page <= page_no:
-            if best is None or level >= best[0]:
-                best = (level, str(title))
-    return best[1] if best else None
-
 
 
 def _parse_pptx(data: bytes, asset_dir: Path) -> _Parsed:
@@ -2634,7 +2229,6 @@ def _parse_pptx(data: bytes, asset_dir: Path) -> _Parsed:
         )
 
     return parsed
-
 
 
 def _parse_docx(data: bytes, asset_dir: Path) -> _Parsed:

@@ -8,20 +8,20 @@
 
 ```powershell
 # 只校验用例，不调模型
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --dry-run
+python .\eval\run.py --dry-run
 
 # 跑全量，写入 eval/baselines/<时间戳>.json
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --tag baseline
+python .\eval\run.py --tag baseline
 
 # 冒烟：只跑前 3 个 / 只跑某几个分类
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --limit 3
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --category 搜索,网页提取
+python .\eval\run.py --limit 3
+python .\eval\run.py --category 搜索,网页提取
 
 # 和旧基线逐项对比
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --compare .\eval\baselines\baseline-v1.json
+python .\eval\run.py --compare .\eval\baselines\baseline-v1.json
 
 # 指定评测时模拟的客户端位置（默认 北京市；传空字符串表示不提供位置）
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --location 广东省广州市
+python .\eval\run.py --location 广东省广州市
 ```
 
 `--location` 走的是 `Context` 而**不是工具参数**，所以完全不碰 cassette、也不计入工具输出指纹。给固定值是为了让定位类用例可复现——原来靠服务器 IP 定位，每次跑可能都不一样。
@@ -63,11 +63,11 @@ C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --location 广东�
 
 ```powershell
 # 1. 录一轮（真实调用外部 API，把返回值按「工具名 + 参数」存进 cassette）
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --cassette-mode record --cassette frozen-v1 --tag rec
+python .\eval\run.py --cassette-mode record --cassette frozen-v1 --tag rec
 
 # 2. 之后所有对比都走 replay，两次运行拿到的工具输出逐字一致
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --cassette-mode replay --cassette frozen-v1 --tag a
-C:\Users\13526\miniconda3\envs\agent\python.exe .\eval\run.py --cassette-mode replay --cassette frozen-v1 --tag b --compare .\eval\baselines\a.json
+python .\eval\run.py --cassette-mode replay --cassette frozen-v1 --tag a
+python .\eval\run.py --cassette-mode replay --cassette frozen-v1 --tag b --compare .\eval\baselines\a.json
 ```
 
 规则：

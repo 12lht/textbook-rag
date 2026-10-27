@@ -22,9 +22,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 
-PDF = ROOT / "textbook/Hello-Agents.pdf"
+PDF = sample_pdf("Hello-Agents")
 OUT_DIR = ROOT / "out" / "Hello-Agents"
 
 TMP = Path(tempfile.mkdtemp(prefix="export-md-"))

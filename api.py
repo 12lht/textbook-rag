@@ -588,8 +588,10 @@ async def upload_document(
     """
     data = await read_upload_limited(file)
     try:
+        # 配额检查只是一次 count（几十行），留在事件循环里没有问题；
+        # 真正贵的是下面 250MB 的落盘 + 写库，那个已经挪进线程池
         service.check_document_quota(identity.user_id)
-        record = service.upload_document(identity.user_id, file.filename, data)
+        record = await service.upload_document(identity.user_id, file.filename, data)
     except service.QuotaExceeded as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except service.DocumentError as exc:
@@ -775,6 +777,42 @@ async def update_memory(
     if outcome == "clash":
         raise HTTPException(status_code=409, detail="已经有这条了，不用再改一次")
     return {"status": "updated"}
+
+
+@app.get("/api/documents/{doc_id}/file")
+async def document_file(
+    doc_id: str,
+    identity: service.Identity = Depends(logged_in_identity),
+) -> dict[str, str]:
+    """这本书原文件的打开地址（带签名）。
+
+    普通用户点「看原文」走这条：直接看上传的 PDF，不再渲染 Markdown。
+    渲染那套（KaTeX、分块、折叠）是给开发者看解析质量的，留到管理员功能里。
+    """
+    url = await service.document_file_url(doc_id, identity.user_id)
+    if url is None:
+        raise HTTPException(status_code=404, detail="原文件不在了，只能重新上传")
+    return {"url": url}
+
+
+@app.get("/api/documents/{doc_id}/file/view")
+async def document_file_view(doc_id: str, u: str = "", t: str = "") -> FileResponse:
+    """带签名的原文件。**刻意不接 `Depends(current_identity)`**：新标签打开 PDF 带不上令牌。"""
+    if not service.verify_document_file(doc_id, u, t):
+        raise HTTPException(status_code=403, detail="文件链接无效或已过期")
+    record = await service.document_file(doc_id, u)
+    if record is None or not record.get("exists"):
+        raise HTTPException(status_code=404, detail="原文件不在了")
+    kind = str(record.get("kind") or "")
+    media = "application/pdf" if kind == "pdf" else "application/octet-stream"
+    # 不传 filename：传了 Starlette 会加 `Content-Disposition: attachment`，浏览器就变成下载了
+    # 也不许缓存：地址里带的是**一小时有效**的签名，被浏览器或中间代理存下来之后，
+    # 链接过期了还能打开（等于把签名机制作废），反过来也会出现「换成 403 了但页面还是旧 PDF」
+    return FileResponse(
+        record["path"],
+        media_type=media,
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @app.get("/api/assets/{asset_id}")

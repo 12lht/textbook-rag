@@ -164,34 +164,6 @@
     .empty { padding: 44px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.85; }
     .empty b { color: var(--ink); font-weight: 600; }
 
-    /* --- Markdown 预览 ---
-       放在页面内的浮层，不开新窗口：管理文档时是「翻几本对一下」的节奏，
-       新窗口会把页面切走，回来还得重新滚到原来那本。 */
-    .modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: rgba(24,32,30,.42); }
-    .modal[hidden] { display: none; }
-    .modal-card {
-      display: flex; flex-direction: column; min-height: 0;
-      width: min(940px, 100%); height: min(86vh, 100%);
-      border-radius: 16px; background: #fffdf9; box-shadow: 0 26px 70px rgba(20,32,25,.32);
-    }
-    .modal-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
-    .modal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-    .modal-tab { padding: 5px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 12px; }
-    .modal-tab.active { border-color: var(--ink); color: #fff; background: var(--ink); }
-    .modal-close { width: 28px; height: 28px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 17px; line-height: 1; }
-    .modal-close:hover { color: var(--ink); background: #f2efe8; }
-    .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 26px 40px; word-break: break-word; }
-    /* 教材解析出大量 worst_best_time_complexity.py 这类下划线长标识符，浏览器默认不在
-       _ 处折行，手机上会把内容撑到 500px+ 而弹窗只有 350px——右边就「看不见」了。 */
-    .modal-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.75 ui-monospace, Menlo, monospace; }
-    .modal-body img { max-width: 100%; height: auto; display: block; margin: 1em auto; border-radius: 6px; }
-    .modal-body h1, .modal-body h2, .modal-body h3 { line-height: 1.4; margin: 1.5em 0 .6em; }
-    .modal-body h1 { font-size: 21px; } .modal-body h2 { font-size: 18px; } .modal-body h3 { font-size: 15.5px; }
-    .modal-body p { margin: .8em 0; line-height: 1.8; font-size: 14px; }
-    .modal-body table { border-collapse: collapse; margin: 1em 0; font-size: 13px; display: block; overflow-x: auto; }
-    .modal-body th, .modal-body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
-    .modal-body blockquote { margin: 1em 0; padding: .2em 0 .2em 13px; border-left: 3px solid var(--line); color: var(--muted); }
-
     /* 登录门。知识库对游客是关的（游客共用同一个库），所以直接在整页层面挡住，
        不要让人点进一个个按钮才发现全是 401。 */
     .gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(245,247,241,.92); }
@@ -214,7 +186,9 @@
 
     @media (max-width: 720px) {
       .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: auto; }
-      .cats { max-height: 34vh; border-right: 0; border-bottom: 1px solid #e6dfd3; }
+      /* 不给 max-height：手机上 .cats 是 position:fixed; top:0; bottom:0 的抽屉，
+         这里再压一个 34vh 会让抽屉只剩一条窄条（两个 media 同时命中） */
+      .cats { border-right: 0; border-bottom: 1px solid #e6dfd3; }
       .docs { padding: 18px 16px 40px; }
       .doc-card { grid-template-columns: auto minmax(0, 1fr); row-gap: 9px; }
       .doc-cat, .doc-ops { grid-column: 2; }
@@ -233,7 +207,6 @@
       .sidebar-backdrop.show { display: block; }
       .cat-ops { opacity: 1; }
       .docs { padding: 16px; }
-      .modal { padding: 10px; }
       .doc-card { grid-template-columns: auto minmax(0, 1fr); }
       .doc-cat, .doc-ops { grid-column: 2; justify-self: start; }
     }
@@ -296,25 +269,8 @@
     </div>
   </div>
 
-  <div class="modal" id="preview" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="previewName">
-      <div class="modal-head">
-        <div class="modal-name" id="previewName">解析预览</div>
-        <button class="modal-tab active" id="tabRender" type="button">渲染</button>
-        <button class="modal-tab" id="tabRaw" type="button">原文</button>
-        <button class="modal-close" id="previewClose" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="modal-body" id="previewBody"></div>
-    </div>
-  </div>
-
   <div class="toast" id="toast" hidden></div>
 
-  <script src="/static/vendor/marked.min.js"></script>
-  <script src="/static/vendor/purify.min.js"></script>
-  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css" />
-  <script src="/static/vendor/katex/katex.min.js"></script>
-  <script src="/static/vendor/katex/auto-render.min.js"></script>
   <script>
     // --- 移动端抽屉分类栏：与聊天页同一套交互 ---
     {
@@ -410,6 +366,22 @@
     }
 
     let toastTimer = null;
+    // 打开教材原文：先换一个签名地址再新标签打开。浏览器打开 PDF 时带不上
+    // Authorization 头，所以后端给的是带 hmac 签名的 URL（和插图一个套路）。
+    async function openDocumentFile(doc) {
+      try {
+        const response = await apiFetch(`/api/documents/${encodeURIComponent(doc.doc_id)}/file`);
+        if (!response.ok) throw new Error(await readError(response, '打不开'));
+        const { url } = await response.json();
+        // `window.open` 必须紧跟用户操作才不会被弹窗拦截。这里中间隔了 await，
+        // 被拦时返回 null——不提示的话用户看到的就是「点了没反应」。
+        const opened = window.open(url, '_blank', 'noopener');
+        if (!opened) say('浏览器拦下了新标签，请允许本站弹窗后再点一次', true);
+      } catch (error) {
+        say(`打不开「${doc.title}」：${error.message}`, true);
+      }
+    }
+
     function say(message, bad = false) {
       toast.textContent = message;
       toast.classList.toggle('bad', Boolean(bad));
@@ -710,10 +682,10 @@
         const preview = document.createElement('button');
         preview.type = 'button';
         preview.className = 'doc-op';
-        preview.textContent = '看解析';
-        preview.disabled = doc.status !== 'ready';
-        preview.title = doc.status === 'ready' ? '查看解析出的原文（带页码锚点）' : '解析完成后才能看';
-        preview.onclick = () => openPreview(doc);
+        preview.textContent = '看原文';
+        // 原文件在不在和解析状态无关：解析失败也能翻 PDF，所以不禁用。
+        preview.title = '在新标签打开上传的 PDF 原文';
+        preview.onclick = () => openDocumentFile(doc);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'doc-op danger';
@@ -857,107 +829,6 @@
 
     uploadButton.onclick = () => fileInput.click();
     fileInput.onchange = () => uploadFiles(fileInput.files);
-
-    // ------------------------------------------------------------------
-    // 解析预览
-    // ------------------------------------------------------------------
-    const preview = $('#preview');
-    const previewName = $('#previewName');
-    const previewBody = $('#previewBody');
-    const tabRender = $('#tabRender');
-    const tabRaw = $('#tabRaw');
-    let previewDoc = null;
-    const previewCache = { render: null, raw: null };
-
-    function closePreview() {
-      preview.hidden = true;
-      previewDoc = null;
-      previewBody.innerHTML = '';
-      previewCache.render = null;
-      previewCache.raw = null;
-    }
-    $('#previewClose').onclick = closePreview;
-    preview.onclick = (event) => { if (event.target === preview) closePreview(); };
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !preview.hidden) closePreview();
-    });
-
-    async function openPreview(doc) {
-      previewDoc = doc;
-      previewName.textContent = `${doc.title} · ${doc.chunk_count} 段 · ${doc.asset_count} 图表`;
-      preview.hidden = false;
-      const canRender = Boolean(window.marked && window.DOMPurify);
-      tabRender.disabled = !canRender;
-      tabRender.title = canRender ? '' : '渲染组件没加载出来（离线或被拦截），只能看原文';
-      await showPreview(canRender ? 'render' : 'raw');
-    }
-
-    // 数学段先抽离成占位符（marked 会把 \( \[ 当转义吃掉反斜杠），渲染完放回交 KaTeX 处理
-    let mathStash = [];
-    function maskMath(text) {
-      mathStash = [];
-      return String(text ?? '').replace(
-        /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g,
-        (match) => { mathStash.push(match); return `@@MATH${mathStash.length - 1}@@`; },
-      );
-    }
-
-    async function showPreview(mode) {
-      if (!previewDoc) return;
-      tabRender.classList.toggle('active', mode === 'render');
-      tabRaw.classList.toggle('active', mode === 'raw');
-      previewBody.innerHTML = '';
-      let text = previewCache[mode];
-      if (text === null) {
-        previewBody.textContent = '加载中…';
-        // render=1 让服务端把 `![](as_77.png)` 换成带签名的 URL，
-        // 否则 <img> 请求带不上 Authorization，全是破图。
-        const query = mode === 'render' ? '?render=1' : '';
-        try {
-          const response = await apiFetch(
-            `/api/documents/${encodeURIComponent(previewDoc.doc_id)}/markdown${query}`,
-          );
-          if (!response.ok) throw new Error(await readError(response, '读取失败'));
-          text = await response.text();
-          previewCache[mode] = text;
-        } catch (error) {
-          previewBody.textContent = `读取失败：${error.message}`;
-          return;
-        }
-      }
-      if (mode === 'render') {
-        previewBody.innerHTML = DOMPurify.sanitize(marked.parse(maskMath(text), { breaks: true, gfm: true }))
-          .replace(/@@MATH(\d+)@@/g, (_, index) => escapeHtml(mathStash[Number(index)] ?? ''));
-        // 教材解析里的 $$..$$ / \(..\) 公式在 sanitize 之后渲染（KaTeX 产物不再过 sanitize）
-        if (window.renderMathInElement) {
-          renderMathInElement(previewBody, {
-            delimiters: [
-              { left: '$$', right: '$$', display: true },
-              { left: '\\[', right: '\\]', display: true },
-              { left: '\\(', right: '\\)', display: false },
-            ],
-            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
-            throwOnError: false,
-          });
-        }
-        // 图挂了别只留一个空洞：告诉人是哪张图、为什么看不了。
-        previewBody.querySelectorAll('img').forEach((img) => {
-          img.onerror = () => {
-            img.alt = `${img.alt || '插图'}（这张图加载失败）`;
-            img.style.width = '220px';
-          };
-        });
-      } else {
-        const pre = document.createElement('pre');
-        pre.textContent = text;
-        // 先清掉「加载中…」，否则那段文字会顶在正文前面不消失。
-        previewBody.innerHTML = '';
-        previewBody.appendChild(pre);
-      }
-    }
-
-    tabRender.onclick = () => showPreview('render');
-    tabRaw.onclick = () => showPreview('raw');
 
     // ------------------------------------------------------------------
     // 加载与轮询

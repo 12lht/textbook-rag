@@ -50,7 +50,10 @@
 | `GET` | `/api/documents` | 教材列表（含 `status` / 页数 / 段数 / 图表数 / `category_id`） |
 | `PATCH` | `/api/documents/{doc_id}` | 改归属：`{"category_id": "c-xxxx"}`，传 `null` 挪回未分类 |
 | `DELETE` | `/api/documents/{doc_id}` | 删除教材（正文、图片、向量一起清） |
-| `GET` | `/api/documents/{doc_id}/markdown` | 解析出的 Markdown；`?render=1` 把图引用换成带签名的 URL |
+| `GET` | `/api/documents/{doc_id}/markdown` | 解析出的 Markdown；`?render=1` 把图引用换成带签名的 URL（**开发者用**，前端不再调用） |
+| `GET` | `/api/documents/{doc_id}/file` | 「看原文」的第一步：返回**带签名**的原文件地址（要令牌） |
+| `GET` | `/api/documents/{doc_id}/file/view?u=&t=` | 签名访问原文件，`FileResponse` 带 `accept-ranges`；**不接令牌**（新标签带不上）。响应带 `Cache-Control: private, no-store`，签名一小时有效，不许被缓存 |
+| `GET` | `/api/capabilities` | 能力开关（记忆 / 联网 / 检索等），前端按它决定显示哪些入口 |
 | `GET` | `/api/categories` | 分类列表，每个带 `doc_count` |
 | `POST` | `/api/categories` | 新建分类（重名 `409`，名字不合法 `400`） |
 | `PATCH` | `/api/categories/{category_id}` | 改名（不存在 `404`，撞名 `409`） |
@@ -62,7 +65,7 @@
 | 路径 | 内容 |
 | --- | --- |
 | `/` | 对话主界面 |
-| `/library` | 知识库管理页（分类 / 入库 / 归类 / 删除 / 看解析） |
+| `/library` | 知识库管理页（分类 / 入库 / 归类 / 删除 / 看原文） |
 
 ### 分类与归属
 
@@ -70,6 +73,13 @@
 - **删分类不删书**。分类只是一行标签，书是几十 MB 解析出来的资产；响应里带 `documents: "unfiled"` 就是为了让前端能明确告诉用户这一点。
 - 归属写在书身上（`PATCH /api/documents/{id}`），不开 `POST /api/categories/{id}/documents`：一本书同时只在一个分类里，入口只有一个才不会互相打架。
 - 越权一律 `404`（书不是你的、分类不是你的都算「不存在」）。区分 `403` 等于告诉对方「这个 id 是真的」。
+
+### 「看原文」为什么不渲染 Markdown
+
+普通用户点按钮直接打开上传的 PDF（`/file` → `/file/view`）。Markdown 渲染那套（KaTeX、
+按页分块、视口外折叠）是为**调试解析质量**做的：一本 215 页的书渲染出来是 10MB DOM、
+27 万个节点，浏览器扛一会儿就崩。渲染入口留给开发者（`/markdown?render=1`），
+以后放进管理员功能。
 
 ### 上传的体积上限（`POST /api/documents`）
 

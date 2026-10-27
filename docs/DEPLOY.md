@@ -28,6 +28,14 @@
 | `DEEPSEEK_API_KEY` | 是 | 主模型。`MODEL_PROVIDER=glm` 时改用 `GLM_API_KEY` |
 | `TAVILY_API_KEY` | 是 | 联网搜索工具。没配则搜索工具不注册、按钮置灰 |
 | `AMAP_API_KEY` | 否 | 天气 + 逆地理编码。没配则天气工具回「服务未配置」 |
+| `MINERU_API_KEY` | 否 | PDF 解析走云端 MinerU（按页算额度，1000 页/天）。不配则上传 PDF 直接 failed，PPTX / DOCX 不受影响 |
+| `MINERU_MODEL` | 否 | 默认 `vlm`。别改回 `pipeline`——它会把表格里的上标压平（`2^63` 变 `263`），看起来像解析成功 |
+| `VISION_MODEL` | 否 | 装饰图灰区判定用的视觉模型，默认 `Qwen/Qwen3-VL-8B-Instruct`（走 `SILICON_API_KEY`）。没配 key 则灰区一律保留图片 |
+| `SILICON_API_KEY` | 否 | 视觉模型（判装饰 / 写图注）和向量、rerank 共用的 key。不配则灰区一律保留图、图注退占位、检索退回纯 BM25 |
+| `VISION_DESC_MODEL` | 否 | 给**无题注**插图写一句图注用的模型，默认 `Qwen/Qwen3-VL-30B-A3B-Instruct`。写不出来/超时就退回「第 N 页 插图」。**8B 服务不稳**（实测单张 60s 超时或直接 500），别默认回去 |
+| `VISION_BASE_URL` | 否 | 视觉模型的 OpenAI 兼容地址，默认 `https://api.siliconflow.cn/v1` |
+| `EMBEDDING_MODEL` | 否 | 向量模型，默认 `BAAI/bge-m3` |
+| `EMBEDDING_BASE_URL` | 否 | 向量服务的地址，默认同 `VISION_BASE_URL` |
 | `MODEL_PROVIDER` | 否 | `deepseek`（默认）/ `glm`。主模型与标题模型共用这一个开关 |
 | `ASSET_SECRET` | 否 | 教材插图签名密钥。不配则首次启动生成 `data/asset_secret.key` |
 | `GUEST_SECRET` | 否 | 访客 cookie 签名密钥。同上，生成 `data/guest_secret.key` |
@@ -152,7 +160,7 @@ your.domain.com {
 # 全量（含插图与上传原件）
 python scripts/backup.py --keep 7
 
-# 精简（只备状态，约 25MB；assets/uploads 需要时能从 textbook/ 重新解析）
+# 精简（只备状态，约 25MB）。注意：textbook/ 已移出仓库，uploads/assets 丢了就只能让用户重新上传
 python scripts/backup.py --slim --keep 7
 ```
 

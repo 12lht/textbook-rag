@@ -113,12 +113,9 @@ function makeServer({ loggedIn }) {
       doc.category_id = target;
       return json({ doc_id: doc.doc_id, category_id: target });
     }
-    if (url.includes('/markdown')) {
-      const render = url.includes('render=1');
-      const body = render
-        ? '<!-- page:1 -->\n\n正文段落\n\n![图 3-4 抽样](/api/assets/as_1?u=u-1&t=9999999999.abc)'
-        : '<!-- page:1 -->\n\n正文段落\n\n![图 3-4 抽样](as_1.png)';
-      return { ok: true, status: 200, json: async () => ({}), text: async () => body };
+    const fileMatch = url.match(/^\/api\/documents\/([^/]+)\/file$/);
+    if (fileMatch) {
+      return json({ url: `/api/documents/${fileMatch[1]}/file/view?u=u-1&t=9999999999.abc` });
     }
     return json({ detail: 'not mocked: ' + url }, 404);
   };
@@ -157,6 +154,9 @@ async function boot({ loggedIn, withRenderer = true }) {
   window.setTimeout = (fn, ms) => { timers.push(ms); return timers.length; };
   window.clearTimeout = () => {};
   window.confirm = () => true;
+  // 「看原文」是 window.open 打开 PDF。linkedom 里没有实现，用一个收集器记下地址
+  window.opened = [];
+  window.open = (url) => { window.opened.push(String(url)); return {}; };
   window.FormData = class {
     constructor() { this.fields = []; }
     append(key, value) { this.fields.push([key, value]); }
@@ -200,7 +200,7 @@ const settle = async (rounds = 20) => {
 }
 
 {
-  const { document, server, timers } = await boot({ loggedIn: true });
+  const { document, server, timers, window } = await boot({ loggedIn: true });
   check('登录门挡起来', document.querySelector('#gate').hidden === true);
 
   const names = catNames(document);
@@ -238,9 +238,9 @@ const settle = async (rounds = 20) => {
     chosen ? chosen.value : '(没有任何 option 被选中)');
 
   check('有书在解析 → 安排了轮询', timers.includes(2500), JSON.stringify(timers));
-  check('解析中的书不能看解析',
-    document.querySelectorAll('#docList .doc-op')[2].disabled === true);
-  check('已就绪的书能看解析',
+  check('解析失败的书也能看原文（原文件和解析状态无关）',
+    document.querySelectorAll('#docList .doc-op')[2].disabled === false);
+  check('已就绪的书能看原文',
     document.querySelectorAll('#docList .doc-op')[0].disabled === false);
 
   const catNodes = [...document.querySelectorAll('#catList .cat')];
@@ -288,35 +288,31 @@ const settle = async (rounds = 20) => {
   check('移动完批量条收起', document.querySelector('#bulkBar').hidden === true);
 
   server.calls.length = 0;
+  window.opened.length = 0;
   await document.querySelectorAll('#docList .doc-op')[0].onclick();
-  for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
-  check('预览默认走渲染（要求服务端重写图地址）',
-    server.calls.some((c) => c.url.includes('/markdown?render=1')),
+  await settle();
+  check('看原文先换签名地址',
+    server.calls.some((c) => c.url === '/api/documents/d1/file'),
     server.calls.map((c) => c.url).join(' '));
-  const body = document.querySelector('#previewBody');
-  check('渲染视图里的图变成真 <img>', /<img[^>]+src="\/api\/assets\/as_1\?u=u-1/.test(body.innerHTML),
-    body.innerHTML.slice(0, 120));
-  check('渲染视图里锚点被渲染器吃掉', !body.innerHTML.includes('page:1'), body.innerHTML.slice(0, 120));
-
-  await document.querySelector('#tabRaw').onclick();
-  for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
-  check('原文模式里有页码锚点', body.innerHTML.includes('&lt;!-- page:1 --&gt;'),
-    body.innerHTML.slice(0, 80));
-  check('原文模式是 <pre> 且没残留「加载中」',
-    body.innerHTML.startsWith('<pre>') && !body.innerHTML.includes('加载中'),
-    body.innerHTML.slice(0, 60));
-  document.querySelector('#previewClose').onclick();
-  check('关掉后浮层隐藏', document.querySelector('#preview').hidden === true);
+  check('不再请求 markdown（前端不渲染解析结果了）',
+    !server.calls.some((c) => c.url.includes('/markdown')),
+    server.calls.map((c) => c.url).join(' '));
+  check('新标签打开的是签名地址',
+    window.opened.length === 1 && window.opened[0].includes('/file/view?'),
+    JSON.stringify(window.opened));
+  check('弹窗元素已经删掉', document.querySelector('#previewBody') === null,
+    String(document.querySelector('#previewBody')));
 }
 
 {
-  const { document } = await boot({ loggedIn: true, withRenderer: false });
+  // marked / KaTeX 已经从知识库页移除（看原文直接开 PDF），没有它们也必须能正常开文件
+  const { document, window } = await boot({ loggedIn: true, withRenderer: false });
+  window.opened.length = 0;
   await document.querySelectorAll('#docList .doc-op')[0].onclick();
-  for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
-  check('没有 marked → 渲染标签禁用', document.querySelector('#tabRender').disabled === true);
-  check('没有 marked → 直接给原文而不是空白',
-    document.querySelector('#previewBody').innerHTML.includes('&lt;!-- page:1 --&gt;'),
-    document.querySelector('#previewBody').innerHTML.slice(0, 60));
+  await settle();
+  check('没有 marked 也能看原文（不再依赖渲染器）',
+    window.opened.length === 1 && window.opened[0].includes('/file/view?'),
+    JSON.stringify(window.opened));
 }
 
 {

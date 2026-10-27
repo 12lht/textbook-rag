@@ -14,8 +14,9 @@
 - **近似类**：需要一个分母，分母是自己数出来的（图注召回就是），
   所以绝对值仅供参考，**只看趋势和突变**。
 
-刻意复用 `documents._CAPTION_RE` / `documents._pdf_junk_lines`：评测必须和解析器
+刻意复用 `documents._CAPTION_RE` / `documents._match_caption`：评测必须和解析器
 用同一把尺子。自己另写一份正则，等于用更宽松的标准给同一个东西判高分。
+（`_pdf_preflight` 原本在 documents 里，随本地解析一起删了；这里只留评测用得到的「是否幻灯片」。）
 
 用法：
     python eval/parse.py --pdf C:/.../Hello-Algo.pdf --pages 31-60
@@ -34,6 +35,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(ROOT / ".env")  # MinerU 的 key 在 .env 里，不加载整条解析链路都起不来
 
 _TMP = Path(tempfile.mkdtemp(prefix="parse-eval-"))
 
@@ -136,7 +141,7 @@ def evaluate(pdf_path: Path, pages: tuple[int, int] | None) -> dict[str, object]
                 table_pages += 1
         except Exception:  # noqa: BLE001 - 畸形页面不参与统计
             pass
-    preflight = documents._pdf_preflight(subset, pymupdf)
+    preflight = _preflight(subset, pymupdf)
     subset.close()
     src.close()
 
@@ -302,6 +307,25 @@ def print_report(report: dict[str, object], previous: dict[str, object] | None) 
             print(f"    {key:<22} {old} → {new}  {mark}")
         if previous.get("markdown_sha") == report.get("markdown_sha"):
             print("    Markdown 逐字未变")
+
+
+def _preflight(pdf, pymupdf) -> dict[str, object]:
+    """只看「是不是幻灯片式页面」：宽高比 > 1.1 且抽样页的中位字符数 < 500。
+
+    原来还探文字层占比和双栏——那两项是给本地解析器选路用的，本地链路已删，评测不需要。
+    """
+    pages = int(pdf.page_count)
+    if pages < 3:
+        return {"slides": False}
+    rect = pdf[0].rect
+    if rect.height <= 0 or rect.width / rect.height <= 1.1:
+        return {"slides": False}
+    start = min(2, pages - 1)
+    span = pages - start
+    wanted = min(5, span)
+    indexes = sorted({start + round(i * (span - 1) / max(wanted - 1, 1)) for i in range(wanted)})
+    chars = sorted(len(pdf[index].get_text("text").strip()) for index in indexes)
+    return {"slides": chars[len(chars) // 2] < 500}
 
 
 def main() -> None:

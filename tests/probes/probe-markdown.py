@@ -20,9 +20,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位�
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import pymupdf
+from dotenv import load_dotenv  # noqa: E402
 
-import documents
+load_dotenv(REPO_ROOT / ".env")  # MinerU 的 key 在 .env 里
+
+import pymupdf  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import documents  # noqa: E402
+from _sample import sample_pdf  # noqa: E402
 
 failures: list[str] = []
 
@@ -39,7 +45,7 @@ def main() -> None:
     documents.UPLOAD_DIR = tmp / "uploads"
     documents.ASSET_DIR = tmp / "assets"
 
-    src = pymupdf.open(str(REPO_ROOT / "textbook/Hello-Algo.pdf"))
+    src = pymupdf.open(str(sample_pdf("Hello-Algo")))
     out = pymupdf.open()
     out.insert_pdf(src, from_page=30, to_page=59)
     sample = tmp / "sample.pdf"
@@ -86,19 +92,21 @@ def main() -> None:
 
     before_markdown = documents.markdown_of(doc_id, "u1")
     before_chunks = len(documents.chunks_of(doc_id))
+    # **存原值再还原**：以前这里写死还原成 500/900，而模块默认早就是 250/900，
+    # 还原后参数不等于原参数，chunk 数当然回不去（探针自己过时了，不是代码错）。
+    saved_target, saved_max = documents.TARGET_CHARS, documents.MAX_CHARS
     documents.TARGET_CHARS = 200
     documents.MAX_CHARS = 320
     result = documents.rechunk(doc_id)
     after_markdown = documents.markdown_of(doc_id, "u1")
     after_chunks = len(documents.chunks_of(doc_id))
-    print(f"\n重切：TARGET 500 → 200，chunk {before_chunks} → {after_chunks}")
+    print(f"\n重切：TARGET {saved_target} → 200，chunk {before_chunks} → {after_chunks}")
     check("重切后 chunk 变多", after_chunks > before_chunks, f"{before_chunks} → {after_chunks}")
     check("重切没有动 markdown（说明没重新解析）", after_markdown == before_markdown)
     check("重切返回的条数一致", result["chunk_count"] == after_chunks, str(result["chunk_count"]))
     check("重切后仍能引用图（asset 没被清）", any(c["asset_id"] for c in documents.chunks_of(doc_id)))
 
-    documents.TARGET_CHARS = 500
-    documents.MAX_CHARS = 900
+    documents.TARGET_CHARS, documents.MAX_CHARS = saved_target, saved_max
     documents.rechunk(doc_id)
     check("参数还原后 chunk 数回到原值", len(documents.chunks_of(doc_id)) == before_chunks)
 
