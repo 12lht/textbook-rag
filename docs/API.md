@@ -95,6 +95,32 @@
 反向代理那层也要配 `client_max_body_size 252m`，否则请求到不了应用（见 `DEPLOY.md`）。
 
 
+### 会话内附件（`POST /api/attachments`）
+
+和 `POST /api/documents` 是两条路，别混：
+
+| | `/api/documents` | `/api/attachments` |
+|---|---|---|
+| 用途 | 教材**入库** | 本次提问用的**临时材料** |
+| 解析 | MinerU，几十秒，后台跑 | 不解析 |
+| 检索 | 进永久检索池 | 不进 |
+| 存储 | SQLite + `data/` | `data/attachments/<user_id>/` |
+| 生命周期 | 用户手动删 | 7 天后自动清 |
+| 登录 | 要求 | 游客也能用 |
+
+`POST /api/attachments`（multipart，字段名 `file`）返回 `{"att_id","kind","mime","bytes"}`。
+只收 JPEG / PNG / WebP / GIF，**按文件头判断**，不信扩展名也不信 `Content-Type`
+（两个都来自客户端）。单图上限 8MB，超了 `413`。
+
+把 `att_id` 放进 `POST /api/chat/stream` 的 `attachments` 数组（最多 8 个）模型就能看到图。
+历史里的附件会随每轮请求重新展开，所以第二轮不带附件也能接着问上一张图。
+
+`GET /api/attachments/{att_id}?u=&t=` 是给 `<img>` 用的签名地址，和正文插图同一套做法：
+不带签名 `403`；拿别人的 `att_id` 配自己的签名会 `404`（目录按 user_id 隔离）。
+
+**附件默认是临时的**，不进藏书阁。想长期保留要重新走 `/api/documents`。
+
+
 ### 会被限流的端点
 
 下表这几个不只是「可能失败」，而是**会主动挡住你**。被挡时返回 `429`，响应头带 `Retry-After`（秒）。

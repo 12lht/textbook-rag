@@ -3,23 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agent Workspace</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'7'%20fill%3D'%2318201e'%2F%3E%3Cpath%20d%3D'M16%207%208.5%2025M16%207%2023.5%2025M11.2%2018.5H20.8'%20stroke%3D'%23fff'%20stroke-width%3D'3'%20stroke-linecap%3D'round'%20fill%3D'none'%2F%3E%3C%2Fsvg%3E" />
+  <title>书院 · 教材问答</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A//www.w3.org/2000/svg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'6'%20fill%3D'%239c3a29'/%3E%3Cpath%20d%3D'M16%2010.6C14.2%209.3%2011.9%208.7%209.4%208.7c-.9%200-1.7.1-2.4.2v12.6c.7-.1%201.5-.2%202.4-.2%202.5%200%204.8.6%206.6%201.9%201.8-1.3%204.1-1.9%206.6-1.9.9%200%201.7.1%202.4.2V8.9c-.7-.1-1.5-.2-2.4-.2-2.5%200-4.8.6-6.6%201.9Z'%20stroke%3D'%23fffaf2'%20stroke-width%3D'1.8'%20stroke-linejoin%3D'round'%20fill%3D'none'/%3E%3Cpath%20d%3D'M16%2010.6v12.6'%20stroke%3D'%23fffaf2'%20stroke-width%3D'1.6'/%3E%3C/svg%3E" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+    /* 不再 @import Google Fonts：国内经常连不上，等字体超时的那几百毫秒里
+       整页会先用兜底字体排版再跳一次。改成系统字体栈，零网络请求、零抖动。 */
     :root {
-      --ink: #18201e;
-      --muted: #73807a;
-      --line: #dbe4dc;
-      --paper: #f5f7f1;
-      --panel: #ffffff;
-      --accent: #e76f51;
-      --accent-dark: #bd4f39;
+      /* 「纸与墨」：纸是暖的，墨是冷的，朱砂只用来盖章——不做界面主色大面积铺。
+         全站颜色只从这里取，组件里不写死色值。 */
+      --ink: #1c2531;
+      --ink-soft: #39424f;
+      --muted: #6f6c63;
+      --muted-soft: #928d80;
+      --line: #e0d8c6;
+      --line-strong: #cdc2a9;
+      --paper: #f6f2e8;
+      --paper-deep: #efe9db;
+      --panel: #fffdf7;
+      --accent: #9c3a29;
+      --accent-dark: #782a1c;
+      --accent-soft: #f8e9e2;
       /* 失败色单独一个变量，不借 accent-dark：那是主按钮的悬停色，
          同一个颜色既表示「操作」又表示「出错」，读起来会串味。 */
-      --danger: #b3352a;
-      --mint: #dcefe5;
-      --shadow: 0 22px 60px rgba(44, 65, 51, .12);
+      --danger: #a32b1c;
+      --mint: #e5e8d9;
+      --gold: #ad8b54;
+      --shadow: 0 18px 46px rgba(60, 47, 30, .10);
+      --shadow-sm: 0 4px 14px rgba(60, 47, 30, .06);
+      --font-serif: "Iowan Old Style", "Source Serif 4", Georgia, "Songti SC", STSong, SimSun, serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -27,57 +40,85 @@
       margin: 0;
       overflow: hidden;
       color: var(--ink);
-      background: radial-gradient(circle at 12% 0%, #e3f1e2 0, transparent 32rem), var(--paper);
-      font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+      /* 原来左上角那团薄荷绿光晕换成暖光：纸是背景，不该抢戏。
+         两层极淡的径向渐变叠出「台灯打在纸上」的层次，不用贴图。 */
+      background:
+        radial-gradient(1200px 620px at 18% -8%, rgba(255, 252, 240, .95), transparent 70%),
+        radial-gradient(900px 500px at 92% 4%, rgba(173, 139, 84, .07), transparent 65%),
+        var(--paper);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
     button, textarea { font: inherit; }
     button { cursor: pointer; }
+    /* 细滚动条：默认那条灰色粗条在纸色背景上非常出戏。 */
+    * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    *::-webkit-scrollbar { width: 9px; height: 9px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background-clip: content-box; background-color: var(--line-strong); }
+    *::-webkit-scrollbar-thumb:hover { background-color: var(--muted-soft); }
     .shell { display: grid; grid-template-columns: 292px minmax(0, 1fr); height: 100vh; height: 100dvh; overflow: hidden; }
-    .sidebar { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 18px; border-right: 1px solid #e6dfd3; background: #f7f4ed; }
-    .brand { flex: none; display: flex; align-items: center; gap: 12px; margin: 0 10px 28px; }
-    .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; color: white; background: var(--ink); border-radius: 12px; font-weight: 700; }
-    .brand-name { font-weight: 700; letter-spacing: -.03em; }
-    .brand-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
-    .new-chat { flex: none; width: 100%; border: 0; border-radius: 12px; padding: 13px 15px; color: white; background: var(--accent); font-weight: 600; box-shadow: 0 8px 18px rgba(231,111,81,.2); }
+    /* 侧栏比主区深一格：视觉上像书脊，和正文纸面分开。 */
+    .sidebar { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 18px; border-right: 1px solid var(--line-strong); background: var(--paper-deep); box-shadow: inset -1px 0 0 rgba(255, 255, 255, .55); }
+    .brand { flex: none; display: flex; align-items: center; gap: 12px; margin: 0 4px 26px; }
+    /* 印章式的标记：朱砂底 + 内圈白线，里面放一个线描书本。
+       原来是个汉字，字在 38px 的方块里显得挤，图形反而更清楚。 */
+    .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; color: #fffaf2; background: var(--accent); border-radius: 7px; box-shadow: inset 0 0 0 1px rgba(255, 250, 242, .45), 0 2px 6px rgba(120, 42, 28, .22); }
+    .brand-mark svg { display: block; }
+    /* 两字中文名比英文短得多，17px 会显得单薄；字号上调 + 拉开字距撑住分量。 */
+    .brand-name { font-family: var(--font-serif); font-size: 19px; font-weight: 600; letter-spacing: .1em; }
+    .new-chat { flex: none; width: 100%; border: 0; border-radius: 8px; padding: 12px 15px; color: #fffaf2; background: var(--accent); font-size: 13.5px; font-weight: 600; letter-spacing: .02em; box-shadow: inset 0 1px 0 rgba(255, 250, 242, .18), 0 3px 10px rgba(120, 42, 28, .18); transition: background .15s, transform .1s; }
     .new-chat:hover { background: var(--accent-dark); }
-    .section-label { flex: none; margin: 28px 10px 10px; color: var(--muted); font: 500 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
-    .conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 5px; align-content: start; }
+    .new-chat:active { transform: translateY(1px); }
+    /* 小标题做成「书眉」：左侧一道短金线 + 等宽大写，比纯灰字更有章节感。 */
+    .section-label { flex: none; display: flex; align-items: center; gap: 8px; margin: 26px 4px 10px; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+    .section-label::before { content: ""; flex: none; width: 14px; height: 1px; background: var(--gold); }
+    .conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
+    /* 一条会话都没有时，侧栏会空出一大块。用 :empty 补一行提示，不用改 JS。 */
+    .conversation-list:empty::after { content: "还没有会话"; padding: 14px 12px; color: var(--muted-soft); font-size: 12px; }
     /* 知识库入口。原来这里是「教材库」标题 + 上传按钮 + 文档列表（最多 32vh），
        现在文档管理有了独立页面，侧栏只留这一行，把高度还给会话列表。
        样式跟着 .memory-open 走（虚线框、次要色），一眼能看出它是个跳转入口。 */
     .library-entry {
-      flex: none; display: block; margin: 18px 10px 4px; padding: 10px 12px;
-      border: 1px dashed var(--line); border-radius: 10px;
-      color: var(--muted); background: transparent; font-size: 12px; text-decoration: none;
+      flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      margin: 16px 0 4px; padding: 10px 12px;
+      border: 1px solid var(--line); border-radius: 8px;
+      color: var(--ink-soft); background: rgba(255, 253, 247, .55);
+      font-size: 12.5px; text-decoration: none;
+      transition: border-color .15s, color .15s, background .15s;
     }
-    .library-entry:hover { border-color: var(--accent); color: var(--accent-dark); }
+    /* 箭头交给 CSS 生成，hover 时右移一格：比在 HTML 里写死「→」更容易做动效。 */
+    .library-entry::after { content: "→"; color: var(--muted-soft); transition: transform .15s, color .15s; }
+    .library-entry:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--panel); }
+    .library-entry:hover::after { color: var(--accent); transform: translateX(3px); }
     /* --- 记忆面板 ---
        「AI 记住了什么」是低频但必须能查的东西：用户偶尔要核对有没有记错。
        所以侧栏只放一个入口，内容放进弹窗——条目可能有几十条，摆在侧栏
        会把会话列表挤没。 */
     .memory-entry { flex: none; display: grid; gap: 6px; margin-bottom: 14px; }
-    .memory-open { width: 100%; padding: 10px 12px; text-align: left; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); background: transparent; font-size: 12px; }
-    .memory-open:hover { border-color: var(--accent); color: var(--accent-dark); }
+    .memory-open { width: 100%; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: rgba(255, 253, 247, .55); font-size: 12px; transition: border-color .15s, color .15s; }
+    .memory-open:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--panel); }
     /* 游客没有记忆，入口整个不显示——留个点了会说「先登录」的按钮是噪音。 */
     .memory-entry[hidden] { display: none; }
     .modal-card.wide { width: min(560px, 100%); }
-    .modal-title { margin: 0 0 6px; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
-    .modal-sub { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; line-height: 1.65; }
+    .modal-title { margin: 0 0 6px; font-family: var(--font-serif); font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+    .modal-sub { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
     .memory-list { display: grid; gap: 8px; max-height: 56vh; overflow-y: auto; overscroll-behavior: contain; }
-    .memory-row { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .memory-row { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
     .memory-head { display: flex; gap: 8px; align-items: center; margin-bottom: 7px; }
-    .memory-kind { padding: 2px 7px; border-radius: 6px; color: #3d5b48; background: var(--mint); font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+    .memory-kind { padding: 2px 7px; border-radius: 4px; color: var(--ink-soft); background: var(--mint); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; }
     /* 「其他」是模型给了不认识的 kind 时的兜底，不该和正常分类一样显眼 */
-    .memory-kind.other { color: var(--muted); background: #f2efe8; }
-    .memory-hits { margin-left: auto; color: var(--muted); font: 10.5px "DM Mono", monospace; }
-    .memory-text { font-size: 13px; line-height: 1.65; word-break: break-word; }
+    .memory-kind.other { color: var(--muted); background: var(--paper-deep); }
+    .memory-hits { margin-left: auto; color: var(--muted-soft); font: 10.5px var(--font-mono); }
+    .memory-text { font-size: 13px; line-height: 1.7; word-break: break-word; }
     .memory-ops { display: flex; gap: 6px; margin-top: 9px; }
-    .memory-op { padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: #fff; font-size: 11.5px; }
+    .memory-op { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 11.5px; }
     .memory-op:hover { border-color: var(--ink); color: var(--ink); }
-    .memory-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .memory-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
     .memory-op:disabled { opacity: .55; cursor: wait; }
     .memory-edit { display: grid; gap: 8px; }
-    .memory-edit input { width: 100%; padding: 9px 10px; border: 1px solid var(--accent); border-radius: 9px; color: var(--ink); background: #fff; font-size: 13px; outline: none; }
+    .memory-edit input { width: 100%; padding: 9px 10px; border: 1px solid var(--accent); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 13px; outline: none; }
     .memory-empty { padding: 22px 6px; color: var(--muted); font-size: 12.5px; line-height: 1.75; text-align: center; }
     /* 弹窗底部的错误行：改重了（409）、条目不见了（404）都写在这里，
        不跳 alert——那样会把刚编辑的输入框一起掀掉。 */
@@ -86,103 +127,121 @@
        和记忆面板共用 .memory-row / .memory-list 那套卡片样式，
        只有顶部「生成」那一行是新的。 */
     .invite-new { display: flex; gap: 8px; margin-bottom: 14px; }
-    .invite-new input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid #cfdacf; border-radius: 9px; color: var(--ink); background: #fff; font-size: 12.5px; outline: none; }
+    .invite-new input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 12.5px; outline: none; }
     .invite-new input:focus { border-color: var(--accent); }
-    .invite-make { flex: none; padding: 9px 14px; border: 0; border-radius: 9px; color: #fff; background: var(--accent); font-size: 12.5px; font-weight: 600; }
+    .invite-make { flex: none; padding: 9px 14px; border: 0; border-radius: 7px; color: #fffaf2; background: var(--accent); font-size: 12.5px; font-weight: 600; }
     .invite-make:hover { background: var(--accent-dark); }
     .invite-make:disabled { opacity: .6; cursor: wait; }
     /* 邀请码本身用等宽字体 + 字距，抄写和核对都方便 */
-    .invite-code { font: 600 15px "DM Mono", monospace; letter-spacing: .12em; word-break: break-all; }
-    .invite-row.used .invite-code { color: var(--muted); text-decoration: line-through; }
+    .invite-code { font: 600 15px var(--font-mono); letter-spacing: .12em; word-break: break-all; }
+    .invite-row.used .invite-code { color: var(--muted-soft); text-decoration: line-through; }
     .conversation-item { display: flex; gap: 4px; align-items: stretch; }
-    .conversation { flex: 1; min-width: 0; padding: 11px 12px; text-align: left; border: 1px solid transparent; border-radius: 10px; color: var(--ink); background: transparent; }
-    .conversation:hover, .conversation.active { border-color: var(--line); background: var(--panel); box-shadow: 0 5px 18px rgba(45, 69, 51, .05); }
-    .conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-    .conversation-count { margin-top: 5px; color: var(--muted); font-size: 11px; }
-    .conversation-rename { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; color: var(--ink); background: #fff; font-size: 13px; outline: none; box-shadow: 0 5px 18px rgba(45, 69, 51, .08); }
-    .context-menu { position: fixed; z-index: 60; min-width: 150px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(45, 69, 51, .18); }
+    /* 会话行像书签：默认全透明，悬停浮出纸面；选中时左侧压一道朱砂书签条。 */
+    .conversation { position: relative; flex: 1; min-width: 0; padding: 10px 12px 10px 14px; text-align: left; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; transition: background .15s, border-color .15s; }
+    .conversation:hover { background: rgba(255, 253, 247, .7); }
+    .conversation.active { border-color: var(--line-strong); background: var(--panel); box-shadow: var(--shadow-sm); }
+    .conversation.active::before { content: ""; position: absolute; top: 9px; bottom: 9px; left: 3px; width: 2px; border-radius: 2px; background: var(--accent); }
+    .conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.45; }
+    .conversation-count { margin-top: 4px; color: var(--muted); font: 10.5px var(--font-mono); letter-spacing: .02em; }
+    .conversation-rename { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 13px; outline: none; box-shadow: var(--shadow-sm); }
+    .context-menu { position: fixed; z-index: 60; min-width: 150px; padding: 6px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 16px 36px rgba(60, 47, 30, .16); }
     .context-menu[hidden] { display: none; }
-    .context-menu-item { display: block; width: 100%; padding: 8px 10px; text-align: left; border: 0; border-radius: 8px; color: var(--ink); background: transparent; font-size: 13px; }
-    .context-menu-item:hover { background: #f2efe8; }
+    .context-menu-item { display: block; width: 100%; padding: 8px 10px; text-align: left; border: 0; border-radius: 6px; color: var(--ink); background: transparent; font-size: 13px; }
+    .context-menu-item:hover { background: var(--paper-deep); }
     .context-menu-item.danger { color: var(--accent-dark); }
-    .context-menu-item.danger:hover { background: #fff4f1; }
-    .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #fffdf9; }
-    .topbar { flex: none; padding: 22px 34px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
-    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 16px; cursor: pointer; }
-    .menu-btn:active { background: var(--line); }
-    .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
-    .scope-badge { flex: none; border: 1px solid var(--accent-dark); color: var(--accent-dark); background: rgba(255,255,255,.7); border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
-    .scope-badge:hover { background: var(--accent-dark); color: #fff; }
-    .chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: min(900px, 100%); margin: 0 auto; padding: 46px 34px 28px; }
-    .welcome { max-width: 650px; margin: 9vh auto 70px; }
-    .eyebrow { color: var(--accent-dark); font: 500 12px "DM Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
-    h1 { max-width: 680px; margin: 14px 0 18px; font-size: clamp(34px, 5vw, 64px); line-height: .98; letter-spacing: -.065em; }
-    .welcome p { max-width: 520px; color: var(--muted); font-size: 16px; line-height: 1.7; }
-    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
-    .suggestion { padding: 9px 12px; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.65); font-size: 12px; }
-    .suggestion:hover { border-color: var(--accent); color: var(--accent-dark); }
-    .messages { display: grid; gap: 22px; }
-    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 13px; animation: rise .28s ease both; }
-    .message.user { grid-template-columns: minmax(0, 1fr) 32px; }
+    .context-menu-item.danger:hover { background: var(--accent-soft); }
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+    .topbar { flex: none; padding: 20px 34px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; background: rgba(255, 253, 247, .78); }
+    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--panel); font-size: 16px; cursor: pointer; }
+    .menu-btn:active { background: var(--paper-deep); }
+    .conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-serif); font-size: 17px; font-weight: 600; flex: 1 1 auto; }
+    .scope-badge { flex: none; border: 1px solid var(--line-strong); color: var(--ink-soft); background: var(--paper); border-radius: 999px; padding: 4px 12px; font-size: 11.5px; cursor: pointer; transition: border-color .15s, color .15s; }
+    .scope-badge:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+    .chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: min(920px, 100%); margin: 0 auto; padding: 44px 40px 28px; }
+    /* 左边界和输入框对齐（都从 chat/composer 的 40px 内边距起），
+       否则欢迎语会比输入框往右缩一截，看着像没对齐。
+       原来靠上边框 + 眉标起头，眉标删掉后整条长横线就没了承接，改成一小段金线。 */
+    .welcome { max-width: 660px; margin: 8vh 0 70px; }
+    .welcome::before { content: ""; display: block; width: 46px; height: 2px; margin-bottom: 24px; background: var(--gold); }
+    /* 中文标题不能用西文那种 -0.06em 紧排：字会挤在一起。衬线 + 正常字距更像教科书。
+       text-wrap: balance 让多行长度接近，避免最后一行孤字。 */
+    h1 { max-width: 680px; margin: 0 0 4px; font-family: var(--font-serif); font-size: clamp(30px, 3.6vw, 46px); font-weight: 600; line-height: 1.28; letter-spacing: .015em; text-wrap: balance; }
+    .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 30px; }
+    .suggestion { padding: 8px 13px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 253, 247, .7); font-size: 12.5px; transition: border-color .15s, color .15s, background .15s; }
+    .suggestion:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+    .messages { display: grid; gap: 26px; }
+    .message { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; animation: rise .28s ease both; }
+    .message.user { grid-template-columns: minmax(0, 1fr) 30px; }
     .message.user .avatar { grid-column: 2; grid-row: 1; }
     .message.user > div:nth-child(2) { grid-column: 1; grid-row: 1; text-align: right; }
-    .message.user .message-content { display: inline-block; padding: 9px 13px; border-radius: 12px 4px 12px 12px; text-align: left; background: var(--mint); }
-    .avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; color: white; background: var(--ink); font-size: 12px; font-weight: 700; }
-    .message.user .avatar { color: var(--ink); background: var(--mint); }
-    .message-role { margin: 2px 0 7px; color: var(--muted); font: 11px "DM Mono", monospace; text-transform: uppercase; }
+    .message.user .message-content { display: inline-block; padding: 9px 14px; border-radius: 8px 8px 3px 8px; text-align: left; background: var(--mint); }
+    .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: #fffaf2; background: var(--ink); font: 600 13px/1 var(--font-serif); }
+    .message.user .avatar { color: var(--ink-soft); background: var(--mint); }
+    .message-role { margin: 1px 0 7px; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .1em; }
     .trace { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
-    .trace summary { display: inline-block; cursor: pointer; color: var(--accent-dark); font: 11px "DM Mono", monospace; }
-    .trace summary:hover { color: var(--ink); }
-    .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--mint); background: #f7faf5; }
-    .trace-event { line-height: 1.5; }
+    /* 展开/收起的小三角自己画：浏览器默认 marker 紧贴着文字，中文标题下会糊成一团。 */
+    .trace > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .08em; }
+    .trace > summary::-webkit-details-marker { display: none; }
+    .trace > summary::before { content: "▸"; color: var(--gold); font-size: 9px; line-height: 1; transition: transform .15s ease; }
+    .trace[open] > summary::before { transform: rotate(90deg); }
+    .trace summary:hover { color: var(--accent-dark); }
+    .trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--line-strong); background: var(--paper); }
+    .trace-event { line-height: 1.55; }
     .trace-event.trace-failed { color: var(--danger); font-weight: 500; }
     /* 工具返回原文：可折叠，默认收起。内容用等宽小字号 + 限高滚动，
        展开也不至于把页面拉长一屏。 */
-    .trace-tool-result summary { cursor: pointer; color: var(--accent-dark); font: 11px "DM Mono", monospace; }
-    .trace-tool-result summary:hover { color: var(--ink); }
+    .trace-tool-result summary { cursor: pointer; color: var(--muted); font: 500 10.5px var(--font-mono); }
+    .trace-tool-result summary:hover { color: var(--accent-dark); }
     .trace-tool-result.trace-failed summary { color: var(--danger); }
-    .trace-tool-result-body { margin-top: 6px; padding: 8px 10px; max-height: 240px; overflow-y: auto; border-left: 2px solid var(--line); color: var(--muted); font: 12px/1.5 "DM Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .trace-tool-result-body { margin-top: 6px; padding: 8px 10px; max-height: 240px; overflow-y: auto; border-left: 2px solid var(--line-strong); color: var(--muted); font: 11.5px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     /* 思维链单独一块，比工具调用那几行更暗、更窄，视觉上退到后面去。
        summary 直接沿用上面 `.trace summary` 的样式，不重复写一套。 */
     .trace-reasoning { color: var(--muted); }
-    .trace-reasoning-body { margin-top: 6px; padding: 8px 10px; border-left: 2px dashed var(--line); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .message-content { line-height: 1.75; font-size: 15px; overflow-wrap: anywhere; }
+    .trace-reasoning-body { margin-top: 6px; padding: 8px 10px; border-left: 2px dashed var(--line-strong); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* 正文用无衬线：中文宋体在 15px 屏幕上偏糊，长文可读性优先。
+       衬线只留给标题和品牌，两者分工明确。 */
+    .message-content { line-height: 1.85; font-size: 15.5px; overflow-wrap: anywhere; }
     /* 回答里的 markdown 标题（## 等）默认字号太大（h2 = 24px 加粗），压到和
        正文一个量级，只留粗细和上下边距差异。 */
     .message-content h1, .message-content h2, .message-content h3,
     .message-content h4, .message-content h5, .message-content h6 {
-      margin: 14px 0 6px; font-size: 15px; font-weight: 700; line-height: 1.5;
+      margin: 20px 0 8px; font-family: var(--font-serif); font-size: 16.5px; font-weight: 600; line-height: 1.5; letter-spacing: .01em;
     }
-    .message-content h1 { font-size: 16px; }
-    .message-content p { margin: 0 0 12px; }
+    .message-content h1 { font-size: 18px; }
+    .message-content p { margin: 0 0 13px; }
     .message-content p:last-child { margin-bottom: 0; }
-    .message-content strong { font-weight: 700; }
-    .message-content ul, .message-content ol { margin: 8px 0; padding-left: 24px; }
-    .message-content blockquote { margin: 12px 0; padding: 8px 14px; border-left: 3px solid var(--accent); color: var(--muted); background: #f7faf5; }
-    .message-content code { padding: 2px 5px; border-radius: 5px; color: #a44a38; background: #fff0eb; font: 13px "DM Mono", monospace; }
-    .message-content pre { margin: 12px 0; padding: 14px; overflow-x: auto; border-radius: 10px; color: #edf5ed; background: #1e2925; }
+    .message-content strong { font-weight: 700; color: var(--ink); }
+    .message-content ul, .message-content ol { margin: 10px 0; padding-left: 24px; }
+    .message-content li { margin: 3px 0; }
+    .message-content blockquote { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--gold); color: var(--ink-soft); background: var(--paper); }
+    .message-content code { padding: 2px 5px; border-radius: 4px; color: #8f3524; background: var(--accent-soft); font: 13px var(--font-mono); }
+    .message-content pre { margin: 14px 0; padding: 14px 16px; overflow-x: auto; border-radius: 8px; color: #e8ece6; background: #23272e; }
     .message-content pre code { padding: 0; color: inherit; background: transparent; }
-    .message-content table { width: 100%; margin: 12px 0; border-collapse: collapse; font-size: 13px; }
-    .message-content th, .message-content td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; }
-    .message-content th { background: var(--mint); font-weight: 600; }
-    .message-content a { color: var(--accent-dark); text-decoration: underline; text-underline-offset: 3px; }
-    .activity { color: var(--muted); font-size: 13px; font-style: italic; }
-    .message-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-    .rewind { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 11px; line-height: 1.7; }
-    .rewind:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .message-content table { width: 100%; margin: 14px 0; border-collapse: collapse; font-size: 13.5px; }
+    .message-content th, .message-content td { padding: 8px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .message-content th { background: var(--paper-deep); font-weight: 600; }
+    .message-content a { color: var(--accent-dark); text-decoration: underline; text-decoration-color: rgba(156, 58, 41, .35); text-underline-offset: 3px; }
+    .message-content a:hover { text-decoration-color: var(--accent); }
+    .message-content hr { margin: 22px 0; border: 0; border-top: 1px solid var(--line); }
+    .activity { color: var(--muted-soft); font-size: 13px; font-style: italic; }
+    .message-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+    .rewind { padding: 3px 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; line-height: 1.7; }
+    .rewind:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
     .rewind:disabled { opacity: .4; cursor: not-allowed; }
     /* ---------- 引用溯源（C 域） ---------- */
     /* 正文里的 [c1] 角标。可点：弹出引用小窗。 */
-    .message-content img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); margin: 4px 0; }
-    sup.cite { cursor: pointer; margin: 0 1px; padding: 0 5px; border-radius: 5px; color: var(--accent-dark); background: #fff0eb; font: 11px "DM Mono", monospace; }
-    sup.cite:hover, sup.cite.active { color: white; background: var(--accent); }
+    /* 插图当成书里的图版处理：留一圈白边，像贴上去的。 */
+    .message-content img { max-width: 100%; padding: 5px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); margin: 6px 0; }
+    /* 角标是上标，但默认 sup 会顶得太高、把行距撑开，这里压回来一点。 */
+    sup.cite { cursor: pointer; margin: 0 2px; padding: 0 5px; border-radius: 4px; color: var(--accent-dark); background: var(--accent-soft); font: 500 10.5px/1.4 var(--font-mono); vertical-align: baseline; position: relative; top: -.35em; }
+    sup.cite:hover, sup.cite.active { color: #fffaf2; background: var(--accent); }
     /* 引用小窗：点角标弹出，显示出处和原文。position: fixed（视口坐标定位，
        不随聊天区滚动走；聊天区一滚动就把它关掉，避免悬空错位）。 */
-    .cite-popover { position: fixed; z-index: 70; width: min(430px, calc(100vw - 16px)); max-height: min(360px, 60vh); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 16px 36px rgba(45, 69, 51, .18); overflow: hidden; }
-    .cite-popover .head { display: flex; gap: 8px; align-items: baseline; padding: 9px 12px; border-bottom: 1px dashed var(--line); background: #fbfcf8; }
+    .cite-popover { position: fixed; z-index: 70; width: min(430px, calc(100vw - 16px)); max-height: min(360px, 60vh); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: 0 18px 40px rgba(60, 47, 30, .18); overflow: hidden; }
+    .cite-popover .head { display: flex; gap: 8px; align-items: baseline; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--paper); }
     .cite-popover .head .cite-code { flex: none; }
-    .cite-popover .head .source-meta { min-width: 0; font-size: 12.5px; }
-    .cite-popover .body { max-height: min(300px, 50vh); overflow-y: auto; padding: 8px 12px; color: var(--muted); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .cite-popover .head .source-meta { min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
+    .cite-popover .body { max-height: min(300px, 50vh); overflow-y: auto; padding: 10px 14px; color: var(--muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
     /* 原文是整书 markdown 的切片，常带 # 标题和空行：marked 渲染后 <p>/<h*> 默认
        外边距会把行距撑得非常大（用户实测「间距太大、有的字过大过粗」）——
        这里统一压平：标题只保留粗细差异，段落间距收到 3px。 */
@@ -198,59 +257,106 @@
        会横着撑开、字挤成一团。 */
     .cite-popover .body table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; font-size: 12px; }
     .cite-popover .body th, .cite-popover .body td { padding: 3px 6px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
-    .cite-popover .body th { background: #fbfcf8; font-weight: 600; }
+    .cite-popover .body th { background: var(--paper); font-weight: 600; }
     .cite-popover .body .katex { font-size: 1.02em; }
-    .cite-code { flex: none; padding: 1px 6px; border-radius: 5px; color: var(--accent-dark); background: #fff0eb; font: 11px "DM Mono", monospace; }
-    .composer-wrap { position: relative; flex: none; width: min(900px, 100%); margin: 0 auto; padding: 0 34px 30px; }
-    .scroll-bottom { position: absolute; right: 34px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(255,255,255,.95); box-shadow: 0 6px 18px rgba(45,69,51,.16); font-size: 16px; line-height: 1; }
+    .cite-code { flex: none; padding: 1px 6px; border-radius: 4px; color: var(--accent-dark); background: var(--accent-soft); font: 500 10.5px var(--font-mono); }
+    .composer-wrap { position: relative; flex: none; width: min(920px, 100%); margin: 0 auto; padding: 0 40px 30px; }
+    .scroll-bottom { position: absolute; right: 40px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink-soft); background: var(--panel); box-shadow: 0 6px 16px rgba(60, 47, 30, .12); font-size: 15px; line-height: 1; }
     .scroll-bottom.visible { display: grid; }
     .scroll-bottom:hover { border-color: var(--accent); color: var(--accent-dark); }
-    .composer { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #cfdacf; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: var(--shadow); }
+    /* 输入区是一张卡纸：默认细边，聚焦时边上浮一层朱砂，不靠发光。 */
+    /* 卡片整体作为定位参照：弹出菜单要长到整张卡的上方，而不是卡在工具栏这一行里。 */
+    .composer { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); transition: border-color .16s, box-shadow .16s; }
+    .composer:focus-within { border-color: rgba(156, 58, 41, .55); box-shadow: 0 18px 46px rgba(60, 47, 30, .13), 0 0 0 3px rgba(156, 58, 41, .08); }
     .composer-main { display: flex; align-items: flex-end; gap: 10px; }
+    /* 附件入口做成「+」，和下面的开关排成一条工具栏。用「+」而不是图片图标：
+       它回答的是「加东西」，不预设加什么——以后接文档、云盘都不用换按钮。 */
+    .attach-wrap { flex: none; display: flex; }
+    .attach { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: transparent; transition: border-color .15s, color .15s, background .15s; }
+    .attach svg { width: 15px; height: 15px; transition: transform .2s ease; }
+    .attach:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+    .attach[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+    /* 展开时「+」转 45° 变成「×」，不用另做图标就表达了「再点一下收起」。 */
+    .attach[aria-expanded="true"] svg { transform: rotate(45deg); }
+    .attach:disabled { opacity: .45; cursor: wait; }
+    /* 向上弹出的小面板：贴着整张输入卡的上沿长出去，条目少，不做滚动也不分组。 */
+    .attach-menu { position: absolute; left: 4px; bottom: calc(100% + 10px); z-index: 58; width: 272px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 18px 44px rgba(60, 47, 30, .18); animation: attachIn .14s ease both; }
+    .attach-menu[hidden] { display: none; }
+    .attach-menu-label { padding: 7px 10px 5px; color: var(--muted-soft); font: 500 10px var(--font-mono); letter-spacing: .16em; }
+    .attach-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; text-align: left; }
+    .attach-item:hover:not(:disabled) { border-color: var(--line); background: var(--paper); }
+    .attach-item:disabled { opacity: .42; cursor: default; }
+    .attach-icon { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--muted); }
+    .attach-item:hover:not(:disabled) .attach-icon { color: var(--accent-dark); }
+    .attach-text { min-width: 0; }
+    .attach-text b { display: block; font-size: 13px; font-weight: 500; }
+    /* 不换行：这一栏右边还挂着「即将支持」标签，一换行整个条目就散架了。 */
+    .attach-text small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted-soft); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+    .attach-tag { flex: none; margin-left: auto; padding: 1px 6px; border-radius: 4px; color: var(--muted); background: var(--paper-deep); font-size: 10px; }
+    @keyframes attachIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    /* 待发送的图片：横排缩略图，可逐个移除。 */
+    .composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 2px 6px; }
+    .composer-attachments[hidden] { display: none; }
+    .attachment-chip { position: relative; width: 72px; height: 72px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--paper); overflow: hidden; }
+    .attachment-chip img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .attachment-chip.loading { opacity: .5; }
+    .attachment-remove { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; color: #fffaf2; background: rgba(28, 37, 49, .72); font-size: 12px; line-height: 1; }
+    .attachment-remove:hover { background: var(--accent); }
+    /* 拖着文件进窗口时，整条输入区亮一下，告诉用户「松手就行」。 */
+    .composer.dragging { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(156, 58, 41, .12); }
+    /* 消息里已发出的图片。和正文插图分开一套：正文图是「教材里的图」，这里是「你给的图」。 */
+    .message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .message.user .message-attachments { justify-content: flex-end; }
+    .message-attachments img { max-width: 220px; max-height: 220px; border: 1px solid var(--line-strong); border-radius: 8px; cursor: zoom-in; }
     /* 两个开关。实心点 = 开，空心点 = 关：光靠底色区分在浅色主题上不够明显，
        而且色弱用户看不出来，所以状态同时用形状和颜色两重编码。 */
-    .composer-toggles { display: flex; flex-wrap: wrap; gap: 8px; padding-left: 2px; }
-    .toggle { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; line-height: 1.6; }
+    /* 底部工具栏：加号、定位、两个开关并排，高度和圆角统一成 30px 的胶囊，
+       否则一行里混着圆、方、长条三种形状，看着像没对齐。 */
+    .composer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 2px; }
+    .toggle { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted-soft); background: transparent; font-size: 12px; line-height: 1.5; transition: color .15s, border-color .15s, background .15s; }
     .toggle .dot { flex: none; width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
     .toggle.active .dot { background: currentColor; }
     .toggle:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
-    .toggle.active { border-color: transparent; color: #fff; background: var(--ink); font-weight: 600; }
+    .toggle.active { border-color: transparent; color: #fffaf2; background: var(--ink); font-weight: 600; }
     .toggle:disabled { opacity: .45; cursor: not-allowed; }
-    textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.5; }
-    textarea::placeholder { color: #9aa79f; }
-    .locate { flex: none; align-self: flex-end; max-width: 116px; height: 42px; padding: 0 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: rgba(255,255,255,.7); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.6; }
+    /* 窄屏下占位文字会折行、被 42px 的高度切掉半行，宁可用省略号收住。 */
+    textarea::placeholder { color: var(--muted-soft); white-space: nowrap; text-overflow: ellipsis; }
+    .locate { flex: none; max-width: 116px; height: 30px; padding: 0 11px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; transition: border-color .15s, color .15s; }
     .locate:hover { border-color: var(--accent); color: var(--accent-dark); }
-    .locate.set { color: var(--ink); border-color: #bcd9c8; background: var(--mint); font-weight: 600; }
-    .send { display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 12px; color: white; background: var(--ink); font-size: 18px; }
+    .locate.set { color: var(--ink-soft); border-color: var(--line-strong); background: var(--mint); font-weight: 600; }
+    .send { display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 9px; color: #fffaf2; background: var(--ink); font-size: 17px; transition: background .15s, transform .1s; }
+    .send:hover:not(:disabled) { background: var(--accent); }
+    .send:active:not(:disabled) { transform: translateY(1px); }
     .send:disabled { opacity: .45; cursor: wait; }
-    .hint { margin-top: 10px; color: var(--muted); text-align: center; font-size: 11px; }
+    .hint { margin-top: 10px; color: var(--muted); text-align: center; font: 10.5px var(--font-mono); letter-spacing: .04em; }
     .hint.error { color: var(--accent-dark); font-weight: 600; }
     /* 账号区。游客和登录态的差别要一眼看得出来：不只是名字不同，
        还要说清「这次对话记不记长期记忆」——不然用户会以为退出登录后
        模型还记得他，或者反过来以为登录了但没记住。 */
-    .account { flex: none; margin: 0 0 16px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.66); }
+    .account { flex: none; margin: 0 0 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 253, 247, .62); }
     .account-line { display: flex; align-items: center; gap: 10px; }
     .account-who { flex: 1; min-width: 0; }
     .account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-    .account-note { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
-    .account-action { flex: none; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fff; font-size: 12px; font-weight: 600; }
+    .account-note { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+    .account-action { flex: none; padding: 6px 11px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink-soft); background: var(--panel); font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s; }
     .account-action:hover { border-color: var(--accent); color: var(--accent-dark); }
     .account-action.danger { color: var(--accent-dark); }
-    .account-action.danger:hover { border-color: var(--accent); background: #fff4f1; }
-    .modal { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(24,32,30,.42); }
+    .account-action.danger:hover { border-color: var(--accent); background: var(--accent-soft); }
+    .modal { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(28, 37, 49, .42); backdrop-filter: blur(2px); }
     .modal[hidden] { display: none; }
-    .modal-card { position: relative; width: min(360px, 100%); padding: 24px; border-radius: 18px; background: #fffdf9; box-shadow: 0 26px 70px rgba(20,32,25,.32); }
-    .modal-close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font-size: 18px; line-height: 1; }
-    .modal-close:hover { color: var(--ink); background: #f2efe8; }
+    .modal-card { position: relative; width: min(360px, 100%); padding: 26px 24px 22px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 26px 70px rgba(40, 30, 18, .30); }
+    .modal-close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 6px; color: var(--muted-soft); background: transparent; font-size: 18px; line-height: 1; }
+    .modal-close:hover { color: var(--ink); background: var(--paper-deep); }
     .modal-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
-    .modal-tab { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: #fff; font-size: 13px; font-weight: 600; }
-    .modal-tab.active { border-color: var(--ink); color: #fff; background: var(--ink); }
+    .modal-tab { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); font-size: 13px; font-weight: 600; }
+    .modal-tab.active { border-color: var(--ink); color: #fffaf2; background: var(--ink); }
     .field { display: block; margin-bottom: 12px; }
-    .field span { display: block; margin-bottom: 6px; color: var(--muted); font: 11px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
-    .field input { width: 100%; padding: 11px 12px; border: 1px solid #cfdacf; border-radius: 10px; color: var(--ink); background: #fff; outline: none; }
+    .field span { display: block; margin-bottom: 6px; color: var(--muted-soft); font: 500 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    .field input { width: 100%; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel); outline: none; transition: border-color .15s; }
     .field input:focus { border-color: var(--accent); }
     .modal-error { min-height: 18px; margin-bottom: 6px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
-    .modal-submit { width: 100%; padding: 12px; border: 0; border-radius: 11px; color: #fff; background: var(--accent); font-weight: 600; }
+    .modal-submit { width: 100%; padding: 12px; border: 0; border-radius: 7px; color: #fffaf2; background: var(--accent); font-weight: 600; letter-spacing: .02em; }
     .modal-submit:hover { background: var(--accent-dark); }
     .modal-submit:disabled { opacity: .6; cursor: wait; }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
@@ -258,9 +364,9 @@
       /* 侧栏改抽屉：手机上上下分栏会把聊天区压到半屏以下（旧做法 max-height:44vh）。
          抽屉平时藏在屏幕外（translateX），点顶栏汉堡按钮滑入；选中会话自动收起。 */
       .shell { display: flex; flex-direction: column; }
-      .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(300px, 84vw); max-height: none; padding: 24px 18px; border-right: 1px solid var(--line); background: #f7f4ed; transform: translateX(-105%); transition: transform .22s ease; overflow-y: auto; }
+      .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(300px, 84vw); max-height: none; padding: 24px 18px; border-right: 1px solid var(--line-strong); background: var(--paper-deep); transform: translateX(-105%); transition: transform .22s ease; overflow-y: auto; }
       .sidebar.open { transform: none; }
-      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(20, 24, 18, .42); }
+      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(28, 37, 49, .38); }
       .sidebar-backdrop.show { display: block; }
       .menu-btn { display: inline-flex; }
       .brand { margin-bottom: 15px; }
@@ -272,8 +378,10 @@
       .chat { padding: 30px 18px 24px; }
       .composer-wrap { padding: 0 18px 18px; }
       .scroll-bottom { right: 18px; }
-      .welcome { margin: 5vh auto 48px; }
-      h1 { font-size: 42px; }
+      .welcome { margin: 5vh 0 48px; }
+      /* 42px 在 390px 宽的屏上放不下「读万卷书，行万里路。」，会折成
+         「…万里」/「路。」两个孤字。按视口缩放，一行刚好放下十个字。 */
+      h1 { font-size: clamp(26px, 8vw, 34px); }
     }
   </style>
 </head>
@@ -282,8 +390,13 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">A</div>
-        <div><div class="brand-name">Agent Workspace</div><div class="brand-sub">weather · web · memory</div></div>
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 6.6C10.4 5.3 8.4 4.7 6 4.7c-.8 0-1.5.1-2.2.2v12.9c.7-.1 1.4-.2 2.2-.2 2.4 0 4.4.6 6 1.9 1.6-1.3 3.6-1.9 6-1.9.8 0 1.5.1 2.2.2V4.9C19.5 4.8 18.8 4.7 18 4.7c-2.4 0-4.4.6-6 1.9Z"/>
+            <path d="M12 6.6v12.9"/>
+          </svg>
+        </div>
+        <div class="brand-name">书院</div>
       </div>
       <div class="account">
         <div class="account-line">
@@ -298,7 +411,7 @@
       <div class="section-label">Conversations · 右键管理</div>
       <div class="conversation-list" id="conversationList"></div>
       
-      <a class="library-entry" id="libraryEntry" href="/library">知识库 · 教材与分类 →</a>
+      <a class="library-entry" id="libraryEntry" href="/library">藏书阁 · 教材与分类</a>
       
       <div class="memory-entry" id="memoryEntry" hidden>
         <button class="memory-open" id="memoryOpen" type="button">查看 AI 记住了什么</button>
@@ -316,13 +429,11 @@
       </header>
       <section class="chat" id="chat">
         <div class="welcome" id="welcome">
-          <div class="eyebrow">A quiet interface for curious questions</div>
-          <h1>把问题交给一组会思考的工具。</h1>
-          <p>天气、实时搜索和网页阅读都在同一段对话里。选择一个已有会话，或直接开始新的探索。</p>
+          <h1>读万卷书，行万里路。</h1>
           <div class="suggestions">
-            <button class="suggestion" data-prompt="我这里今天的天气怎么样？">查一下今天的天气</button>
-            <button class="suggestion" data-prompt="搜索今天值得关注的科技新闻">搜索科技新闻</button>
-            <button class="suggestion" data-prompt="介绍一下你能做什么">介绍一下你自己</button>
+            <button class="suggestion" data-prompt="帮我梳理一下知识库里这本教材的章节结构">梳理教材章节</button>
+            <button class="suggestion" data-prompt="讲讲信号与系统里傅里叶变换的物理意义">问一个概念</button>
+            <button class="suggestion" data-prompt="我这里今天的天气怎么样？">查一下天气</button>
           </div>
         </div>
         <div class="messages" id="messages"></div>
@@ -330,17 +441,57 @@
       <div class="composer-wrap">
         <button class="scroll-bottom" id="scrollBottom" type="button" title="回到底部" aria-label="回到底部">↓</button>
         <form class="composer" id="composer">
+          <div class="composer-attachments" id="composerAttachments" hidden></div>
           <div class="composer-main">
-            <button class="locate" id="locate" type="button" title="设置位置">定位</button>
             <textarea id="input" rows="1" placeholder=""></textarea>
             <button class="send" id="send" title="发送" aria-label="发送">↑</button>
           </div>
-          
-          <div class="composer-toggles">
+          <div class="composer-tools">
+            <div class="attach-wrap" id="attachWrap">
+              <button class="attach" id="attachButton" type="button" title="添加" aria-label="添加" aria-haspopup="menu" aria-expanded="false">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </button>
+              <div class="attach-menu" id="attachMenu" role="menu" hidden>
+                <div class="attach-menu-label">添加</div>
+                <button class="attach-item" type="button" role="menuitem" data-action="upload">
+                  <span class="attach-icon">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="3" y="4.5" width="18" height="15" rx="2.5"/>
+                      <circle cx="8.6" cy="10" r="1.5"/>
+                      <path d="M4 17.2l4.6-4.6a2 2 0 0 1 2.8 0L16.2 18"/>
+                    </svg>
+                  </span>
+                  <span class="attach-text"><b>上传图片</b><small>JPG / PNG / WebP，也可以直接拖进来</small></span>
+                </button>
+                <button class="attach-item" type="button" role="menuitem" data-action="paste">
+                  <span class="attach-icon">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="7" y="4" width="10" height="3.4" rx="1.2"/>
+                      <path d="M9 5.4H5.8A1.8 1.8 0 0 0 4 7.2v12.1A1.8 1.8 0 0 0 5.8 21h12.4a1.8 1.8 0 0 0 1.8-1.7V7.2a1.8 1.8 0 0 0-1.8-1.8H15"/>
+                    </svg>
+                  </span>
+                  <span class="attach-text"><b>从剪贴板粘贴</b><small>截完图直接加，省一步存文件</small></span>
+                </button>
+                <button class="attach-item" type="button" role="menuitem" disabled>
+                  <span class="attach-icon">
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/>
+                      <path d="M14 3.5V8.5h5"/>
+                    </svg>
+                  </span>
+                  <span class="attach-text"><b>上传教材文档</b><small>PDF / PPT / Word</small></span>
+                  <span class="attach-tag">即将支持</span>
+                </button>
+              </div>
+            </div>
+            <button class="locate" id="locate" type="button" title="设置位置">定位</button>
             <button class="toggle" id="toggleReasoning" type="button" aria-pressed="true"><span class="dot"></span>深度思考</button>
             <button class="toggle" id="toggleWeb" type="button" aria-pressed="true"><span class="dot"></span>联网搜索</button>
           </div>
         </form>
+        <input type="file" id="attachInput" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden />
         <div class="hint">Enter 发送 · Shift + Enter 换行</div>
       </div>
     </main>
@@ -399,7 +550,7 @@
   <script src="/static/vendor/katex/katex.min.js"></script>
   <script src="/static/vendor/katex/auto-render.min.js"></script>
   <script>
-    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '', scope: null, scopeName: '' };
+    const state = { threadId: null, busy: false, autoFollow: true, lastScrollTop: 0, location: null, locationLabel: '', scope: null, scopeName: '', pending: [] };
     // 「进入某本书的对话」：从知识库分类点进来时 URL 带 scope（分类 id）与 scope_name。
     // 放 state 而不是每次读 URL：退出聚焦要改 URL，读一次存住更直接。
     {
@@ -421,6 +572,11 @@
     const scrollBottomButton = $('#scrollBottom');
     const conversationMenu = $('#conversationMenu');
     const locateButton = $('#locate');
+    const attachButton = $('#attachButton');
+    const attachInput = $('#attachInput');
+    const attachBox = $('#composerAttachments');
+    const attachWrap = $('#attachWrap');
+    const attachMenu = $('#attachMenu');
     const scopeBadge = $('#scopeBadge');
 
     // --- 移动端抽屉侧栏 ---
@@ -514,7 +670,7 @@
       accountAction.textContent = identity.guest ? '登录 / 注册' : '退出';
       accountAction.classList.toggle('danger', !identity.guest);
       input.placeholder = identity.guest
-        ? '以游客身份提问（会话仅本浏览器可见）'
+        ? '以游客身份提问（仅本浏览器可见）'
         : '问点什么…';
       // 两个侧栏入口都跟着身份走。弹窗要是还开着，里面装的是上一个身份的东西，
       // 必须一起关掉——留着会让人以为看见的是自己新账号的数据。
@@ -1200,7 +1356,7 @@
       });
     }
 
-    function addMessage(role, content, activity = false, operations = [], turn = null, citations = null) {
+    function addMessage(role, content, activity = false, operations = [], turn = null, citations = null, images = []) {
       const shouldFollow = state.autoFollow;
       const item = document.createElement('article');
       item.className = `message ${role}`;
@@ -1210,7 +1366,10 @@
       const rewindRow = role === 'user' && turn !== null
         ? '<div class="message-actions"><button type="button" class="rewind" title="删除这条消息及其之后的全部对话">回退到发送这条之前</button></div>'
         : '';
-      item.innerHTML = `<div class="avatar">${role === 'user' ? '我' : 'A'}</div><div><div class="message-role">${role === 'user' ? 'You' : 'Agent'}</div>${trace}<div class="message-content${activity ? ' activity' : ''}"></div>${rewindRow}</div>`;
+      // 角色标签跟界面语言保持一致：原来写死 You/Agent，中文界面里显得是别的东西。
+      const roleLabel = role === 'user' ? '你' : '教材助手';
+      const avatarText = role === 'user' ? '我' : '教';
+      item.innerHTML = `<div class="avatar">${avatarText}</div><div><div class="message-role">${roleLabel}</div>${trace}<div class="message-content${activity ? ' activity' : ''}"></div>${rewindRow}</div>`;
       const contentNode = item.querySelector('.message-content');
       // 助手的回答走 renderAnswer：[cN] 变可点角标、图引用换签名 URL。
       // urlMap 只在历史消息带引用条目时非空（实时流是先出正文、后到引用事件）。
@@ -1218,6 +1377,19 @@
       contentNode.innerHTML = role === 'assistant'
         ? renderAnswer(content, urlMap)
         : renderMarkdown(content);
+      // 图片放在文字上面：读的时候先看到「问的是哪张图」，再看问题。
+      if (images.length) {
+        const grid = document.createElement('div');
+        grid.className = 'message-attachments';
+        images.forEach((src) => {
+          const img = document.createElement('img');
+          img.src = src;
+          img.alt = '我上传的图片';
+          img.loading = 'lazy';
+          grid.appendChild(img);
+        });
+        contentNode.insertBefore(grid, contentNode.firstChild);
+      }
       beautifyMath(contentNode);
       contentNode.trace = item.querySelector('.trace');
       contentNode.traceList = item.querySelector('.trace-list');
@@ -1255,8 +1427,10 @@
       let userTurn = 0;
       history.forEach((message) => {
         const isUser = message.role === 'user';
+        // 历史里的图片是后端签好名的地址（见 service._decorate_history），直接能加载。
         addMessage(message.role, message.content, false, message.operations || [],
-          isUser ? userTurn : null, message.citations || null);
+          isUser ? userTurn : null, message.citations || null,
+          (message.attachments || []).map((item) => item.url));
         if (isUser) userTurn += 1;
       });
       if (!history.length) welcome.style.display = 'block';
@@ -1560,10 +1734,103 @@
       }
     }
 
+    // ------------------------------------------------------------------
+    // 会话内图片附件
+    // ------------------------------------------------------------------
+    // 缩图放前端做：一张手机截图 3MB，base64 后更大；缩到长边 1024 通常只剩一两百 KB。
+    // 而模型的视觉 token 封顶在 1024/张，传更大的图不会看得更清，只会传得更慢。
+    const IMAGE_MAX_SIDE = 1024;
+    const IMAGE_QUALITY = 0.9;
+    const MAX_PENDING_IMAGES = 8;
+
+    async function shrinkImage(file) {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (bitmap.close) bitmap.close();
+      // 统一转 JPEG：PNG 截图转过来体积小一个量级，透明通道对教材截图没有意义。
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', IMAGE_QUALITY));
+      return blob || file;
+    }
+
+    function renderPending() {
+      attachBox.innerHTML = '';
+      attachBox.hidden = state.pending.length === 0;
+      state.pending.forEach((item) => {
+        const chip = document.createElement('div');
+        chip.className = 'attachment-chip' + (item.uploading ? ' loading' : '');
+        const img = document.createElement('img');
+        img.src = item.preview;
+        img.alt = '待发送的图片';
+        chip.appendChild(img);
+        // 上传中不给「移除」按钮：这时点掉会让已经飞出去的请求落地到一个已删除的槽位。
+        if (!item.uploading) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'attachment-remove';
+          remove.textContent = '×';
+          remove.title = '移除这张图';
+          remove.onclick = () => {
+            state.pending = state.pending.filter((entry) => entry !== item);
+            renderPending();
+          };
+          chip.appendChild(remove);
+        }
+        attachBox.appendChild(chip);
+      });
+    }
+
+    async function addImageFiles(fileList) {
+      const files = Array.from(fileList || []).filter((file) => file.type.startsWith('image/'));
+      if (!files.length) return;
+      // 串行上传而不是 Promise.all：一次贴 8 张时并发打满上传带宽，反而每张都更慢，
+      // 而且失败时会给用户冒出 8 条错误提示。
+      for (const file of files) {
+        if (state.pending.length >= MAX_PENDING_IMAGES) {
+          setHint(`一次最多 ${MAX_PENDING_IMAGES} 张图`, true);
+          break;
+        }
+        const slot = { preview: URL.createObjectURL(file), uploading: true, att_id: null };
+        state.pending.push(slot);
+        renderPending();
+        try {
+          const blob = await shrinkImage(file);
+          const form = new FormData();
+          // 文件名固定：后端按文件头判断真实格式，不信名字也不信 Content-Type。
+          form.append('file', blob, 'image.jpg');
+          const response = await apiFetch('/api/attachments', { method: 'POST', body: form });
+          if (!response.ok) throw new Error(await readError(response, '上传失败'));
+          const data = await response.json();
+          slot.att_id = data.att_id;
+          slot.uploading = false;
+        } catch (error) {
+          state.pending = state.pending.filter((entry) => entry !== slot);
+          setHint(`图片上传失败：${error.message}`, true);
+        }
+        renderPending();
+      }
+      input.focus({ preventScroll: true });
+    }
+
     async function sendMessage(text) {
-      if (!text || state.busy) return;
+      if (state.busy) return;
+      // 只发图不写字是合法的（「这题怎么做」可以不写），但不能两样都没有。
+      const images = state.pending.filter((item) => !item.uploading && item.att_id);
+      if (!text && !images.length) return;
+      if (state.pending.some((item) => item.uploading)) {
+        setHint('图片还在上传，稍等一下再发', true);
+        return;
+      }
       state.autoFollow = true;
-      addMessage('user', text, false, [], messages.querySelectorAll('.message.user').length);
+      addMessage('user', text, false, [], messages.querySelectorAll('.message.user').length, null,
+        images.map((item) => item.preview));
+      // 清空待发送区，但**不** revoke 这些 blob URL：消息气泡里还在用它们显示。
+      // 页面刷新时浏览器自然回收，比手动管理引用计数省事且不会闪白。
+      state.pending = [];
+      renderPending();
       input.value = '';
       input.style.height = 'auto';
       setStatus('正在思考…', true);
@@ -1590,6 +1857,7 @@
             reasoning: toggles.reasoning,
             web_search: toggles.web_search,
             scope_category_id: state.scope || null,
+            attachments: images.map((item) => item.att_id),
           })
         });
         if (!response.ok) throw new Error(await readError(response, '请求失败'));
@@ -1664,6 +1932,100 @@
         input.focus({ preventScroll: true });
       }
     }
+
+    // ------------------------------------------------------------------
+    // 附件入口：点「+」出一张小菜单，再选怎么加
+    // ------------------------------------------------------------------
+    function openAttachMenu() {
+      attachMenu.hidden = false;
+      attachButton.setAttribute('aria-expanded', 'true');
+    }
+    function closeAttachMenu() {
+      attachMenu.hidden = true;
+      attachButton.setAttribute('aria-expanded', 'false');
+    }
+
+    attachButton.addEventListener('click', () => {
+      if (attachMenu.hidden) openAttachMenu(); else closeAttachMenu();
+    });
+
+    // 点面板外面收起。用 mousedown 而不是 click：拖拽选文件时是先按下再移动，
+    // click 会被拖拽吞掉，菜单就留在原地挡视线了。
+    document.addEventListener('mousedown', (event) => {
+      if (attachMenu.hidden || attachWrap.contains(event.target)) return;
+      closeAttachMenu();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !attachMenu.hidden) {
+        closeAttachMenu();
+        attachButton.focus();
+      }
+    });
+
+    attachMenu.addEventListener('click', async (event) => {
+      const item = event.target.closest('.attach-item');
+      if (!item || item.disabled) return;
+      closeAttachMenu();
+      if (item.dataset.action === 'upload') attachInput.click();
+      if (item.dataset.action === 'paste') await pasteFromClipboard();
+    });
+
+    // clipboard.read 只在 HTTPS / localhost 下可用，而且浏览器会弹一次授权。
+    // 拿不到就指条明路，不要在这里把人卡住——Ctrl+V 走的完全是同一条上传。
+    async function pasteFromClipboard() {
+      try {
+        const clips = await navigator.clipboard.read();
+        const files = [];
+        for (const clip of clips) {
+          const type = (clip.types || []).find((entry) => entry.startsWith('image/'));
+          if (!type) continue;
+          const blob = await clip.getType(type);
+          files.push(new File([blob], 'clipboard.png', { type }));
+        }
+        if (!files.length) {
+          setHint('剪贴板里没有图片', true);
+          return;
+        }
+        addImageFiles(files);
+      } catch (error) {
+        setHint('浏览器没给剪贴板权限，在输入框里按 Ctrl+V 也一样', true);
+      }
+    }
+
+    attachInput.addEventListener('change', () => {
+      addImageFiles(attachInput.files);
+      // 清空 value：否则连选两次同一张图不会再触发 change。
+      attachInput.value = '';
+    });
+
+    // 截图工具出来的图直接粘贴就能发，比「存文件 → 点按钮 → 找文件」快得多。
+    input.addEventListener('paste', (event) => {
+      const files = Array.from((event.clipboardData && event.clipboardData.files) || [])
+        .filter((file) => file.type.startsWith('image/'));
+      if (!files.length) return;
+      event.preventDefault();
+      addImageFiles(files);
+    });
+
+    // 拖拽。dragover 必须 preventDefault，否则浏览器会把这个文件当成导航直接打开图片。
+    const composerBox = $('#composer');
+    const hasFiles = (event) => Array.from((event.dataTransfer && event.dataTransfer.types) || []).includes('Files');
+    ['dragenter', 'dragover'].forEach((type) => {
+      composerBox.addEventListener(type, (event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        composerBox.classList.add('dragging');
+      });
+    });
+    ['dragleave', 'dragend'].forEach((type) => {
+      composerBox.addEventListener(type, () => composerBox.classList.remove('dragging'));
+    });
+    composerBox.addEventListener('drop', (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      composerBox.classList.remove('dragging');
+      if (event.dataTransfer.files.length) addImageFiles(event.dataTransfer.files);
+    });
 
     $('#composer').addEventListener('submit', (event) => { event.preventDefault(); sendMessage(input.value.trim()); });
     input.addEventListener('keydown', (event) => {

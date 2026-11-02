@@ -45,6 +45,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+import attachments as attachment_store
+
 load_dotenv()
 
 DATA_DIR = Path(__file__).with_name("data")
@@ -66,6 +68,7 @@ class Context:
     memory_enabled: bool = True
 
     citations: list[dict] = field(default_factory=list)
+    textbook_searches: int = 0
 
     reasoning: bool = True
     web_search: bool = True
@@ -243,6 +246,10 @@ def _catalog_text(user_id: str, scope: str | None = None) -> str:
 
 
 _SEARCH_LIMIT = 6
+# 提示词里写了「最多检索四次」，这里做成硬约束：
+# 多出来的检索会在尾部追加新的 tool 结果，增加输入 token 和模型往返次数；
+# 它不会让已有前缀缓存失效（前缀只到新增内容之前）。
+MAX_TEXTBOOK_SEARCHES = 4
 
 _TOOL_RESULT_PREVIEW_CHARS = 4000
 
@@ -285,7 +292,7 @@ def search_textbook(
     """在学生上传的教材里查找相关段落，返回若干段原文和引用编号。
 
     query 用教材里的说法写，越具体越好（术语、公式编号、图号都可以直接写）。**同一个问题最多
-    检索两次**：第一次不中可以换个说法再查一次，第二次仍不满意就用现有信息回答并说明教材里
+    检索四次**：第一次不中可以换个说法再查，累计四次仍不满意就用现有信息回答并说明教材里
     没找到，不要继续重试。
 
     doc_title 在问题指向**特定一本书**时填：点名了书名，或说到「第几章」「这本书」都算，填一部分
@@ -303,6 +310,15 @@ def search_textbook(
         return "查询内容为空。"
 
     context = getattr(runtime, "context", None)
+
+    used = int(getattr(context, "textbook_searches", 0) or 0) if context else 0
+    if used >= MAX_TEXTBOOK_SEARCHES:
+        return (
+            "本次提问已经检索过四次教材，不能再查了。请基于已有的检索结果作答；"
+            "若信息仍不足，直接说明教材里没找到，并建议用户换个问法或补充信息。"
+        )
+    if context is not None:
+        context.textbook_searches = used + 1
 
     told = str(doc_title).strip() if doc_title else ""
     scoped = getattr(context, "scoped_title", None) if context else None
@@ -327,6 +343,7 @@ def search_textbook(
     for hit in hits:
         chunk_id = hit.get("chunk_id") or ""
         code = assigned.get(chunk_id)
+        duplicate = code is not None
         content = str(hit.get("content") or "")
         figure_markdown = _figure_markdown(hit, content)
         nearby_note = ""
@@ -386,6 +403,12 @@ def search_textbook(
         if hit.get("page_start"):
             start, end = hit.get("page_start"), hit.get("page_end") or hit.get("page_start")
             place += f" · 第 {start} 页" if start == end else f" · 第 {start}-{end} 页"
+        if duplicate:
+            lines.append(
+                f"[{code}] {place}{' · ' + kind if kind else ''}\n"
+                "（本次提问中已经检索到这段，内容见上文，不再重复）"
+            )
+            continue
         lines.append(
             f"[{code}] {place}{' · ' + kind if kind else ''}\n{content}{figure_markdown}{nearby_note}"
         )
@@ -415,6 +438,8 @@ TEXTBOOK_GUIDE = (
     "某章讲什么）**先查再答**，不要凭记忆。**查之前先从书单里挑最相关的一本**，把书名填进 "
     "doc_title——单本检索比全局准得多；doc_title 优先填**具体的章节文件名**，确实整本书都相关"
     "（或要对比书内多处）才填书名把范围放宽到整本；只有跨书的问题才不填、搜全部。"
+    "第一次检索**直接用用户的原话**当 query（去掉「请问」「帮我」这类寒暄即可），不要先改写；"
+    "只有第一次结果不相关时才换关键词，最多查四次。"
     "回答只依据检索到的段落，句末标 [c1] 这样的编号、只标真用到的。"
     "确实答不了就直说教材没讲、**不要**用自己的知识补，也可以问用户要不要联网查。"
     "与课程无关的日常问题（天气、时间、闲聊）直接回答，**不要**查教材。"
@@ -447,6 +472,7 @@ def _system_prompt(
             prompt += (
                 f"\n\n当前会话聚焦在《{focus}》：用户只想学这一本，检索已自动限定在它的"
                 "文件范围内，search_textbook 的 doc_title **不需要填**（填了也以这个范围为准）。"
+                "第一次检索直接用用户原话当 query，最多查四次。"
                 "问题与这本书无关时正常回答，不要硬扯到书里。"
             )
             if textbook_catalog:
@@ -978,6 +1004,42 @@ def _tool_rounds_this_turn(messages: Sequence[BaseMessage]) -> int:
     return rounds
 
 
+_ANSWER_NOW_GUIDE = (
+    "（系统提示：本轮的工具调用次数已经用完，请立刻基于上面已有的信息给出最终回答。"
+    "如果这些信息还不足以回答，就明确说明缺什么、建议用户怎么补充，"
+    "不要凭记忆编造教材内容。不要提及这条提示。）"
+)
+
+
+def _expand_attachments(message: HumanMessage, user_id: str) -> HumanMessage:
+    """把消息里记着的 att_id 展开成真正的图片块。
+
+    **只改发出去的这一份**（`model_copy`），state 里留的仍是「纯文本 + att_id 列表」。
+    这是整条链路的关键约束：历史存在 langgraph checkpoint 里，每个 checkpoint 是完整 state
+    快照，图片 base64 一旦写进 content，10 轮对话就是 10 份副本（几十 MB）。
+
+    取不到图（过期被清、id 不对、不是这个用户的）就跳过那一张，不抛异常：用户可能隔了几天
+    回来接着问，图没了也应该能正常回文字，而不是整轮报错。
+    """
+    ids = message.additional_kwargs.get("attachments") or []
+    if not ids:
+        return message
+    blocks: list[dict[str, object]] = []
+    if isinstance(message.content, str) and message.content.strip():
+        blocks.append({"type": "text", "text": message.content})
+    for att_id in ids:
+        url = attachment_store.to_data_url(user_id, str(att_id))
+        if url:
+            # detail 默认 original：教材截图里的公式和图表缩小后字就糊了。
+            # 要省 token 的场合（比如只是问"这是什么"）由上层改 low，别在这里一刀切。
+            blocks.append({"type": "image_url", "image_url": {"url": url}})
+    if len(blocks) <= 1:
+        # 一张都没取到，退回原消息：把纯文本包成单个 text block 没有意义，
+        # 反而让下游多一层数组要处理。
+        return message
+    return message.model_copy(update={"content": blocks})
+
+
 def _messages_for_model(
     state: AgentState,
     *,
@@ -996,8 +1058,9 @@ def _messages_for_model(
     本函数重建），一旦内容有任何漂移，模型在第二轮看到的规则就和第一轮不一样。重建的内容
     逐字节一致时缓存照常命中，代价只是一次字符串拼接。
 
-    `answer_now=True` 是「工具轮数用尽」的收尾指令。`scope` 是聚焦的书名，与
-    stream_agent 首轮插入用的必须是同一个值。
+    `answer_now=True` 是「工具轮数用尽」的收尾指令，作为末尾的 HumanMessage 追加，
+    不改第 0 条 system：system 一旦变化，这一轮整段上下文都无法命中前缀缓存。
+    `scope` 是聚焦的书名，与 stream_agent 首轮插入用的必须是同一个值。
     """
     messages = _flatten_for_model(state["messages"])
     summary = (state.get("summary") or "").strip()
@@ -1011,12 +1074,6 @@ def _messages_for_model(
             "回答时用你自己的口吻直接对用户说话，不要照抄摘要的措辞。\n"
             f"<摘要>\n{summary}\n</摘要>"
         )
-    if answer_now:
-        extra += (
-            "\n\n（这一轮的工具调用次数已经用完，请立刻基于上面已有的信息给出最终回答。"
-            "如果这些信息还不足以回答，就明确说明缺什么、建议用户怎么补充，"
-            "不要凭记忆编造教材内容。）"
-        )
 
     system = SystemMessage(
         content=(
@@ -1028,6 +1085,19 @@ def _messages_for_model(
         messages[0] = system
     else:
         messages.insert(0, system)
+    # 收尾指令放在消息列表末尾，不改第 0 条的 system 前缀：
+    # system 一旦变化，这一轮整段上下文都无法命中前缀缓存。
+    if answer_now:
+        messages.append(HumanMessage(content=_ANSWER_NOW_GUIDE))
+    # 附件展开放在最后：系统消息重建、摘要注入都只碰文本，先展开会让它们面对数组 content。
+    # 没有 user_id 就不展开（CLI/评测链路可能不传），行为与以前一致。
+    if user_id:
+        messages = [
+            _expand_attachments(message, user_id)
+            if isinstance(message, HumanMessage)
+            else message
+            for message in messages
+        ]
     return messages
 
 
@@ -1360,7 +1430,12 @@ async def get_history(thread_id: str) -> list[dict[str, object]]:
     pending_citations: list[dict] = []
     for message in snapshot.values.get("messages", []):
         if isinstance(message, HumanMessage):
-            history.append({"role": "user", "content": str(message.content)})
+            # 附件只回传 id，URL 由 service 层签名后再给前端（密钥不能进这个模块）。
+            entry = {"role": "user", "content": str(message.content)}
+            att_ids = (message.additional_kwargs or {}).get("attachments") or []
+            if att_ids:
+                entry["attachments"] = [str(item) for item in att_ids]
+            history.append(entry)
             assistant_entry = None
         elif isinstance(message, AIMessage):
             reasoning = (message.additional_kwargs or {}).get("reasoning_content")
@@ -1416,6 +1491,7 @@ async def stream_agent(
     reasoning: bool = True,
     web_search: bool = True,
     scope: str | None = None,
+    attachments: list[str] | None = None,
 ):
     """跑一遍图，产出 Agent 自己的事件流（异步生成器）。
 
@@ -1434,7 +1510,14 @@ async def stream_agent(
     config = _config(thread_id)
     graph = await _ensure_graph()
     has_history = bool((await graph.aget_state(config)).values.get("messages", []))
-    messages = [HumanMessage(content=user_input)]
+    # 附件只把 id 记进 additional_kwargs（会被 checkpoint 序列化，但只是一串短字符串）；
+    # 真正的图片在 `_messages_for_model` 里才展开成 base64 —— 那一步不回写 state。
+    messages = [
+        HumanMessage(
+            content=user_input,
+            additional_kwargs={"attachments": list(attachments)} if attachments else {},
+        )
+    ]
     if not has_history:
         messages.insert(
             0,

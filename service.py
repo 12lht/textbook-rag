@@ -25,6 +25,7 @@ from typing import AsyncIterator
 from urllib.parse import quote
 
 import agent_core
+import attachments
 import conversations
 import documents
 import geocode
@@ -543,6 +544,15 @@ def _decorate_history(
     密钥，`<img>` 又带不上令牌）。每次加载现签：签名带过期时间，存死链接过几天就全 403。
     """
     for message in messages:
+        if message.get("role") == "user":
+            # 用户消息里的附件从裸 id 换成带签名的地址，前端 <img> 直接能加载。
+            att_ids = message.get("attachments") or []
+            if att_ids:
+                message["attachments"] = [
+                    {"att_id": str(att), "url": attachment_url(str(att), user_id)}
+                    for att in att_ids
+                ]
+            continue
         if message.get("role") != "assistant":
             continue
         content = message.get("content")
@@ -633,6 +643,7 @@ async def chat_events(
     reasoning: bool = True,
     web_search: bool = True,
     scope_category_id: str | None = None,
+    attachments: list[str] | None = None,
 ) -> AsyncIterator[dict[str, object]]:
     """给网页和 CLI 共用的事件流：标题与 Agent 并行生成，再转发 Agent 自己的事件。
 
@@ -663,6 +674,7 @@ async def chat_events(
             reasoning=reasoning,
             web_search=web_search,
             scope=scope,
+            attachments=attachments,
         ):
             if event.get("type") == "done":
                 break  # done 是「流结束」的唯一标志，必须最后发（先收标题再发它）
@@ -725,6 +737,20 @@ async def upload_document(user_id: str, filename: str | None, data: bytes) -> di
     用户看到的就是「回答打到一半不动了」。
     """
     return await asyncio.to_thread(documents.create_upload, user_id, filename or "", data)
+
+
+async def save_attachment(user_id: str, data: bytes) -> dict[str, object]:
+    """收下一个会话内附件（目前只有图片），返回 att_id。
+
+    和 `upload_document` 的区别是**没有后续**：不排队解析、不写 SQLite、不进检索池。
+    落盘同样走线程池——几百 KB 的写虽然快，但没必要在事件循环里做。
+    """
+    return await asyncio.to_thread(attachments.save_image, user_id, data)
+
+
+# api.py 只认 service 这一层，把附件的异常和上限原样透出去，别让上层 import attachments。
+AttachmentError = attachments.AttachmentError
+MAX_ATTACHMENT_BYTES = attachments.MAX_IMAGE_BYTES
 
 
 async def parse_uploaded_document(doc_id: str, user_id: str | None = None) -> dict[str, object]:
@@ -881,6 +907,25 @@ async def document_file(doc_id: str, user_id: str) -> dict[str, object] | None:
 def _asset_hmac(asset_id: str, user_id: str, expires: int) -> str:
     payload = f"{asset_id}:{user_id}:{expires}".encode()
     return hmac.new(_ASSET_SECRET.encode(), payload, hashlib.sha256).hexdigest()[:32]
+
+
+def attachment_url(att_id: str, user_id: str) -> str:
+    """会话内附件图片的签名地址，可直接放进 `<img src>`。
+
+    和 `asset_url` 共用一套签名密钥，但载荷加了 `att:` 前缀：两类 id 都由十六进制随机串
+    组成，不加前缀的话同名时签名能互用，等于给了一条越权读取的路。
+    """
+    token = sign_asset(f"att:{att_id}", user_id)
+    return f"/api/attachments/{quote(att_id, safe='')}?u={quote(user_id, safe='')}&t={quote(token, safe='')}"
+
+
+def verify_attachment(att_id: str, user_id: str, token: str) -> bool:
+    return verify_asset(f"att:{att_id}", user_id, token)
+
+
+def load_attachment(user_id: str, att_id: str) -> tuple[bytes, str] | None:
+    """读附件原图。返回 (bytes, mime)，不存在就 None（过期被清或 id 不属于这个人）。"""
+    return attachments.load_image(user_id, att_id)
 
 
 def asset_url(asset_id: str, user_id: str) -> str:

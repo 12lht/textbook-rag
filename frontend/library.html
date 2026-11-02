@@ -3,31 +3,52 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>知识库 · Agent Workspace</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'7'%20fill%3D'%2318201e'%2F%3E%3Cpath%20d%3D'M16%207%208.5%2025M16%207%2023.5%2025M11.2%2018.5H20.8'%20stroke%3D'%23fff'%20stroke-width%3D'3'%20stroke-linecap%3D'round'%20fill%3D'none'%2F%3E%3C%2Fsvg%3E" />
+  <title>藏书阁 · 书院</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A//www.w3.org/2000/svg'%20width%3D'32'%20height%3D'32'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20width%3D'32'%20height%3D'32'%20rx%3D'6'%20fill%3D'%239c3a29'/%3E%3Cpath%20d%3D'M16%2010.6C14.2%209.3%2011.9%208.7%209.4%208.7c-.9%200-1.7.1-2.4.2v12.6c.7-.1%201.5-.2%202.4-.2%202.5%200%204.8.6%206.6%201.9%201.8-1.3%204.1-1.9%206.6-1.9.9%200%201.7.1%202.4.2V8.9c-.7-.1-1.5-.2-2.4-.2-2.5%200-4.8.6-6.6%201.9Z'%20stroke%3D'%23fffaf2'%20stroke-width%3D'1.8'%20stroke-linejoin%3D'round'%20fill%3D'none'/%3E%3Cpath%20d%3D'M16%2010.6v12.6'%20stroke%3D'%23fffaf2'%20stroke-width%3D'1.6'/%3E%3C/svg%3E" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+    /* 与对话页共用同一套「纸与墨」令牌：两个页面之间跳转时不能有颜色断层。 */
     :root {
-      --ink: #18201e;
-      --muted: #73807a;
-      --line: #dbe4dc;
-      --paper: #f5f7f1;
-      --panel: #ffffff;
-      --accent: #e76f51;
-      --accent-dark: #bd4f39;
-      --danger: #b3352a;
-      --mint: #dcefe5;
-      --shadow: 0 22px 60px rgba(44, 65, 51, .12);
+      --ink: #1c2531;
+      --ink-soft: #39424f;
+      --muted: #6f6c63;
+      --muted-soft: #928d80;
+      --line: #e0d8c6;
+      --line-strong: #cdc2a9;
+      --paper: #f6f2e8;
+      --paper-deep: #efe9db;
+      --panel: #fffdf7;
+      --accent: #9c3a29;
+      --accent-dark: #782a1c;
+      --accent-soft: #f8e9e2;
+      --danger: #a32b1c;
+      --mint: #e5e8d9;
+      --gold: #ad8b54;
+      --shadow: 0 18px 46px rgba(60, 47, 30, .10);
+      --shadow-sm: 0 4px 14px rgba(60, 47, 30, .06);
+      --font-serif: "Iowan Old Style", "Source Serif 4", Georgia, "Songti SC", STSong, SimSun, serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
       margin: 0;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
       color: var(--ink);
-      background: radial-gradient(circle at 12% 0%, #e3f1e2 0, transparent 32rem), var(--paper);
-      font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(1200px 620px at 18% -8%, rgba(255, 252, 240, .95), transparent 70%),
+        radial-gradient(900px 500px at 92% 4%, rgba(173, 139, 84, .07), transparent 65%),
+        var(--paper);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
     }
+    * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    *::-webkit-scrollbar { width: 9px; height: 9px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background-clip: content-box; background-color: var(--line-strong); }
+    *::-webkit-scrollbar-thumb:hover { background-color: var(--muted-soft); }
     button, input, select { font: inherit; }
     button { cursor: pointer; }
 
@@ -36,72 +57,81 @@
        用户来的那个会话（可能是直接开的新标签）。给一个明确的锚点。 */
     .topbar {
       display: flex; align-items: center; gap: 16px;
-      padding: 14px 24px;
-      border-bottom: 1px solid #e6dfd3;
-      background: #f7f4ed;
+      padding: 13px 24px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--paper-deep);
+      box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .5);
     }
     .back {
-      flex: none; padding: 7px 13px; border: 1px solid var(--line); border-radius: 9px;
-      color: var(--muted); background: #fff; font-size: 12.5px; text-decoration: none;
+      flex: none; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 7px;
+      color: var(--ink-soft); background: var(--panel); font-size: 12.5px; text-decoration: none;
+      transition: border-color .15s, color .15s;
     }
     .back:hover { border-color: var(--accent); color: var(--accent-dark); }
     .brand { display: flex; align-items: center; gap: 10px; }
     .brand-mark {
       display: grid; place-items: center; width: 30px; height: 30px;
-      color: #fff; background: var(--ink); border-radius: 9px; font-weight: 700; font-size: 13px;
+      color: #fffaf2; background: var(--accent); border-radius: 6px;
+      box-shadow: inset 0 0 0 1px rgba(255, 250, 242, .45);
     }
-    .brand-name { font-weight: 700; letter-spacing: -.02em; font-size: 14px; }
-    .brand-sub { color: var(--muted); font-size: 11px; margin-top: 1px; }
+    .brand-mark svg { display: block; }
+    .brand-name { font-family: var(--font-serif); font-weight: 600; letter-spacing: .01em; font-size: 15px; }
+    .brand-sub { color: var(--muted); font: 400 10px/1.4 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; }
     .who { margin-left: auto; color: var(--muted); font-size: 12px; }
     .who b { color: var(--ink); font-weight: 600; }
 
     /* --- 两栏：左分类 / 右文档 ---
        左栏定宽而不是自适应：分类名长度差别很大（「信号与系统」vs「移动通信」），
        自适应会让右边的表格每次都被推着左右跳。 */
-    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); height: calc(100vh - 59px); height: calc(100dvh - 59px); }
+    /* 高度不再写死 calc(100vh - 59px)：顶栏一改 padding 这个魔数就错位。
+       改成 flex 撑满剩余高度，顶栏多高都不用回来改这里。 */
+    .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
 
     .cats {
       display: flex; flex-direction: column; min-height: 0;
-      padding: 16px 12px; border-right: 1px solid #e6dfd3; background: #f7f4ed;
+      padding: 16px 12px; border-right: 1px solid var(--line-strong); background: var(--paper-deep);
+      box-shadow: inset -1px 0 0 rgba(255, 255, 255, .55);
     }
     .cats-title {
-      flex: none; margin: 0 6px 10px; color: var(--muted);
-      font: 500 11px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase;
+      flex: none; display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; color: var(--muted);
+      font: 500 10.5px var(--font-mono); letter-spacing: .14em; text-transform: uppercase;
     }
+    .cats-title::before { content: ""; flex: none; width: 12px; height: 1px; background: var(--gold); }
     /* `0 1 auto` 而不是 `1 1 auto`：分类少的时候不要把它撑满整栏，
        否则「新建分类」输入框会被推到面板最底下，隔着一大片空白，
        填个新分类要先跨过半个屏幕。分类多的时候它照样会内部滚动。 */
     .cat-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
     .cat {
       display: flex; align-items: center; gap: 6px;
-      padding: 8px 9px; border: 1px solid transparent; border-radius: 9px;
-      color: var(--ink); background: transparent; font-size: 13px; text-align: left;
+      padding: 8px 9px; border: 1px solid transparent; border-radius: 7px;
+      color: var(--ink-soft); background: transparent; font-size: 13px; text-align: left;
+      transition: background .12s, border-color .12s;
     }
-    .cat:hover { border-color: var(--line); background: var(--panel); }
+    .cat:hover { border-color: var(--line); background: rgba(255, 253, 247, .7); }
     /* 选中态用左侧色条而不是整块填充：分类行里还有「改名/删除」两个小按钮，
        整块反白之后它们会看不清。 */
-    .cat.active { border-color: var(--accent); background: #fff; box-shadow: inset 3px 0 0 var(--accent); }
+    .cat.active { border-color: var(--line-strong); color: var(--ink); background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
     .cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cat-count { flex: none; color: var(--muted); font: 11px "DM Mono", monospace; }
+    .cat-count { flex: none; color: var(--muted); font: 10.5px var(--font-mono); }
     /* 操作按钮平时不占视觉重量（opacity 0 但仍占位，避免悬停时整行抖动）。 */
     .cat-ops { flex: none; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
     .cat:hover .cat-ops, .cat.active .cat-ops { opacity: 1; }
     .cat-op {
-      padding: 1px 5px; border: 0; border-radius: 5px;
-      color: var(--muted); background: transparent; font-size: 11px; line-height: 1.5;
+      padding: 1px 5px; border: 0; border-radius: 4px;
+      color: var(--muted-soft); background: transparent; font-size: 11px; line-height: 1.5;
     }
-    .cat-op:hover { color: var(--ink); background: #f2efe8; }
-    .cat-op.danger:hover { color: var(--accent-dark); background: #fff4f1; }
+    .cat-op:hover { color: var(--ink); background: var(--paper-deep); }
+    .cat-op.danger:hover { color: var(--accent-dark); background: var(--accent-soft); }
     .cat-new { flex: none; display: flex; gap: 6px; margin-top: 12px; }
     .cat-new input {
       flex: 1; min-width: 0; padding: 8px 10px;
-      border: 1px solid #cfdacf; border-radius: 9px; color: var(--ink); background: #fff;
-      font-size: 12.5px; outline: none;
+      border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel);
+      font-size: 12.5px; outline: none; transition: border-color .15s;
     }
     .cat-new input:focus { border-color: var(--accent); }
     .cat-new button {
-      flex: none; width: 34px; border: 0; border-radius: 9px;
-      color: #fff; background: var(--accent); font-size: 15px; line-height: 1;
+      flex: none; width: 34px; border: 0; border-radius: 7px;
+      color: #fffaf2; background: var(--accent); font-size: 15px; line-height: 1;
     }
     .cat-new button:hover { background: var(--accent-dark); }
     .cat-new button:disabled { opacity: .6; cursor: wait; }
@@ -109,15 +139,18 @@
        alert 会把刚敲进去的名字一起掀掉，重打一遍很烦。 */
     .cat-err { flex: none; min-height: 16px; margin: 6px 6px 0; color: var(--accent-dark); font-size: 11.5px; font-weight: 600; }
 
-    .docs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 22px 30px 60px; }
-    .docs-head { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
-    .docs-title { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -.02em; }
-    .docs-sub { margin: 0 0 18px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
-    .docs-actions { margin-left: auto; display: flex; gap: 8px; }
+    .docs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 26px 34px 60px; }
+    .docs-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    .docs-title { margin: 0; font-family: var(--font-serif); font-size: 24px; font-weight: 600; letter-spacing: .01em; }
+    .docs-sub { margin: 0 0 20px; padding-bottom: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+    .docs-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .sort-select { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink-soft); background: var(--panel); font-size: 12.5px; }
+    .sort-select:focus { border-color: var(--accent); outline: none; }
     .btn-primary {
-      padding: 9px 15px; border: 0; border-radius: 10px;
-      color: #fff; background: var(--accent); font-size: 12.5px; font-weight: 600;
-      box-shadow: 0 8px 18px rgba(231,111,81,.18);
+      padding: 9px 15px; border: 0; border-radius: 7px;
+      color: #fffaf2; background: var(--accent); font-size: 12.5px; font-weight: 600;
+      letter-spacing: .02em; box-shadow: 0 3px 10px rgba(120, 42, 28, .16);
+      transition: background .15s;
     }
     .btn-primary:hover { background: var(--accent-dark); }
     .btn-primary:disabled { opacity: .6; cursor: wait; box-shadow: none; }
@@ -127,83 +160,87 @@
     .bulkbar {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       margin-bottom: 14px; padding: 10px 14px;
-      border: 1px solid var(--accent); border-radius: 11px;
-      background: #fff6f3; font-size: 12.5px;
+      border: 1px solid var(--line-strong); border-left: 2px solid var(--accent); border-radius: 8px;
+      background: var(--accent-soft); font-size: 12.5px;
     }
     .bulkbar[hidden] { display: none; }
     .bulkbar b { font-weight: 650; }
-    .bulkbar select { padding: 6px 9px; border: 1px solid #cfdacf; border-radius: 8px; color: var(--ink); background: #fff; font-size: 12.5px; }
-    .bulkbar button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 12.5px; }
+    .bulkbar select { padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--panel); font-size: 12.5px; }
+    .bulkbar button { padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 12.5px; }
     .bulkbar button:hover { border-color: var(--ink); color: var(--ink); }
-    .bulkbar button.go { border-color: var(--ink); color: #fff; background: var(--ink); }
-    .bulkbar button.go:hover { background: #2b3733; }
+    .bulkbar button.go { border-color: var(--ink); color: #fffaf2; background: var(--ink); }
+    .bulkbar button.go:hover { background: var(--accent); border-color: var(--accent); }
 
-    .doc-list { display: grid; gap: 9px; }
+    .doc-list { display: grid; gap: 8px; }
+    /* 每本教材是一张索引卡：编号/标题/元信息从上到下，右侧放分类和操作。 */
     .doc-card {
       display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 13px; align-items: center;
-      padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+      padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+      transition: box-shadow .15s, border-color .15s;
     }
-    .doc-card:hover { box-shadow: 0 8px 24px rgba(45,69,51,.07); }
-    .doc-card.picked { border-color: var(--accent); background: #fffaf8; }
+    .doc-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+    .doc-card.picked { border-color: var(--accent); background: var(--accent-soft); }
     .doc-card input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
     .doc-body { min-width: 0; }
     .doc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
-    .doc-file { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
-    .doc-meta { margin-top: 3px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .doc-file { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--font-mono); }
+    .doc-meta { margin-top: 4px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
     .doc-meta .bad { color: var(--danger); }
-    .doc-meta .ok { color: #2f7a55; }
-    .doc-meta .warn { color: #b8860b; }
-    .doc-cat { padding: 6px 8px; border: 1px solid #cfdacf; border-radius: 8px; color: var(--ink); background: #fff; font-size: 12px; max-width: 150px; }
+    .doc-meta .ok { color: #3f6b4a; }
+    .doc-meta .warn { color: var(--gold); }
+    .doc-cat { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink-soft); background: var(--panel); font-size: 12px; max-width: 150px; }
     .doc-cat:focus { border-color: var(--accent); outline: none; }
     .doc-ops { display: flex; gap: 4px; }
-    .doc-op { padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size: 11.5px; white-space: nowrap; }
+    .doc-op { padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 11.5px; white-space: nowrap; }
     .doc-op:hover { border-color: var(--ink); color: var(--ink); }
-    .doc-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: #fff4f1; }
+    .doc-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
     .doc-op:disabled { opacity: .5; cursor: not-allowed; }
 
-    .empty { padding: 44px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.85; }
+    .empty { padding: 48px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.9; }
     .empty b { color: var(--ink); font-weight: 600; }
 
     /* 登录门。知识库对游客是关的（游客共用同一个库），所以直接在整页层面挡住，
        不要让人点进一个个按钮才发现全是 401。 */
-    .gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(245,247,241,.92); }
+    /* 遮罩不用 backdrop-filter：它会把整个顶栏糊成一层重影，
+       不像「被挡住」，像「没渲染完」。半透明的纸色盖住就够了。 */
+    .gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(246, 242, 232, .96); }
     .gate[hidden] { display: none; }
-    .gate-card { width: min(400px, 100%); padding: 30px; border-radius: 18px; background: #fffdf9; box-shadow: var(--shadow); text-align: center; }
-    .gate-title { margin: 0 0 8px; font-size: 19px; font-weight: 650; }
-    .gate-text { margin: 0 0 20px; color: var(--muted); font-size: 13px; line-height: 1.8; }
-    .gate-link { display: inline-block; padding: 11px 20px; border-radius: 11px; color: #fff; background: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
+    .gate-card { width: min(400px, 100%); padding: 32px 30px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); text-align: center; }
+    .gate-title { margin: 0 0 10px; font-family: var(--font-serif); font-size: 21px; font-weight: 600; }
+    .gate-text { margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.85; }
+    .gate-link { display: inline-block; padding: 11px 20px; border-radius: 7px; color: #fffaf2; background: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
     .gate-link:hover { background: var(--accent-dark); }
 
     /* 轻提示。下载/删除/归类这类「做完了」的反馈滑一下就走，不打断操作。 */
     .toast {
       position: fixed; left: 50%; bottom: 26px; z-index: 100; transform: translateX(-50%);
-      max-width: min(560px, calc(100vw - 40px)); padding: 10px 18px; border-radius: 11px;
-      color: #fff; background: rgba(24,32,30,.93); font-size: 12.5px; line-height: 1.6;
-      box-shadow: 0 12px 30px rgba(20,32,25,.28);
+      max-width: min(560px, calc(100vw - 40px)); padding: 10px 18px; border-radius: 8px;
+      color: #fbf6ea; background: rgba(28, 37, 49, .94); font-size: 12.5px; line-height: 1.6;
+      box-shadow: 0 12px 30px rgba(30, 24, 14, .26);
     }
     .toast[hidden] { display: none; }
-    .toast.bad { background: rgba(179,53,42,.95); }
+    .toast.bad { background: rgba(163, 43, 28, .95); }
 
     @media (max-width: 720px) {
-      .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); height: auto; }
+      .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
       /* 不给 max-height：手机上 .cats 是 position:fixed; top:0; bottom:0 的抽屉，
          这里再压一个 34vh 会让抽屉只剩一条窄条（两个 media 同时命中） */
-      .cats { border-right: 0; border-bottom: 1px solid #e6dfd3; }
+      .cats { border-right: 0; border-bottom: 1px solid var(--line-strong); }
       .docs { padding: 18px 16px 40px; }
       .doc-card { grid-template-columns: auto minmax(0, 1fr); row-gap: 9px; }
       .doc-cat, .doc-ops { grid-column: 2; }
       .who { display: none; }
     }
-    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #cfdacf; border-radius: 10px; background: #fff; font-size: 16px; cursor: pointer; }
+    .menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--panel); font-size: 16px; cursor: pointer; }
     @media (max-width: 760px) {
       /* 分类栏改抽屉：250px 固定栏在手机上会把文档区挤到只剩一百来像素。
          交互与聊天页的抽屉侧栏一致：汉堡唤出、遮罩点击/选中分类后收起。 */
       .menu-btn { display: inline-flex; }
       .topbar { padding: 12px 16px; gap: 10px; }
-      .layout { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - 61px); }
-      .cats { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(280px, 84vw); transform: translateX(-105%); transition: transform .22s ease; box-shadow: 0 0 40px rgba(0,0,0,.15); overflow-y: auto; }
+      .layout { grid-template-columns: minmax(0, 1fr); }
+      .cats { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(280px, 84vw); transform: translateX(-105%); transition: transform .22s ease; box-shadow: 0 0 40px rgba(30, 24, 14, .18); overflow-y: auto; }
       .cats.open { transform: none; }
-      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(20, 24, 18, .42); }
+      .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(28, 37, 49, .38); }
       .sidebar-backdrop.show { display: block; }
       .cat-ops { opacity: 1; }
       .docs { padding: 16px; }
@@ -217,10 +254,15 @@
     <a class="back" href="/">← 回到对话</a>
     <button class="menu-btn" id="menuBtn" type="button" aria-label="打开分类">☰</button>
     <div class="brand">
-      <div class="brand-mark">A</div>
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 6.6C10.4 5.3 8.4 4.7 6 4.7c-.8 0-1.5.1-2.2.2v12.9c.7-.1 1.4-.2 2.2-.2 2.4 0 4.4.6 6 1.9 1.6-1.3 3.6-1.9 6-1.9.8 0 1.5.1 2.2.2V4.9C19.5 4.8 18.8 4.7 18 4.7c-2.4 0-4.4.6-6 1.9Z"/>
+          <path d="M12 6.6v12.9"/>
+        </svg>
+      </div>
       <div>
-        <div class="brand-name">知识库</div>
-        <div class="brand-sub">分类 · 入库 · 删除</div>
+        <div class="brand-name">藏书阁</div>
+        <div class="brand-sub">Archive · 分类与入库</div>
       </div>
     </div>
     <div class="who" id="who"></div>
@@ -242,6 +284,10 @@
       <div class="docs-head">
         <h1 class="docs-title" id="docsTitle">全部文档</h1>
         <div class="docs-actions">
+          <select class="sort-select" id="sortSelect" title="排序方式">
+            <option value="number">按编号 / 名称</option>
+            <option value="created">按上传时间</option>
+          </select>
           <button class="btn-primary" id="uploadButton" type="button">＋ 上传并入库</button>
           <input type="file" id="fileInput" accept=".pdf,.pptx,.docx" multiple hidden />
         </div>
@@ -261,7 +307,7 @@
 
   <div class="gate" id="gate" hidden>
     <div class="gate-card">
-      <h2 class="gate-title">知识库需要登录</h2>
+      <h2 class="gate-title">藏书阁需要登录</h2>
       <p class="gate-text" id="gateText">
         游客没有自己的库。回到对话页登录后，上传的教材才会只归你所有。
       </p>
@@ -294,6 +340,18 @@
     // 「未分类」用这个哨兵值做筛选条件，而不是空字符串——空字符串已经被
     // 「全部」占用了。它永远不会和真实的 category_id（`c-xxxx`）撞上。
     const UNFILED = '__unfiled__';
+    // 排序方式存在本地：按编号是多数人的默认，但有人习惯看最新上传的，
+    // 每次刷新都重置回去很烦。
+    const SORT_KEY = 'library.sort';
+
+    function readSort() {
+      try {
+        const saved = localStorage.getItem(SORT_KEY);
+        return saved === 'created' || saved === 'number' ? saved : 'number';
+      } catch (error) {
+        return 'number';
+      }
+    }
 
     const state = {
       identity: null,
@@ -302,6 +360,9 @@
       filter: '',          // '' = 全部，UNFILED = 未分类，其余是 category_id
       picked: new Set(),   // 勾选的 doc_id
       pollTimer: null,
+      // 默认按编号排：教材标题带课程顺序（第2章 / 第3章 / 11_xxx），
+      // 按上传时间倒序会把顺序全打乱。想按时间看可以在右上角切。
+      sort: readSort(),
     };
 
     const catList = $('#catList');
@@ -322,6 +383,7 @@
     const gate = $('#gate');
     const who = $('#who');
     const toast = $('#toast');
+    const sortSelect = $('#sortSelect');
 
     let token = readToken();
     function readToken() {
@@ -346,7 +408,7 @@
       if (response.status === 401) {
         writeToken(null);
         state.identity = { guest: true };
-        showGate('登录已过期，请重新登录后再管理知识库。');
+        showGate('登录已过期，请重新登录后再管理藏书阁。');
       }
       return response;
     }
@@ -498,7 +560,8 @@
       input.type = 'text';
       input.maxLength = 40;
       input.value = row.name;
-      input.style.cssText = 'flex:1;min-width:0;padding:5px 7px;border:1px solid #e76f51;border-radius:7px;font-size:12.5px;outline:none;';
+      // 内联样式里用 CSS 变量，别写死色值：改主题时这里最容易漏掉。
+      input.style.cssText = 'flex:1;min-width:0;padding:5px 7px;border:1px solid var(--accent);border-radius:6px;font-size:12.5px;outline:none;background:var(--panel);color:var(--ink);';
       target.innerHTML = '';
       target.appendChild(input);
       // linkedom（探针用的假 DOM）里 input 没有 select()，不加判断会直接抛。
@@ -587,6 +650,49 @@
       return state.documents.filter((doc) => doc.category_id === state.filter);
     }
 
+    // ------------------------------------------------------------------
+    // 排序
+    // ------------------------------------------------------------------
+    // 标题里的编号是课程顺序，必须按「数字大小」比而不是按字符串比：
+    // 字符串比会把「第11章」排到「第2章」前面、「10_基因组学」排到「9_」前面。
+    // 做法是把标题切成「数字段 / 文字段」交替的数组，同类型逐段比较。
+    function naturalChunks(text) {
+      return String(text || '').toLowerCase().match(/\d+|\D+/g) || [];
+    }
+
+    function compareByNumber(left, right) {
+      const a = naturalChunks(left.title);
+      const b = naturalChunks(right.title);
+      const size = Math.min(a.length, b.length);
+      for (let i = 0; i < size; i += 1) {
+        const isNumA = /^\d+$/.test(a[i]);
+        const isNumB = /^\d+$/.test(b[i]);
+        if (isNumA && isNumB) {
+          const diff = Number(a[i]) - Number(b[i]);
+          if (diff) return diff;
+        } else if (!isNumA && !isNumB) {
+          // 中文按拼音排，「附录」不会因为编码值跑到「第1章」前面
+          const diff = a[i].localeCompare(b[i], 'zh-Hans-CN');
+          if (diff) return diff;
+        } else {
+          // 一段数字一段文字：让数字开头的那本排前面，避免「11_xxx」被甩到最后
+          return isNumA ? -1 : 1;
+        }
+      }
+      if (a.length !== b.length) return a.length - b.length;
+      return String(left.title).localeCompare(String(right.title), 'zh-Hans-CN');
+    }
+
+    function sortDocuments(documents) {
+      const sorted = documents.slice();
+      if (state.sort === 'created') {
+        sorted.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      } else {
+        sorted.sort(compareByNumber);
+      }
+      return sorted;
+    }
+
     function documentMeta(doc) {
       if (doc.status === 'failed') {
         return `<span class="bad">入库失败</span> · ${escapeHtml(doc.error || '未知原因')}`;
@@ -625,7 +731,7 @@
     }
 
     function renderDocuments() {
-      const documents = visibleDocuments();
+      const documents = sortDocuments(visibleDocuments());
       docList.innerHTML = '';
 
       // 标题和说明跟着筛选走，用户要知道「现在看的是哪一摊」。
@@ -643,7 +749,7 @@
         empty.className = 'empty';
         empty.innerHTML = state.documents.length
           ? '这个分类下还没有文档。<br>在上面点<b>上传并入库</b>，传完会自动归到这个分类。'
-          : '知识库还是空的。<br>点右上角<b>上传并入库</b>，支持 PDF / PPT / Word。';
+          : '藏书阁还是空的。<br>点右上角<b>上传并入库</b>，支持 PDF / PPT / Word。';
         docList.appendChild(empty);
         return;
       }
@@ -872,6 +978,14 @@
       if (!busy) return;
       state.pollTimer = setTimeout(() => { loadAll(); }, 2500);
     }
+
+    // 排序只影响渲染顺序：后端照旧返回全量，勾选状态和分类归属都不受影响。
+    sortSelect.value = state.sort;
+    sortSelect.onchange = () => {
+      state.sort = sortSelect.value;
+      try { localStorage.setItem(SORT_KEY, state.sort); } catch (error) { /* 无痕模式写不进去，不影响本次使用 */ }
+      renderDocuments();
+    };
 
     (async function boot() {
       const loggedIn = await loadIdentity();

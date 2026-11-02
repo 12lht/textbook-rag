@@ -25,7 +25,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 import service
 
@@ -242,7 +242,9 @@ class InviteRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=12000)
+    # 允许空文本：用户可能只想丢一张图问「这题怎么做」，不配文字。
+    # 「不能啥都没有」由下面的校验兜住，比在 message 上写 min_length=1 更准确。
+    message: str = Field(default="", max_length=12000)
     thread_id: str | None = None
     location: ClientLocation | None = None
     reasoning: bool = True
@@ -250,6 +252,16 @@ class ChatRequest(BaseModel):
     scope_category_id: str | None = Field(
         default=None, max_length=64, description="进入某本书（分类）的对话时传分类 id"
     )
+    # 会话内临时附件（目前只有图片）。先 POST /api/attachments 拿到 att_id 再带上来。
+    # 只限数量不限格式：id 的合法性由 attachments 模块校验，非法 id 直接被忽略，
+    # 不会因此让整条消息发送失败。
+    attachments: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def _require_something(self) -> "ChatRequest":
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("至少要有文字或一张图片")
+        return self
 
 
 class RewindRequest(BaseModel):
@@ -541,6 +553,7 @@ async def sse_events(
             reasoning=request.reasoning,
             web_search=request.web_search,
             scope_category_id=request.scope_category_id,
+            attachments=request.attachments,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     except Exception as exc:
@@ -573,6 +586,54 @@ def chat_stream(
     )
 
 
+
+
+@app.post("/api/attachments")
+async def upload_attachment(
+    file: UploadFile = File(...),
+    identity: service.Identity = Depends(current_identity),
+) -> dict[str, object]:
+    """会话内临时附件（目前只收图片），返回 `att_id`。
+
+    和 `POST /api/documents` 是两条完全不同的路：那个是**入库**（MinerU 解析、切块、进检索池、
+    几周后还查得到），这个是**临时材料**（不解析、7 天后清掉）。所以不复用同一个端点。
+
+    游客也能传：问一张截图不该先要求注册。附件按 user_id 分目录，游客有自己的 id，
+    读别人的 att_id 拿不到文件。
+    """
+    # read_upload_limited 的上限是教材的 250MB，对图片太宽松。先按图片上限挡一道，
+    # 免得为了一张 200MB 的"图片"把整个请求体读进内存再拒绝。
+    limit = service.MAX_ATTACHMENT_BYTES
+    if file.size and file.size > limit:
+        raise HTTPException(
+            status_code=413, detail=f"图片太大，上限 {limit // 1024 // 1024}MB"
+        )
+    data = await read_upload_limited(file)
+    try:
+        return await service.save_attachment(identity.user_id, data)
+    except service.AttachmentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/attachments/{att_id}")
+def attachment_file(att_id: str, u: str = "", t: str = "") -> Response:
+    """按签名地址取附件原图。
+
+    `<img>` 带不上 Authorization 头，所以这条路走签名而不是令牌（和正文插图同一套做法）。
+    `u` 和 `t` 一起参与验签：换了 user_id 签名就对不上，等于同时校验了归属。
+    """
+    if not service.verify_attachment(att_id, u, t):
+        raise HTTPException(status_code=403, detail="链接无效或已过期")
+    found = service.load_attachment(u, att_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="附件不存在或已过期")
+    data, mime = found
+    return Response(
+        content=data,
+        media_type=mime,
+        # 签名地址本身一小时后过期，这里让浏览器在有效期内别再重复请求。
+        headers={"Cache-Control": "private, max-age=1800"},
+    )
 
 
 @app.post("/api/documents")

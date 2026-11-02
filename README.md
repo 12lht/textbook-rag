@@ -1,204 +1,108 @@
-# Agent Workspace
+# 书院 · Textbook RAG
 
-一个基于 LangGraph、DeepSeek、Tavily、高德地图和 MinerU 的 Agent 学习项目：
-对话 Agent + 可检索的教材知识库。
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.143.0-teal)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.2.12-orange)](https://langchain-ai.github.io/langgraph/)
 
-当前项目同时提供：
+把专业课教材变成一间能随时发问的书房：整本 PDF 上传后逐页解析、切段、抽图；
+提问时它翻到具体那一页，带着页码和原图回答你。日常的天气、定位、联网搜索也在同一段对话里。
 
-- FastAPI + 网页前端
-- CLI 调试入口
-- 账号注册 / 登录，会话按用户隔离
-- 未登录访客按浏览器分配签名身份：彼此看不见、7 天后清理、配额有全局上限
-- 工具通过 MCP 协议跑在独立进程（可独立部署、可复用），需要请求上下文的工具留在进程内
-- 天气查询，以及由用户授权提供的客户端定位
-- Tavily 网页搜索与正文提取
-- 多轮工具调用
-- SQLite 会话持久化
-- 会话列表、历史消息和 SSE 流式响应
-- 量化评测闭环：金标集 + 指标基线 + 工具录制回放
-- **教材知识库**：上传 PDF 自动解析（MinerU vlm）→ 切段落/抽图配图注 → BM25 + 向量融合检索，
-  回答带页码与插图引用；按分类管理，支持「看原文」直接翻 PDF
+## 主要功能
+
+**教材问答**
+
+- 上传 PDF / PPTX / DOCX，MinerU 云端解析 + 本地兜底，切段落、抽插图并保留图注
+- 段落同时建 BM25 索引与向量索引，检索后融合 + rerank，避免单路召回漏检
+- 回答带 `[c1]` 式角标，点开是原文片段与页码；正文里能直接引用教材插图
+- 可以「进入某本书」提问，把检索范围锁在一本教材内
+
+**会话内读图**
+
+- 输入框左侧「+」里有上传图片、从剪贴板粘贴两条入口，也支持把图直接拖进来、或 Ctrl+V
+- 截一道题、拍一页书发过去就能问，不必先入库、不必等解析
+- 图片随会话走：第二轮不再带图，模型仍记得上一轮看过什么
+- 图片只在本次会话可见，不进教材库；上传前在前端缩到长边 1024，兼顾清晰度和传输体积
+
+**藏书阁**
+
+- 按分类管理教材，支持批量归类、删除、看原文
+- 列表支持按编号 / 名称自然排序（`第2章 < 第10章`）或按上传时间排序
+- 解析状态、失败原因、双栏排版的切分告警都直接标在卡片上
+
+**通用 Agent 能力**
+
+- 天气、逆地理编码定位、当前时间、网页搜索与网页正文提取
+- 「深度思考」「联网搜索」两个开关，逐条消息可控
+- 跨会话长期记忆：记住你的专业、偏好、正在学的课
+- 账号注册 / 登录，未登录也可用访客身份（按浏览器隔离，7 天清理）
+
+## 技术栈
+
+| 层级 | 技术 |
+| --- | --- |
+| Agent 编排 | LangGraph + LangChain + DeepSeek（备用 GLM） |
+| 工具协议 | MCP（stdio 子进程）+ 进程内上下文工具 |
+| 后端 | FastAPI + Uvicorn，SSE 流式输出 |
+| 前端 | 原生 HTML/JS，无构建步骤；marked + KaTeX + DOMPurify |
+| 教材解析 | MinerU（云端）+ PyMuPDF / python-pptx / python-docx（本地兜底） |
+| 检索 | BM25 + 向量融合 + rerank |
+| 持久化 | SQLite（checkpoint、账号、会话、记忆、教材） |
+| 部署 | Docker + Docker Compose |
 
 ## 项目结构
 
 ```text
-tools.py                   4 个「纯函数」工具的实现（零框架依赖，只有标准库 + tavily）
-mcp_server.py              MCP server：用 stdio 把 tools.py 暴露给 Agent
-geocode.py                 客户端坐标 → 可读位置（高德逆地理编码，带缓存）
-agent_core.py              Agent 编排：LangGraph 图、模型、MCP 客户端、3 个进程内工具（定位 + 记忆读写）、消息状态读写
-users.py                   账号与登录：账号表、密码哈希、登录令牌、邀请码（纯应用层，不依赖 Agent）
-conversations.py           会话元数据：id、标题、重命名标记、会话归属（纯应用层，不依赖 Agent）
-memories.py                跨会话长期记忆：一条事实一行存进 SQLite，去重、清洗、上限（纯应用层，不依赖 Agent）
-limits.py                  配额与限流：按天记用量（SQLite）+ 内存滑窗防刷（纯应用层，不依赖 Agent）
-documents.py               教材库：收文件、解析成 Markdown、切段落、抽图配图注、分类（纯应用层，不依赖 Agent）
-mineru.py                  云端解析客户端：提交 / 轮询 / 分批 / 解压，只负责「PDF → blocks + 图片」
-retrieval.py               检索：BM25 + 向量融合 + 重排，命中段落与同页插图（纯应用层）
-figures.py                 视觉模型调用：灰区判装饰、给无题注图写一句图注
-service.py                 应用层：把上面几层拼成用例（身份收敛/会话用例/回退/对话流/位置收敛/注入记忆后端）
-api.py                     FastAPI 后端
-cli.py                     CLI 调试入口
-cassette.py                评测用的工具录制回放
-eval/cases.jsonl           评测金标集（32 个用例）
-eval/run.py                评测 runner
-eval/baselines/            历史基线 JSON
-eval/cassettes/            录制下来的工具返回值
-frontend/index.html        网页前端（单文件，内联脚本，无构建步骤）
-frontend/library.html      知识库管理页
-frontend/vendor/           marked + DOMPurify + KaTeX（本地化，不再依赖 CDN）
-data/                      SQLite（checkpoint / 长期记忆 / 账号 / 教材）和会话元数据 JSON
-scripts/backup.py          备份脚本：走 SQLite 在线备份接口，不是 cp
-Dockerfile                 运行镜像（--workers 1 是硬约束，理由在文件里）
-docker-compose.yml         编排：应用容器 + 数据卷
-raw/                       开发历史归档
-learning-notes.md          学习笔记
-requirements.txt           固定版本依赖
+api.py              FastAPI 后端
+service.py          应用层组合
+agent_core.py       LangGraph Agent 编排、教材检索工具、长期记忆工具
+tools.py            纯函数工具（天气、时间、网页搜索/提取）
+mcp_server.py       MCP server
+geocode.py          高德逆地理编码
+documents.py        教材上传 / 解析 / 切分
+mineru.py           MinerU 云端解析客户端
+retrieval.py        BM25 + 向量融合检索
+figures.py          视觉模型调用（图注、图像描述）
+attachments.py      会话内临时附件（图片存储、签名访问、过期清理）
+users.py            账号与登录
+conversations.py    会话元数据
+memories.py         跨会话长期记忆
+limits.py           配额与限流
+cassette.py         评测录制回放
+cli.py              CLI 调试入口
+frontend/           网页前端（index.html 对话，library.html 藏书阁）
+eval/               金标集、评测脚本、基线
+tests/              离线回归与探针
+docs/               架构、接口、评测、部署、决策记录
 ```
 
-### 三层怎么分
+## 快速开始
 
-依赖方向是单向的：`api.py` / `cli.py` → `service.py` → `conversations.py` + `users.py` + `agent_core.py`。
+```bash
+# 1. 安装依赖
+python -m pip install -r requirements.txt
 
-- **`conversations.py` / `users.py` / `memories.py`（业务数据）**：只读写 `data/` 下的文件，**不 import 任何 Agent 相关的东西**。换成任何应用都是这一套。
-- **`agent_core.py`（Agent 编排）**：图、工具、模型，以及读写会话「消息状态」的操作（`get_history` / `rewind_thread` / `stream_agent`）。它**不 import `conversations`**，所以标题策略、第几轮起标题这类业务判断不在这里。
-- **`service.py`（应用层）**：跨层组合集中在这里，不散落到路由和命令行里。典型例子：「删除会话」要同时删 LangGraph 的 checkpoint 和元数据 JSON；「会话列表」要同时读标题和消息条数；「回退后会话被清空」要把标题还原成默认值；「你是谁」要从令牌解析出来再决定这次能不能用长期记忆。
+# 2. 配置环境变量
+cp .env.example .env      # 填入 DEEPSEEK / AMAP / TAVILY / SILICON / MINERU 的 Key
 
-判断一个新功能该放哪：**碰不碰 LangGraph 的状态？** 碰 → `agent_core.py`；只碰业务数据 → `conversations.py` / `users.py`；需要两边一起动 → `service.py`。
+# 3. 启动
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
+```
+
+打开 <http://127.0.0.1:8000>。各变量的作用见 [`.env.example`](.env.example)，
+不配某个 Key 时对应的工具会自动关闭、不影响其余功能。
+
+```bash
+python tests/run-offline.py     # 离线回归（不联网、不花钱）
+python eval/run.py --tag v3     # 金标评测（调用真实模型）
+python cli.py                   # 命令行调试
+```
 
 ## 文档
 
-| 文件 | 讲什么 |
-| --- | --- |
-| `README.md` | 这个文件：是什么、怎么跑、代码放在哪 |
-| `docs/ARCHITECTURE.md` | 为什么这么设计：MCP 拆分、账号与令牌、持久化、长期记忆、工具分界 |
-| `docs/API.md` | 接口清单、请求示例、SSE 流式事件 |
-| `docs/EVAL.md` | 评测口径、金标集、录制回放、怎么读基线对比 |
-| `docs/PROJECT-PLAN.md` | 教材助教的功能架构（做什么 / 不做什么 / 验收标准） |
-| `docs/DEPLOY.md` | 怎么部署到公网：Docker、反向代理、HTTPS、备份、上线检查清单 |
-| `learning-notes.md` | 学习笔记，按编号章节续写（34 章 + 待学习清单） |
-| `tests/README.md` | 测试与探针的索引：每个脚本干什么、要不要调模型 |
-
-## 环境准备
-
-所有命令都在**项目根目录**（这个 README 所在的目录）执行，先切过去：
-
-```powershell
-cd <你 clone 下来的目录>
-```
-
-使用 Python 3.11 或更高版本，并安装依赖（下面的 `python` 指你装好依赖的那个解释器）：
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-在项目根目录创建 `.env`，配置 API Key：
-
-```env
-DEEPSEEK_API_KEY=你的DeepSeek_API_Key
-AMAP_API_KEY=你的高德地图_API_Key
-TAVILY_API_KEY=你的Tavily_API_Key
-MODEL_PROVIDER=deepseek
-
-# 教材知识库（不配也能用站点，只是没有知识库 / 检索退化成字面匹配）
-MINERU_API_KEY=你的MinerU_API_Key        # PDF 解析（按页算额度）
-SILICON_API_KEY=你的SiliconFlow_API_Key  # 视觉模型（图注/判装饰）+ 向量 + rerank
-# 可选：VISION_MODEL / VISION_DESC_MODEL / VISION_BASE_URL
-#       EMBEDDING_MODEL / EMBEDDING_BASE_URL / RERANK_ENABLED
-```
-
-不要把真实 Key 提交到代码仓库或发送给前端。
-
-需要使用 GLM-4.7-Flash 时，将模型开关改为：
-
-```env
-MODEL_PROVIDER=glm
-```
-
-此时程序会使用 `GLM_API_KEY` 和智谱 OpenAI 兼容接口；不设置或填写其他值时继续使用 DeepSeek。
-
-**主模型和起标题用同一个 provider**，`MODEL_PROVIDER` 一处说了算。标题模型只是温度调低（0.2）、并关掉推理：
-
-| 用途 | 温度 | max_tokens | 推理 | 说明 |
-| --- | --- | --- | --- | --- |
-| 主对话 | 0.5 | 5000 | 开 | 要智能 |
-| 起标题 | 0.2 | 400 | **关** | 要稳定和短，不需要思考过程 |
-
-关推理是必须的，不是优化：`deepseek-flash` 是**推理模型**，回答前先输出一段思维链，那部分也算 `output_token`。原来沿用 GLM 时代的 `max_tokens=40`，结果 40 个 token 全被思考吃掉、正文变成空串（`finish_reason: length`），表现就是「标题莫名其妙没了」。关掉之后实测输出从 40 token 降到 **4**。
-
-`max_tokens=400` 是**安全垫不是预期用量**——万一日后换模型、关推理的参数被静默忽略，还有余地出标题。上限宽着不花钱，`max_tokens` 是天花板不是目标。
-
-`GLM_API_KEY` 留着做备用是可以的，但它**不再影响起标题**：标题走不走智谱只由 `MODEL_PROVIDER` 决定。
-
-## 启动网页应用
-
-```powershell
-python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
-```
-
-不想 `cd` 也可以把项目目录直接告诉 uvicorn（`.` 就是当前目录）：
-
-```powershell
-python -m uvicorn api:app --app-dir . --host 127.0.0.1 --port 8000 --reload
-```
-
-浏览器打开：
-
-```text
-http://127.0.0.1:8000
-```
-
-API 文档：
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-> 改了 `api.py` 或 `agent_core.py` 之后必须重启服务（加上 `--reload` 会自动重载）。
-> 不加 `--reload` 时，旧进程仍然会从磁盘读取新的 `index.html`，所以会出现
-> 「页面是新按钮、但接口报错」这种现象——前端能更新，Python 代码不能。
->
-> 判断方法看状态码：**404** 说明整条路径都没注册，**405** 说明路径在、只是这个方法没注册
-> （例如 `DELETE /api/conversations/{id}` 生效、`PATCH` 报 405，就是进程还停在加 PATCH 之前）。
-> 都可以打开 `http://127.0.0.1:8000/docs` 核对实际注册了哪些方法，重启后即可恢复。
-
-**要给同学用（公网访问）不要直接把 `--host` 改成 `0.0.0.0`**：那是裸 HTTP，
-令牌明文过网，而且没有反代就关不掉 SSE 缓冲、也收不到真实的 `X-Forwarded-For`
-（访客限流会全部算到同一个 IP 上）。走容器 + 反向代理，步骤见 `docs/DEPLOY.md`。
-
-## 启动 CLI
-
-```powershell
-python cli.py
-```
-
-CLI 命令：
-
-```text
-/switch     展示会话摘要并选择历史会话
-/restart    新建会话
-q           退出程序
-```
-
-直接输入普通消息时，如果当前没有活动会话，程序会自动创建新会话。
-
-CLI **不走登录**：它是本机单人使用，直接用 `service.CLI_IDENTITY`（默认账号 + **开着**记忆）。网页侧的访客身份是另一套：每个浏览器领一个签名 cookie（`g-xxxxxxxx`）当独立身份，记忆是关的。两者 `user_id` 不同（CLI 用默认账号 `"1"`，访客用 `g-` 前缀），所以互不干扰。这也是为什么记忆开关是逐请求的、而不是绑在身份上。
-
-## 开发说明
-
-`agent_core.py` 是 CLI 和 Web 共用的 Agent 核心，不要在 `api.py` 或 `cli.py` 中复制工具实现。网页通过后端访问 Agent，API Key 始终留在后端环境变量中。会话相关的功能请加到 `service.py`，不要直接写进路由，否则路径和 CLI 会各写一遍跨层组合。
-
-加工具或改工具的注意事项：
-
-- 改工具的函数签名或 docstring 会直接改变模型看到的接口，动手前先想清楚是不是必要。
-- **加工具分两种，先判断它需不需要本次请求的上下文**：
-  - 返回值只由参数决定的「纯函数」→ 写进 `tools.py` 并加进 `ALL_TOOLS`，`mcp_server.py` 会自动注册；
-  - 需要请求上下文的（比如当前位置）→ 留在 `agent_core.py`，写 `@tool` + `runtime: ToolRuntime[Context]`。
-- **两种情况都要登记进 `agent_core._TOOL_ORDER`**，否则合并后工具会被排到末尾，发给模型的顺序就变了。
-- 参数里的 `runtime` / `ToolRuntime` 不会出现在模型看到的 schema 里（被框架剥离），但工具描述（docstring）**会**原样发出去。
-- MCP 工具跑在子进程里，它拿到的环境变量是**会话建立时**从父进程继承的快照。改环境变量后要让会话重开（`agent_core.shutdown()` 会把 MCP 客户端作废）才会生效。
-- 在 async 链路里做阻塞 IO（`urllib`、`requests`）必须用 `asyncio.to_thread` 包起来，否则会卡住整个事件循环——包括正在流式输出的 SSE。`geocode.describe` 就是这样的调用。
-
-启动网页应用时会在后台拉起一个 MCP server 子进程，这是正常现象；`Ctrl+C` 时 FastAPI 的 lifespan 会把它一起收掉。如果命令行看起来「卡住不退出」，通常是子进程没被回收。
-
-旧版单文件 CLI 结构保存在 `raw/3.py`，仅用于学习和对照。
-
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 架构与数据流
+- [`docs/API.md`](docs/API.md) — 接口与 SSE 事件
+- [`docs/EVAL.md`](docs/EVAL.md) — 评测口径与基线对比
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — Docker 部署与公网配置
+- [`docs/FEATURE-PROCESS.md`](docs/FEATURE-PROCESS.md) — 新功能从调研到验收的流程
+- [`docs/adr/`](docs/adr/) — 架构决策记录
+- [`tests/README.md`](tests/README.md) — 测试脚本索引

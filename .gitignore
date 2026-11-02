@@ -45,3 +45,6 @@ Thumbs.db
 .venv/
 venv/
 env/
+
+# 截图/临时探针
+.tmp/
