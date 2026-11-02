@@ -43,3 +43,43 @@ jobs:
       # 本地全量：pytest -m "requires_sample or requires_model or requires_network"
       - name: pytest
         run: pytest -m "not requires_sample and not requires_model"
+
+  e2e:
+    name: 前端 e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      # 后端要起：页面会真调 /api/*。不需要 API key——所有 e2e 都不调模型，
+      # 缺 key 时那些接口只会走降级分支，不影响前端行为。
+      - name: 装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 装 Node 依赖
+        run: npm ci
+      # playwright-core 不带浏览器，得自己装。版本要和 package.json 里的
+      # playwright-core 一致，否则 chromium.executablePath() 指向的目录不存在。
+      - name: 装 chromium
+        run: npx playwright@1.64.1 install --with-deps chromium
+      - name: 起 uvicorn
+        run: nohup python -m uvicorn api:app --host 127.0.0.1 --port 8000 --log-level warning &
+      - name: 等后端就绪
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health && exit 0
+            sleep 1
+          done
+          echo "后端 30 秒内没起来" && exit 1
+      # run-all 自己会起两个 mock 并按清单跑完所有 e2e-*.js。
+      # 浏览器不用装：_browser.js 找不到本地 chromium 时会退回 playwright-core
+      # 自报的路径，CI 里 pre-installed 的 chromium 就够。
+      - name: 跑 e2e
+        run: node tests/e2e/run-all.js

@@ -40,7 +40,13 @@ button { cursor: pointer; }
 /* 小标题做成「书眉」：左侧一道短金线 + 等宽大写，比纯灰字更有章节感。 */
 .section-label { flex: none; display: flex; align-items: center; gap: 8px; margin: 26px 4px 10px; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .section-label::before { content: ""; flex: none; width: 14px; height: 1px; background: var(--gold); }
-.conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
+/* minmax(0, 1fr) + 行上的 min-width: 0 是必需的：
+   grid 项默认 min-width:auto，会按现在不换行的标题算成 min-content 宽度，
+   于是长标题把整行撑到容器之外——省略号永远不触发，右半截直接被侧栏裁掉。
+   min-height 96px（约两行半）：矮视口下 flex 默认会把列表压到 0 高，
+   整个侧栏就只剩品牌区和账号区，会话一条都看不见；
+   给个下限让侧栏自己出滚动条，而不是让列表消失。 */
+.conversation-list { flex: 1 1 auto; min-height: 96px; overflow-y: auto; overscroll-behavior: contain; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-content: start; }
 /* 一条会话都没有时，侧栏会空出一大块。用 :empty 补一行提示，不用改 JS。 */
 .conversation-list:empty::after { content: "还没有会话"; padding: 14px 12px; color: var(--muted-soft); font-size: 12px; }
 /* 知识库入口。原来这里是「教材库」标题 + 上传按钮 + 文档列表（最多 32vh），
@@ -101,7 +107,7 @@ button { cursor: pointer; }
 /* 邀请码本身用等宽字体 + 字距，抄写和核对都方便 */
 .invite-code { font: 600 15px var(--font-mono); letter-spacing: .12em; word-break: break-all; }
 .invite-row.used .invite-code { color: var(--muted-soft); text-decoration: line-through; }
-.conversation-item { display: flex; gap: 4px; align-items: stretch; }
+.conversation-item { display: flex; gap: 4px; align-items: stretch; min-width: 0; }
 /* 会话行像书签：默认全透明，悬停浮出纸面；选中时左侧压一道朱砂书签条。 */
 .conversation { position: relative; flex: 1; min-width: 0; padding: 10px 12px 10px 14px; text-align: left; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; transition: background .15s, border-color .15s; }
 .conversation:hover { background: rgba(255, 253, 247, .7); }

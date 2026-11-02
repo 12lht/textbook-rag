@@ -66,8 +66,9 @@ pytest -m requires_network            # 再加上依赖外部资源的用例
 # Python
 python tests/probes/test_rewind.py
 
-# Node（playwright-core 需要能解析到，可以用 NODE_PATH 指过去）
-NODE_PATH=<你的 node_modules 目录> node tests/e2e/e2e-cite-popover.js
+# Node：先 npm install（devDependencies 里只有 playwright-core），然后
+npm run e2e                            # 全量，run-all 自己起 mock 服务
+node tests/e2e/run-all.js --only e2e-katex,e2e-scroll   # 只跑指定脚本
 ```
 
 e2e 脚本的浏览器路径由 `_browser.js` 自己找：先读环境变量 `CHROME_PATH`，没有就在
@@ -77,15 +78,23 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 写的是本机路径，跑之前改成你自己的书；`tests/fixtures/` 里只有一份 `twocol.pdf`，
 够跑双栏排版那几个。
 
-跑 e2e 前先起后端（`uvicorn api:app`），脚本里的 `BASE` 指向对应端口。
+e2e 默认打 mock（`run-all.js` 自动起 mock-server 8766 和 mock-conversations 8768），
+不依赖真后端，也不调模型。个别脚本想对着真 uvicorn 跑，用 `E2E_BASE` 指过去：
 
-不想起真后端时用 mock：`node tests/e2e/mock-server.js`（8766）和
-`node tests/e2e/mock-conversations.js`（8768）。**mock 必须能提供 `/static/*`**——
-它由 `_static.js` 统一处理，指向 `frontend/`，和后端 `app.mount("/static", ...)` 对齐。
-少了这一段，页面只有 HTML 没有脚本，所有断言都在对着空壳跑，而且不报错。
+```bash
+E2E_BASE=http://127.0.0.1:8000 node tests/e2e/e2e-cite-popover.js
+```
+
+**mock 必须能提供 `/static/*`**——它由 `_static.js` 统一处理，指向 `frontend/`，
+和后端 `app.mount("/static", ...)` 对齐。少了这一段，页面只有 HTML 没有脚本，
+所有断言都在对着空壳跑，而且不报错——这个坑真实存在过：mock 缺静态处理的那几天，
+所有依赖渲染的用例一起坏，但因为没人跑，一直没人发现。
 
 `e2e-app-modules.js` 专门盯这件事：15 个模块是否全部加载、`window.state` 与
 `window.addMessage` 是否在、以及挨个点一遍各模块的绑定点。
+
+CI（`.github/workflows/ci.yml` 的 e2e job）在每次 push 时跑 `run-all.js`。
+想加新 e2e 脚本，往 `run-all.js` 的 `SUITE` 清单里加一行即可。
 
 ## 命名约定
 
@@ -93,7 +102,7 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 |---|---|
 | `probe-` | 一次实验，打印数据供人判断，不设断言 |
 | `test-` | 回归测试，断言失败即报错，可反复跑 |
-| `e2e-` | 真实浏览器 + 真实 uvicorn（部分会调真模型） |
+| `e2e-` | 真实浏览器跑前端交互，默认打 mock、不调模型；`E2E_BASE` 可指到真 uvicorn |
 | `audit-` | 批量体检，产出可量化的报告 |
 
 `probe_rewind.py` 是历史遗留的下划线命名，内容与 `probe-*` 同类。
@@ -301,9 +310,10 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `e2e-cite-popover.js` | 引用角标小窗（mock 接口 + 真实页面） | 否 |
 | `e2e-katex.js` | KaTeX 公式渲染与引用小窗（8 条断言，含 `$5` 不误伤） | 否 |
 | `e2e-app-modules.js` | 前端模块图：15 个模块是否全部加载、全局出口、控制台零报错、各处绑定点一遍 | 否 |
-| `_frontend_check.js` | 前端整体自检（**已过期**：内容是拆分前那份内联脚本的留存副本，不再可运行） | 否 |
-| `mock-server.js` | mock 后端（e2e 依赖） | 否 |
-| `mock-conversations.js` | mock 会话数据 | 否 |
+| `run-all.js` | e2e 统一入口：起 mock、按 SUITE 清单跑完全部、汇总退出码 | 否 |
+| `_static.js` | mock 共用的 `/static/*` 处理（缺了页面就没有脚本） | 否 |
+| `mock-server.js` | mock 后端（8766） | 否 |
+| `mock-conversations.js` | mock 会话数据（8768），支持 `/__reset`、`/__seed`、`/__requests` | 否 |
 | `mock-rewind.js` | mock 回退接口 | 否 |
 | `probe-frontend-citations.mjs` | 前端引用渲染（linkedom 真 DOM） | 否 |
 | `probe-frontend-library.mjs` | 前端资料库渲染 | 否 |

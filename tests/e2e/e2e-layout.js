@@ -22,8 +22,8 @@ const probe = () => {
   };
 };
 
-async function run(page, path, label) {
-  await page.goto(BASE + path);
+async function run(page, pathname, label) {
+  await page.goto(BASE + pathname);
   await page.fill('#input', '请生成一段较长的回复');
   await page.click('#send');
 
@@ -77,7 +77,7 @@ async function run(page, path, label) {
   });
 
   const p2 = await page.evaluate(probe);
-  await page.screenshot({ path: path.join(os.tmpdir(), `shot-${path === '/' ? 'fixed' : 'original'}.png`) });
+  await page.screenshot({ path: path.join(os.tmpdir(), `shot-${pathname === '/' ? 'fixed' : 'original'}.png`) });
   return { label, p1, p2, hold, trail };
 }
 
@@ -86,7 +86,13 @@ async function run(page, path, label) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
   const rows = [];
-  rows.push(await run(page, '/original', '修复前（旧布局）'));
+  // /original 是"改造前"的快照，存在临时目录里、随时可能被清掉。
+  // 缺了就跳过对照组，别让整份报告出不来。
+  try {
+    rows.push(await run(page, '/original', '修复前（旧布局）'));
+  } catch {
+    console.log('（跳过 /original 对照组：快照不存在）');
+  }
   rows.push(await run(page, '/', '修复后（新布局）'));
   await browser.close();
 

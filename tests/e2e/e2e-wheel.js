@@ -21,8 +21,8 @@ async function snapshot(page) {
   });
 }
 
-async function run(page, path, label) {
-  await page.goto(BASE + path);
+async function run(page, pathname, label) {
+  await page.goto(BASE + pathname);
   await page.fill('#input', '请生成一段较长的回复');
   await page.click('#send');
 
@@ -48,7 +48,12 @@ async function run(page, path, label) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
   const rows = [];
-  rows.push(await run(page, '/original', '旧布局'));
+  // /original 是"改造前"的快照，缺了就跳过对照组。
+  try {
+    rows.push(await run(page, '/original', '旧布局'));
+  } catch {
+    console.log('（跳过 /original 对照组：快照不存在）');
+  }
   rows.push(await run(page, '/', '新布局'));
   await browser.close();
 

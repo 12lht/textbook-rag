@@ -58,6 +58,20 @@ http.createServer(async (request, response) => {
     return;
   }
 
+  // 播种：某些场景需要"列表长到能撑满侧栏"，默认那 3 条不够。
+  // 直接改 SEED 会影响所有场景，所以留一个只给单个用例用的入口。
+  if (pathname === '/__seed' && request.method === 'POST') {
+    const body = await readBody(request);
+    const count = Math.max(0, Math.min(200, Number(body.count) || 0));
+    conversations = Array.from({ length: count }, (unused, i) => ({
+      thread_id: `t-seed${String(i + 1).padStart(4, '0')}`,
+      summary: `第 ${i + 1} 个会话：关于分集接收与信道编码的讨论`,
+      message_count: i,
+    }));
+    send(response, 200, { status: 'seeded', count: conversations.length });
+    return;
+  }
+
   if (pathname === '/__requests') {
     send(response, 200, requests);
     return;

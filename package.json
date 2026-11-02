@@ -1,0 +1,11 @@
+{
+  "name": "textbook-rag-frontend-tests",
+  "private": true,
+  "description": "只服务于 tests/e2e：浏览器驱动的端到端检查。项目本身零构建，没有前端打包步骤。",
+  "scripts": {
+    "e2e": "node tests/e2e/run-all.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

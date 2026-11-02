@@ -48,3 +48,6 @@ env/
 
 # 截图/临时探针
 .tmp/
+
+# Node 依赖（只给 tests/e2e 用，项目本身零构建）
+node_modules/
