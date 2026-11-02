@@ -32,6 +32,21 @@ ignore = [
 "tests/**" = ["E501"]
 "eval/**" = ["E501"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# -q：通过的测试只打点，失败才展开整段 traceback。
+# --strict-markers：标记写错直接报错——避免「打了 requires_network 但其实没注册」，
+#   那样默认的 -m 过滤会静默放行本该跳过的测试。
+# -m "not requires_network"：默认不跑依赖外部资源（MinerU CDN / Tavily）的用例。
+#   它们会因为对端抖动而红，实测同一份代码单跑绿、全量跑报 SSL EOF——回归信号
+#   一抖就没人信了。要跑显式加 `-m requires_network`。
+addopts = "-q --strict-markers -m \"not requires_network\""
+markers = [
+    "requires_sample: 需要 data/uploads 下的真实样本 PDF（不入库，CI 里没有）",
+    "requires_model: 需要真实调用模型 API（花钱，CI 里不跑）",
+    "requires_network: 需要调外部 API（Tavily / 搜索），CI 里不跑",
+]
+
 [tool.mypy]
 python_version = "3.11"
 # 只检查这几个模块。它们是"纯数据变换"的代码，注解写准了就能一直绿；

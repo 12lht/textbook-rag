@@ -25,7 +25,7 @@ jobs:
         run: mypy
 
   offline:
-    name: 离线回归
+    name: 测试
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +36,10 @@ jobs:
       - name: 装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      # 排除三个探针：它们要读 data/uploads 下的真实样本 PDF，
-      # 而 data/ 被 .gitignore 排除，CI 里没有。其余七个自造数据，能完整跑。
-      # 本地跑全量：python tests/run-offline.py
-      - name: 跑离线回归（CI 子集）
-        run: python tests/run-offline.py --exclude astral-repair,upload,asset-render
+          pip install -r requirements.txt -r requirements-dev.txt
+      # 默认集合已排除 requires_network（pyproject 的 addopts）。
+      # 这里再排掉两类：requires_sample 要 data/uploads 里的真实 PDF（不入库），
+      # requires_model 要真实 API key（CI 里没有 secret）。
+      # 本地全量：pytest -m "requires_sample or requires_model or requires_network"
+      - name: pytest
+        run: pytest -m "not requires_sample and not requires_model"

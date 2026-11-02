@@ -1,7 +1,8 @@
-# 测试与探针
+# 测试
 
-本项目的验证脚本。**不是 pytest 套件**——没有 conftest、没有 fixture 机制，
-每个脚本自己就是一次实验：跑一遍、打印数据、人看结论。
+**回归测试是 pytest 套件**：`tests/test_*.py` + `tests/conftest.py`。
+探索性探针仍留在 `tests/probes/`（脚本式，打印数据供人判断），它们不会被 pytest
+收集——文件名不匹配 `test_*.py`，需要时单独跑。
 
 脚本原先散在 `.workbuddy/tmp/`（190 个条目混着截图、日志、测试 PDF），
 现已按用途归到这里，一次性产物（截图 / 日志 / 被取代的迭代版）已删除。
@@ -12,9 +13,11 @@
 
 ## 目录
 
-| 目录 | 内容 |
+| 路径 | 内容 |
 |---|---|
-| `probes/` | 后端探针，Python，直接 import 项目模块（入库） |
+| `test_*.py` | pytest 回归测试（10 个文件） |
+| `conftest.py` | 公共 fixture：仓库路径、临时存储、样本 PDF |
+| `probes/` | 探索性探针，脚本式，**不被 pytest 收集**（入库） |
 | `e2e/` | 前端端到端，Node + playwright-core，跑真实浏览器（入库） |
 | `bench/` | 系统核心指标基准：token 消耗、缓存命中、时延（入库） |
 | `fixtures/` | 测试素材（双栏 PDF 等）（入库） |
@@ -22,26 +25,36 @@
 
 ## 怎么跑
 
-**改完代码先跑这一条**，它把"能离线判定成败"的探针串成一个入口，有一条失败就退出码非 0：
+**改完代码先跑这一条**（约 20 秒）：
 
 ```bash
-python tests/run-offline.py            # 全量，约 65 秒
-python tests/run-offline.py --list     # 只列会跑哪些
-python tests/run-offline.py vectors    # 按名字过滤
+pytest                                # 默认集合
+pytest tests/test_chunking.py         # 单个文件
+pytest -k vector                      # 按名字过滤
+pytest -m requires_model              # 再加上真实模型调用（花钱）
+pytest -m requires_network            # 再加上依赖外部资源的用例
 ```
 
-判定口径是「子进程退出码 0 **且**输出里没有 `FAIL`」，探针自己打印的「跳过」也算失败——
-静默跳过曾经让一批探针"绿着坏了"很久。
+三档标记（注册在 `pyproject.toml` 的 `markers`）：
 
-CI（`.github/workflows/ci.yml`）跑不了全量：`probe-upload`、`probe-astral-repair`、
-`probe-asset-render` 要读 `data/uploads/` 下的真实样本 PDF，而 `data/` 不入库。
-CI 用排除开关跑其余七个：
+| 标记 | 含义 | 默认 |
+|---|---|---|
+| `requires_sample` | 要 `data/uploads/` 里的真实 PDF（不入库） | 跑；CI 里排除 |
+| `requires_model` | 真实调用模型 API，会花配额 | 跑；CI 里排除 |
+| `requires_network` | 调 MinerU CDN / Tavily | **不跑**，要显式 `-m requires_network` |
 
-```bash
-python tests/run-offline.py --exclude astral-repair,upload,asset-render
-```
+`requires_network` 默认排除，是因为对端抖动会让整批变红——实测同一份代码单跑绿、
+全量跑报 `SSL: UNEXPECTED_EOF`。回归信号一抖就没人信了。
 
-这三条改动前务必在本地跑全量，它们覆盖的正是上传闸门和签名取图。
+### 为什么不再用 `run-offline.py`
+
+那个 40 行的 runner 干的就是 pytest 的活：按清单循环起子进程、数 PASS、有 FAIL 就
+退出码非 0。换成 pytest 之后多拿到三样：**失败能定位到具体断言**（原来只报文件名）、
+`tmp_store` fixture 统一管临时库（原来每个探针手抄三行重定向，漏一处就静默写进真库）、
+标记驱动的过滤（原来靠 `--exclude` 匹配文件名子串）。
+
+原来那条「打印『跳过』也算失败」的规则仍然有效——pytest 的 skip 必须显式写 reason，
+不存在 `except: sys.exit(0)` 那种静默假绿。
 
 ## 单个探针怎么跑
 
@@ -129,9 +142,8 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-algo-code.py` | 在 Hello-Algo（LaTeX 排版）上验证同一套规则 | 否 |
 | `probe-documents.py` | 教材摄取（M1）在真实 PDF 上的表现 | **是**（花约 30 页 MinerU 额度） |
 | `probe-formats.py` | PDF / PPTX / DOCX 三种格式都能走完摄取 | **是**（PDF 部分花 MinerU 额度） |
-| `probe-upload.py` | 上传闸门：上限 / 去重 / 老库迁移 / 删除 | 否（只走 `create_upload`，不解析） |
 | `probe-producer.py` | PDF 产地：Producer / Creator / 页面尺寸 / 每页字数 | 否 |
-| `probe-markdown.py` | Markdown 中间态长什么样 | **是**（花约 30 页 MinerU 额度，不在 `run-offline.py` 里） |
+| `probe-markdown.py` | Markdown 中间态长什么样 | **是**（花约 30 页 MinerU 额度，不在回归集合里） |
 | `probe-parse-after.py` | 改动后的实际产出：段长分布、代码块数、样例 | 否 |
 | `audit-ingest.py` | 三本基线书重跑解析 + 切分，输出可量化脏点 | 否 |
 | `audit-md.py` | 审计 `data/` 里已 ready 书的解析成品质量 | 否 |
@@ -176,12 +188,7 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | 脚本 | 用途 | 调模型 |
 |---|---|---|
 | `probe-mineru.py` | 链路直连：上传 → 轮询 → 解压 → content_list 结构 | 否（花 MinerU 额度） |
-| `probe-astral-repair.py` | 星平面字符（U+1D400 起）从 PDF 文字层回填，全离线 | 否 |
 | `probe-figure-filter.py` | 装饰图三档判定（keep / drop / 灰区问 VLM），逐张导出 + HTML 对照（验课件类 PDF 才有意义） | 灰区才调（花 MinerU 额度） |
-| `probe-mineru-batches.py` | **离线**回归：多批解析不串页（每批独立目录、图片不互相覆盖）、4xx 立即失败 | 否（网络全是桩） |
-| `probe-chunking.py` | **离线**回归：空锚点段 / 超短碎片 / 超长代码块 | 否 |
-| `probe-inline-math.py` | **离线**回归：裸 LaTeX 包裹（表格行不许动、代码块不许动） | 否 |
-| `probe-vectors.py` | **离线**回归：改 Markdown 后向量必须失效重算、索引签名要变 | 否（embedding 被替换） |
 
 ## 四、检索与评测
 
@@ -196,7 +203,6 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-short-chunks.py` | 短正文 chunk 到底是什么 | 否 |
 | `probe-prod-verify.py` | 生产改动落地：TARGET=250 + rerank + 邻居扩展 | 否 |
 | `probe-citations.py` | 引用溯源后端：解析函数、`get_history` 重建 | 否 |
-| `probe-asset-render.py` | Markdown 图引用能不能真渲染（`?render=1`） | 否 |
 | `probe-search-variance.py` | web_search 结果长度波动拆成「MCP 包装」与「网页内容」 | 是 |
 | `eval-baseline-off.py` | 关掉上标还原后跑评测，重建改动前基线 | 是 |
 
@@ -219,7 +225,6 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-title-model.py` | 起标题用的是不是主模型同一个 provider | 否 |
 | `probe-title-schedule.py` | 起标题的节奏（第几轮重起） | 否 |
 | `probe-usage.py` | 能不能从 checkpoint 读到真实 token 用量 | 否 |
-| `probe-cassette.py` | 录制回放四条路径：record / replay / 未命中 / off | 否 |
 | `inspect-thread-tools.py` | 只读：某会话每次工具调用的参数与返回原文 | 否 |
 | `lesson-tool.py` | 教学：普通函数 vs `@tool` 差在哪 | 否 |
 
@@ -240,7 +245,6 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-summary-live.py` | 真模型跑 `summarize_history`，看早期事实有没有留住 | 是 |
 | `probe-summary-e2e.py` | 真实图里跑一遍摘要化 | 是 |
 | `probe-summary-echo.py` | 摘要会不会被模型原样复述（对照） | 是 |
-| `probe-token-estimate.py` | 标定 token 估算误差；断言工具结果没被转义成 `\u5faa` 发出去 | 是 |
 
 ## 七、账号、会话、位置
 
@@ -252,7 +256,6 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `probe-invite-api.py` | 邀请码的 HTTP 层：400 / 401 / 403 分得清 | 否 |
 | `probe-limits.py` | 配额与限流：边界、跨天、退还、假时钟推时间 | 否 |
 | `probe-limits-api.py` | 429 + `Retry-After`，以及「额度没了就不跑模型」 | 否 |
-| `probe-conversation-owners.py` | 会话归属（`conversations.py`） | 否 |
 | `probe-client-location.py` | 客户端位置这条链路 | 是 |
 
 ## 八、基础设施与微基准

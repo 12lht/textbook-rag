@@ -5,6 +5,8 @@
 #     pip install -r requirements-dev.txt
 #     ruff check .
 #     mypy                      # 读 pyproject.toml 的 [tool.mypy]
+#     pytest                    # 读 pyproject.toml 的 [tool.pytest.ini_options]
 
 ruff==0.15.15
 mypy==2.4.1
+pytest==9.0.3

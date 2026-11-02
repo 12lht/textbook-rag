@@ -104,7 +104,8 @@ python -m uvicorn api:app --host 127.0.0.1 --port 8000
 不配某个 Key 时对应的工具会自动关闭、不影响其余功能。
 
 ```bash
-python tests/run-offline.py     # 离线回归（不联网、不花钱）
+pytest                          # 回归测试（默认不跑需要外部资源的用例）
+pytest -m requires_model        # 加上真实模型调用（会花配额）
 python eval/run.py --tag v3     # 金标评测（调用真实模型）
 python cli.py                   # 命令行调试
 ruff check .                    # 静态检查（pip install -r requirements-dev.txt）

@@ -5,35 +5,23 @@
 - 213 条不足 5 字的正文段（「故」「则」「即」）；
 - 13 条超过 3000 字，最坏 36106 字（一条代码块把整章都装进去了）。
 
-跑法：python tests/probes/probe-chunking.py
+原 `tests/probes/probe-chunking.py`，2026-11-03 迁到 pytest。
 """
 from __future__ import annotations
 
 import re
-import sys
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+import documents
 
-import documents  # noqa: E402
-
-failures: list[str] = []
 ANCHOR_ONLY = re.compile(r"^(?:\s*<!--\s*(?:page|chapter):[^>]*-->\s*)+$")
-
-
-def check(label: str, ok: bool, detail: str = "") -> None:
-    print(f"{'PASS' if ok else 'FAIL'}  {label}{('  ' + detail) if detail else ''}")
-    if not ok:
-        failures.append(label)
 
 
 def body(text: str, size: int = 120) -> str:
     return (text * (size // max(1, len(text)) + 1))[:size]
 
 
-def main() -> int:
-    print("== 1. 未闭合的代码围栏不能吞掉后面几十页 ==\n")
+def test_unterminated_fence_does_not_swallow_pages() -> None:
+    """一个漏写的 ``` 曾把后面几十页全吞进代码块。"""
     markdown = "\n".join([
         "<!-- page:1 -->",
         "<!-- chapter:第 1 章 -->",
@@ -49,29 +37,35 @@ def main() -> int:
     chunks = documents.cut_chunks(markdown, "doc00001")
     kinds = [(c["kind"], c["content"][:24].replace("\n", " ")) for c in chunks]
     page2 = [c for c in chunks if "第二页的正文" in c["content"]]
-    check("第 2 页正文是 text 而不是 code", bool(page2) and page2[0]["kind"] == "text", str(kinds))
-    check("页码出现在正确位置", bool(page2) and page2[0]["page_start"] == 2,
-          str(page2[0]["page_start"]) if page2 else "没找到")
-    check("没有「只有锚点」的段落", not any(ANCHOR_ONLY.match(c["content"]) for c in chunks))
-    check("代码块还在（只收了自己那三行）",
-          any(c["kind"] == "code" and "def solve" in c["content"] for c in chunks), str(kinds))
 
-    print("\n== 2. 超长代码块按行切开 ==\n")
+    assert page2 and page2[0]["kind"] == "text", f"第 2 页正文变成了 {kinds}"
+    assert page2[0]["page_start"] == 2, page2[0]["page_start"]
+    assert not any(ANCHOR_ONLY.match(c["content"]) for c in chunks), "出现了只有锚点的空段"
+    assert any(c["kind"] == "code" and "def solve" in c["content"] for c in chunks), kinds
+
+
+def test_long_code_block_is_split_on_line_boundaries() -> None:
+    """超长代码块按行切开，且不能丢内容、不能切半行。"""
     listing = "\n".join(f"line_{i:04d} = compute({i})  # 这一行有一点注释让它长一些" for i in range(400))
     long_markdown = "\n".join(["<!-- page:1 -->", "```python", listing, "```"])
     chunks = documents.cut_chunks(long_markdown, "doc00002")
     code_chunks = [c for c in chunks if c["kind"] == "code"]
-    check("被切成多块", len(code_chunks) > 1, f"{len(code_chunks)} 块")
-    check("每块都不超过上限", all(len(c["content"]) <= documents.MAX_CODE_CHARS for c in code_chunks),
-          f"最长 {max(len(c['content']) for c in code_chunks)}")
-    rebuilt = "".join(c["content"] if c["content"].endswith("\n") else c["content"] + "\n"
-                      for c in code_chunks)
-    check("拼回去内容不丢", rebuilt.count("line_") == 400, f"{rebuilt.count('line_')} 行")
-    check("切点都在行首（没切半行）",
-          all(c["content"].lstrip().startswith("line_") for c in code_chunks),
-          str([c["content"][:12] for c in code_chunks[:3]]))
+    longest = max(len(c["content"]) for c in code_chunks)
 
-    print("\n== 3. 图后面的碎句要挂到下一段 ==\n")
+    assert len(code_chunks) > 1, f"{len(code_chunks)} 块"
+    assert longest <= documents.MAX_CODE_CHARS, f"最长 {longest} 超过上限 {documents.MAX_CODE_CHARS}"
+
+    rebuilt = "".join(
+        c["content"] if c["content"].endswith("\n") else c["content"] + "\n"
+        for c in code_chunks
+    )
+    assert rebuilt.count("line_") == 400, f"拼回去只剩 {rebuilt.count('line_')} 行"
+    assert all(c["content"].lstrip().startswith("line_") for c in code_chunks), \
+        f"切点不在行首：{[c['content'][:12] for c in code_chunks[:3]]}"
+
+
+def test_fragment_after_figure_is_merged_into_prose() -> None:
+    """图后面那种「故」开头的单字碎句，不能独立成段。"""
     fragment_markdown = "\n".join([
         "<!-- page:1 -->",
         "<!-- chapter:第 1 章 -->",
@@ -84,12 +78,15 @@ def main() -> int:
     ])
     chunks = documents.cut_chunks(fragment_markdown, "doc00003")
     tiny = [c for c in chunks if c["kind"] == "text" and len(c["content"]) < 5]
-    check("没有独立成条的碎句", tiny == [], str([c["content"] for c in tiny]))
     merged = [c for c in chunks if "故" in c["content"]]
-    check("碎句并进了正文", bool(merged) and "故" in merged[0]["content"]
-          and "抽样定理要求" in merged[0]["content"], str(merged[0]["content"][:30]) if merged else "没了")
 
-    print("\n== 3b. 被图夹住的碎片也要并走（流程图拆行）==\n")
+    assert tiny == [], f"碎句独立成段：{[c['content'] for c in tiny]}"
+    assert merged and "抽样定理要求" in merged[0]["content"], \
+        merged[0]["content"][:30] if merged else "碎句丢了"
+
+
+def test_fragment_between_figures_is_merged() -> None:
+    """被两张图夹住的碎片（流程图拆行）也要并走，但公式不能被并进正文。"""
     flowchart = "\n".join([
         "<!-- page:1 -->",
         "<!-- chapter:第 1 章 -->",
@@ -108,13 +105,16 @@ def main() -> int:
     ])
     chunks = documents.cut_chunks(flowchart, "doc00005")
     tiny = [c for c in chunks if c["kind"] == "text" and len(c["content"]) < 5]
-    check("图之间的碎行没有独立成段", tiny == [], str([c["content"] for c in tiny]))
-    check("碎行挂到了相邻正文",
-          any("开始" in c["content"] and "计算流程" in c["content"] for c in chunks),
-          str([c["content"][:20] for c in chunks if c["kind"] == "text"]))
-    check("公式没被并进正文", any(c["kind"] == "formula" and "P(A)=1" in c["content"] for c in chunks))
 
-    print("\n== 4. 正常文档的段数不受影响 ==\n")
+    assert tiny == [], f"图之间的碎行独立成段：{[c['content'] for c in tiny]}"
+    assert any("开始" in c["content"] and "计算流程" in c["content"] for c in chunks), \
+        f"碎行没挂到相邻正文：{[c['content'][:20] for c in chunks if c['kind'] == 'text']}"
+    assert any(c["kind"] == "formula" and "P(A)=1" in c["content"] for c in chunks), \
+        "公式被并进正文了"
+
+
+def test_normal_document_keeps_reasonable_chunks() -> None:
+    """正常文档不该被上述修补逻辑影响：段长合理、原文不丢、序号连续。"""
     normal = "\n".join(
         line
         for i in range(10)
@@ -126,19 +126,8 @@ def main() -> int:
     )
     chunks = documents.cut_chunks(normal, "doc00004")
     lengths = [len(c["content"]) for c in chunks]
-    check("段落长度都在合理区间（不碎片、不超长）",
-          bool(chunks) and all(documents.core.MIN_CHARS <= size <= documents.core.MAX_CHARS for size in lengths),
-          str(lengths))
-    check("原文没丢", sum(lengths) >= 10 * 100, f"合计 {sum(lengths)} 字")
-    check("序号连续", [c["seq"] for c in chunks] == list(range(len(chunks))))
 
-    print()
-    if failures:
-        print(f"{len(failures)} 项失败：" + "、".join(failures))
-        return 1
-    print("全部通过")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    assert chunks and all(documents.core.MIN_CHARS <= size <= documents.core.MAX_CHARS for size in lengths), \
+        f"段长越界：{lengths}"
+    assert sum(lengths) >= 10 * 100, f"原文丢了，合计只剩 {sum(lengths)} 字"
+    assert [c["seq"] for c in chunks] == list(range(len(chunks))), "序号不连续"
