@@ -2,7 +2,6 @@
   "metrics": {
     "样本数": 11,
     "用例数": 11,
-    "工具选择完全匹配率": 0.6364,
     "工具召回率": 1.0,
     "工具精确率": 0.803,
     "负例抑制率": null,
@@ -25,24 +24,18 @@
     "网页提取": {
       "样本数": 2,
       "通过数": 2,
-      "完全匹配数": 2,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 1.0
     },
     "定位": {
       "样本数": 3,
       "通过数": 3,
-      "完全匹配数": 3,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 1.0
     },
     "天气": {
       "样本数": 6,
       "通过数": 2,
-      "完全匹配数": 2,
-      "完全匹配率": 0.3333,
       "端到端通过率": 0.3333,
       "平均工具数": 1.8333
     }
@@ -104,7 +97,6 @@
         "web_extract"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -146,7 +138,6 @@
         "web_extract"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -188,7 +179,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -230,7 +220,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -272,7 +261,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -315,7 +303,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -367,7 +354,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -409,7 +395,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -452,7 +437,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -500,7 +484,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -549,7 +532,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.3333,
       "contains_ok": null,

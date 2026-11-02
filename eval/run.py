@@ -17,8 +17,6 @@
 
     工具选择合规率      必备工具全部调到，且没有任何「不被允许」的额外调用。
                         这是主指标 —— 判据是语义合规，不是集合相等。
-    严格集合相等率      实际集合 == 必备集合。保留作参考，但它会把合法的多工具组合
-                        判成错误（原因见下面「为什么不用严格集合相等」）。
     工具召回率          仅在有必备工具的样本上算，|必备∩实际| / |必备|
     工具精确率          仅在实际调用了工具的样本上算，|必备∩实际| / |实际|
     负例抑制率          必备集合为空时，确实一个工具都没调的占比（专治「凡事都调工具」）
@@ -29,8 +27,8 @@
     工具调用成功率      tool_result 事件里 status == success 的占比（langchain 标准字段）
     端到端通过率        选择合规 + expect_contains 满足 + 有回答文本 + 没抛异常
 
-为什么不用严格集合相等（2026-10-10 修正）：
-    最初用「实际调用集合 == 期望集合」。跑下来天气类只有 0.5，看着像模型在乱调工具。
+为什么用三档判定（2026-10-10 修正）：
+    最初按「实际调用集合 == 期望集合」判。跑下来天气类只有 0.5，看着像模型在乱调工具。
     但把 6 次运行的记录逐条摊开才发现，额外调用是**按措辞触发的稳定策略**：问
     「上海现在的气温」时 6/6 都不调 get_current_time，问「明天适合去广州出差吗」时
     6/6 都调。相对时间（今天 / 明天 / 未来三天）本来就需要一个锚点，这不是错误。
@@ -228,7 +226,6 @@ def judge_selection(expected: list[str], allowed: list[str], called: list[str]) 
         "redundant_tools": redundant,
         "metered_violations": [n for n in violations if n in METERED_TOOLS],
         "selection_ok": not missing and not violations,
-        "exact_match": expected_set == called_set,
     }
 
 
@@ -444,7 +441,6 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
         "样本数": samples,
         "用例数": len(cases),
         "工具选择合规率": _round(_rate([r["selection_ok"] for r in records])),
-        "严格集合相等率": _round(_rate([r["exact_match"] for r in records])),
         "工具召回率": _round(_mean([r["recall"] for r in positive if r["recall"] is not None])),
         "工具精确率": _round(_mean([r["precision"] for r in with_tools if r["precision"] is not None])),
         "负例抑制率": _round(_rate([not r["called_tools"] for r in negative])),
@@ -480,15 +476,13 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
     for record in records:
         bucket = by_category.setdefault(
             record["category"],
-            {"样本数": 0, "通过数": 0, "合规数": 0, "完全匹配数": 0, "_tools": []},
+            {"样本数": 0, "通过数": 0, "合规数": 0, "_tools": []},
         )
         bucket["样本数"] += 1
         bucket["通过数"] += 1 if record["e2e_ok"] else 0
         bucket["合规数"] += 1 if record["selection_ok"] else 0
-        bucket["完全匹配数"] += 1 if record["exact_match"] else 0
         bucket["_tools"].append(len(record["called_tools"]))
     for bucket in by_category.values():
-        bucket["完全匹配率"] = _round(bucket["完全匹配数"] / bucket["样本数"])
         bucket["合规率"] = _round(bucket["合规数"] / bucket["样本数"])
         bucket["端到端通过率"] = _round(bucket["通过数"] / bucket["样本数"])
         bucket["平均工具数"] = _round(_mean(bucket.pop("_tools")))
@@ -498,7 +492,6 @@ def aggregate(records: list[dict], cases: list[dict], config: dict, cassette_sta
         "by_category": by_category,
         "config": config,
         "failed_case_ids": sorted({r["case_id"] for r in records if not r["e2e_ok"]}),
-        "strict_failed_case_ids": sorted({r["case_id"] for r in records if not r["exact_match"]}),
         "unrecognized_tool_names": sorted({n for r in records for n in r["unrecognized_tool_names"]}),
         "errored_case_ids": sorted({r["case_id"] for r in records if r["error"]}),
     }
@@ -545,13 +538,13 @@ def print_report(summary: dict, records: list[dict], verbose: bool) -> None:
 
     _line("分类表现")
     print(
-        f"  {'分类':<18} {'样本':>4} {'合规率':>8} {'严格相等':>8} "
+        f"  {'分类':<18} {'样本':>4} {'合规率':>8} "
         f"{'端到端通过率':>12} {'平均工具数':>10}"
     )
     for category, bucket in summary["by_category"].items():
         print(
             f"  {category:<18} {bucket['样本数']:>4} "
-            f"{_fmt(bucket['合规率']):>8} {_fmt(bucket['完全匹配率']):>8} "
+            f"{_fmt(bucket['合规率']):>8} "
             f"{_fmt(bucket['端到端通过率']):>12} {_fmt(bucket['平均工具数']):>10}"
         )
 
@@ -619,27 +612,16 @@ def print_compare(current: dict, previous: dict, previous_label: str) -> None:
 
     old_categories = previous.get("by_category", {})
     if old_categories:
-        _line("分类通过率变化（左：合规率  右：严格集合相等率）")
-        print(f"  {'分类':<18} {'旧合规':>8} {'新合规':>8} {'旧严格':>8} {'新严格':>8}")
+        _line("分类合规率变化")
+        print(f"  {'分类':<18} {'旧合规':>8} {'新合规':>8}")
         for category, bucket in current["by_category"].items():
             old_bucket = old_categories.get(category)
             if not old_bucket:
                 continue
             print(
                 f"  {category:<18} {_fmt(old_bucket.get('合规率')):>8} "
-                f"{_fmt(bucket.get('合规率')):>8} "
-                f"{_fmt(old_bucket.get('完全匹配率')):>8} "
-                f"{_fmt(bucket.get('完全匹配率')):>8}"
+                f"{_fmt(bucket.get('合规率')):>8}"
             )
-
-    old_strict_failed = set(previous.get("strict_failed_case_ids", []))
-    new_failed = set(current.get("failed_case_ids", []))
-    if old_strict_failed:
-        rescued = sorted(old_strict_failed - new_failed)
-        if rescued:
-            _line("被三档口径救回来（严格口径判错、按配额口径其实合规）")
-            for case_id in rescued:
-                print(f"  {case_id}")
 
     old_records = {(r["case_id"], r.get("repeat", 0)): r for r in previous.get("records", [])}
     new_records = {(r["case_id"], r.get("repeat", 0)): r for r in current.get("records", [])}

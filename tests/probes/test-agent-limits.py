@@ -131,12 +131,13 @@ def main() -> None:
         memory_enabled=True,
         answer_now=True,
     )
-    check("没有摘要也要重建系统消息（不能走快路径）",
-          forced[0].content != agent_core.SYSTEM_PROMPT)
-    check("里面有「用现有信息回答」的指令",
-          "工具调用次数已经用完" in forced[0].content)
+    check("system 保持原样（收尾指令不进 system）",
+          forced[0].content == agent_core.SYSTEM_PROMPT,
+          f"first={forced[0].content[:24]!r}")
+    check("收尾指令追加在消息末尾",
+          "工具调用次数已经用完" in forced[-1].content)
     check("明确说了信息不足时怎么办",
-          "明确说明缺什么" in forced[0].content)
+          "明确说明缺什么" in forced[-1].content)
     check("没提「摘要」（这次本来就没有）",
           "<摘要>" not in forced[0].content and "更早内容的摘要" not in forced[0].content)
     check("原始 state 没被改动（只改发出去的）",

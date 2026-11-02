@@ -1,0 +1,1734 @@
+{
+  "metrics": {
+    "样本数": 32,
+    "用例数": 32,
+    "工具选择合规率": 1.0,
+    "工具召回率": 1.0,
+    "工具精确率": 0.8409,
+    "负例抑制率": 1.0,
+    "配额违规调用数": 0,
+    "冗余调用数": 8,
+    "平均冗余调用数": 0.25,
+    "工具调用成功率": 1.0,
+    "端到端通过率": 1.0,
+    "平均调用工具数": 1.0312,
+    "TTFT P50 (ms)": 1114.7,
+    "TTFT P95 (ms)": 9447.2,
+    "端到端 P50 (ms)": 2764.9,
+    "端到端 P95 (ms)": 17698.2,
+    "总 token 消耗": 108626,
+    "平均每用例 token": 3394.6,
+    "平均模型调用次数": 1.875,
+    "输入 token 占比": 0.8754,
+    "重复的 tool_call 事件数": 0,
+    "外部调用录制": 0,
+    "外部调用命中": 0,
+    "外部调用未命中": 0
+  },
+  "by_category": {
+    "工具边界": {
+      "样本数": 2,
+      "通过数": 2,
+      "合规数": 2,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.5
+    },
+    "网页提取": {
+      "样本数": 2,
+      "通过数": 2,
+      "合规数": 2,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.0
+    },
+    "定位": {
+      "样本数": 3,
+      "通过数": 3,
+      "合规数": 3,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.0
+    },
+    "多工具": {
+      "样本数": 3,
+      "通过数": 3,
+      "合规数": 3,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 2.3333
+    },
+    "负例（不应调工具）": {
+      "样本数": 10,
+      "通过数": 10,
+      "合规数": 10,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 0.0
+    },
+    "搜索": {
+      "样本数": 3,
+      "通过数": 3,
+      "合规数": 3,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.6667
+    },
+    "时间": {
+      "样本数": 3,
+      "通过数": 3,
+      "合规数": 3,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.0
+    },
+    "天气": {
+      "样本数": 6,
+      "通过数": 6,
+      "合规数": 6,
+      "合规率": 1.0,
+      "端到端通过率": 1.0,
+      "平均工具数": 1.6667
+    }
+  },
+  "config": {
+    "tag": "baseline-20261027",
+    "repeat": 1,
+    "concurrency": 1,
+    "cases_file": "eval\\cases.jsonl",
+    "category_filter": null,
+    "cassette_mode": "off",
+    "cassette": null,
+    "client_location": "北京市"
+  },
+  "failed_case_ids": [],
+  "unrecognized_tool_names": [],
+  "errored_case_ids": [],
+  "tag": "baseline-20261027",
+  "created_at": "2026-10-27T16:55:35+08:00",
+  "environment": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "temperature": 0.5,
+    "title_model": "deepseek-flash",
+    "keys_present": {
+      "DEEPSEEK_API_KEY": true,
+      "AMAP_API_KEY": true,
+      "TAVILY_API_KEY": true,
+      "GLM_API_KEY": true
+    },
+    "python": "3.11.16",
+    "langgraph": "1.2.12",
+    "langchain": "1.4.2"
+  },
+  "wall_ms": 175158.8,
+  "cassette": {
+    "mode": "off",
+    "path": null,
+    "hits": 0,
+    "misses": 0,
+    "records": 0,
+    "total_interactions": 0
+  },
+  "records": [
+    {
+      "case_id": "edge-01",
+      "category": "工具边界",
+      "repeat": 0,
+      "query": "查一下「阿斯加德」这个城市的天气。",
+      "thread_id": "eval-b6e603-edge-01-0-f1ec18",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location",
+        "web_search"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time",
+        "web_search",
+        "get_user_location"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "web_search"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 3,
+      "tool_result_events": 3,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "34e0fef327e545c1",
+      "tool_success": [
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 7199,
+        "output_tokens": 1004,
+        "total_tokens": 8203,
+        "model_calls": 3
+      },
+      "ttft_ms": 12302.9,
+      "total_ms": 14580.8,
+      "answer_chars": 489,
+      "answer": "我查了一下，但结果有点“跨次元”的问题：**“阿斯加德”（Asgard，Ásgarðr）并不是现实中存在的城市**。它是北欧神话里阿萨神族的居所，也就是雷神索尔、奥丁、洛基的家乡，在漫威宇宙和《战神》等游戏里也经常出现。它只存在于神话与流行文化中，没有气象站可以查询天气。\n\n另外，我想说明一下，我刚才的查询工具确实返回了一条数据，**但那条数据不属于阿斯加德**：\n\n> 青海果洛州玛沁县：多云，13°C，湿度 24%，西风 5 级\n\n这显然是因为系统把“阿斯加德”模糊匹配到了某个不相关的地名。如果我直接把这条数据的结果说成是阿斯加德的天气，那就不准确了，所以我没有把它当作答案。\n\n如果你想了解其他地方的天气，可以告诉我具体是哪个位置，比如：\n- 北欧相关的真实地点（如挪威的奥勒松 Ålesund、瑞典乌普萨拉，都是北欧神话文化圈）\n- 或者你所在地的天气（我可以帮你查一下当前城市）\n\n如果你是在写小说、做游戏设定或玩梗，想给阿斯加德“编”一个天气，我也可以帮你设计一套符合神话氛围的设定，比如“比弗罗斯特彩虹桥附近有极光、瓦尔哈拉常年晴朗、约顿海姆方向有暴雪”这类。",
+      "error": null
+    },
+    {
+      "case_id": "edge-02",
+      "category": "工具边界",
+      "repeat": 0,
+      "query": "读一下 https://this-domain-should-not-exist-12345.com 的内容。",
+      "thread_id": "eval-b6e603-edge-02-0-4f30df",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_extract"
+      ],
+      "called_tools": [
+        "web_extract"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "web_extract",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "7c524c34d9f8b8fd",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1245,
+        "output_tokens": 181,
+        "total_tokens": 1426,
+        "model_calls": 2
+      },
+      "ttft_ms": 801.2,
+      "total_ms": 4099.2,
+      "answer_chars": 232,
+      "answer": "我来帮你抓取一下。抓取失败了，这个地址读不到内容。\n\n错误信息只有一句「无法读取网页」，没有更多细节。从域名本身看（`this-domain-should-not-exist-12345.com`），它很可能根本不存在或没有解析 —— 不过我没法从这条错误里区分是「域名不存在」「DNS 解析失败」还是「页面返回了错误状态」这几类原因。\n\n如果你想让我继续，可以：\n- 确认一下网址是否拼写正确、有没有漏掉路径；\n- 或者告诉我你想找的是什么内容，我可以帮你搜索。",
+      "error": null
+    },
+    {
+      "case_id": "extract-01",
+      "category": "网页提取",
+      "repeat": 0,
+      "query": "读一下 https://example.com 这个网页的正文。",
+      "thread_id": "eval-b6e603-extract-01-0-31db64",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_extract"
+      ],
+      "called_tools": [
+        "web_extract"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "web_extract",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "191e37dbb0e26c1b",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1277,
+        "output_tokens": 251,
+        "total_tokens": 1528,
+        "model_calls": 2
+      },
+      "ttft_ms": 7110.7,
+      "total_ms": 7628.8,
+      "answer_chars": 345,
+      "answer": "网页正文如下（https://example.com）：\n\n> This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.\n\n翻译：本域名用于文档示例，无需授权即可使用；它不是一项服务，请不要依赖它进行测试和监控。\n\n补充说明：example.com 是 IANA 保留的示例域名，页面本身只有标题为“Example Domain”的极简内容，没有实际的业务信息。如果你需要查真实资料，可以告诉我具体主题，我可以帮你搜索或读取其他网页。",
+      "error": null
+    },
+    {
+      "case_id": "extract-02",
+      "category": "网页提取",
+      "repeat": 0,
+      "query": "把 https://www.python.org 的内容提取出来。",
+      "thread_id": "eval-b6e603-extract-02-0-3acca8",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_extract"
+      ],
+      "called_tools": [
+        "web_extract"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "web_extract",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "f36ff7ae62aa1faf",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 4828,
+        "output_tokens": 1127,
+        "total_tokens": 5955,
+        "model_calls": 2
+      },
+      "ttft_ms": 662.0,
+      "total_ms": 8609.4,
+      "answer_chars": 2490,
+      "answer": "我来提取那个页面的内容。已提取 https://www.python.org 的页面内容。这是一个 JS 渲染站点，抓取到的是无 JS 时的回退版本（会包含完整导航和主体内容）。整理如下：\n\n---\n\n## 页面提示\n> **Notice:** This page displays a fallback because interactive scripts did not run.\n（页面显示的是降级版本，因为交互脚本未运行）\n\n## 顶部导航 / Python 网络\nPython · PSF · Docs · PyPI · Jobs · Community\n右侧：Donate、搜索框、字号调节（Smaller / Larger / Reset）、社交（LinkedIn、Mastodon、IRC、Twitter）、Sign In / Sign Up\n\n## 主导航栏目\n| 栏目 | 要点 | 子项 |\n|---|---|---|\n| **About** | \"Python 是一门让你更快工作、更有效集成系统的编程语言\" | Applications、Quotes、Getting Started、Help |\n| **Downloads** | 提供源码与各平台安装包 | All releases、Source code、Windows、macOS、Android、iOS、Othe",
+      "error": null
+    },
+    {
+      "case_id": "location-01",
+      "category": "定位",
+      "repeat": 0,
+      "query": "我现在在哪个城市？",
+      "thread_id": "eval-b6e603-location-01-0-813084",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "c297b5a39db78c75",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1187,
+        "output_tokens": 59,
+        "total_tokens": 1246,
+        "model_calls": 2
+      },
+      "ttft_ms": 1506.9,
+      "total_ms": 1618.0,
+      "answer_chars": 45,
+      "answer": "你现在位于**北京市**。\n\n有什么可以帮你的吗？比如查一下北京的实时天气或未来几天预报。",
+      "error": null
+    },
+    {
+      "case_id": "location-02",
+      "category": "定位",
+      "repeat": 0,
+      "query": "帮我定位一下我当前的位置。",
+      "thread_id": "eval-b6e603-location-02-0-f6a234",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "c297b5a39db78c75",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1202,
+        "output_tokens": 169,
+        "total_tokens": 1371,
+        "model_calls": 2
+      },
+      "ttft_ms": 2133.8,
+      "total_ms": 2346.8,
+      "answer_chars": 70,
+      "answer": "根据你客户端授权提供的位置信息，你当前所在的位置是：**北京市**。\n\n需要我帮你查一下北京的实时天气、未来几天预报，或者附近的相关信息吗？",
+      "error": null
+    },
+    {
+      "case_id": "location-03",
+      "category": "定位",
+      "repeat": 0,
+      "query": "我这里属于哪个省？",
+      "thread_id": "eval-b6e603-location-03-0-903449",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_user_location"
+      ],
+      "called_tools": [
+        "get_user_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "c297b5a39db78c75",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1203,
+        "output_tokens": 94,
+        "total_tokens": 1297,
+        "model_calls": 2
+      },
+      "ttft_ms": 746.3,
+      "total_ms": 1984.7,
+      "answer_chars": 100,
+      "answer": "我来获取一下你的位置信息。根据你授权提供的当前位置，你在**北京市**。\n\n北京市是直辖市，不属于任何省份——它本身就是省级行政区，直接由中央政府管辖。\n\n需要我帮你查一下北京的天气，或者别的什么吗？",
+      "error": null
+    },
+    {
+      "case_id": "multi-01",
+      "category": "多工具",
+      "repeat": 0,
+      "query": "我这里今天的天气怎么样？",
+      "thread_id": "eval-b6e603-multi-01-0-534529",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_user_location",
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_user_location",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 3,
+      "tool_result_events": 3,
+      "tool_results": [
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "86fcab2f6cb59bbe",
+      "tool_success": [
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 2129,
+        "output_tokens": 374,
+        "total_tokens": 2503,
+        "model_calls": 3
+      },
+      "ttft_ms": 762.6,
+      "total_ms": 4739.0,
+      "answer_chars": 287,
+      "answer": "我先获取一下你的位置信息。北京今天（10月27日）的天气情况：\n\n**当前实况**（16:39 更新）\n- 天气：晴\n- 气温：14°C\n- 湿度：14%（非常干燥）\n- 风：北风 4 级\n\n**今日全天**\n- 晴到晴，气温 1~16°C，西北风 1–3 级\n\n几点提醒：\n- 昼夜温差较大（早晚只有 1~4°C 左右），出门记得带件外套。\n- 湿度很低，注意多补水、保湿，也要留意用火安全。\n- 风有点大（当前 4 级），体感会比气温偏凉。\n\n接下来几天也都是晴天为主，气温逐步回升：28 日 4~15°C，29 日 5~19°C，30 日 5~20°C（夜间转多云）。",
+      "error": null
+    },
+    {
+      "case_id": "multi-02",
+      "category": "多工具",
+      "repeat": 0,
+      "query": "现在几点？顺便告诉我北京的天气。",
+      "thread_id": "eval-b6e603-multi-02-0-c5139e",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "7c9d75e3f13e72cd",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 1286,
+        "output_tokens": 185,
+        "total_tokens": 1471,
+        "model_calls": 2
+      },
+      "ttft_ms": 890.8,
+      "total_ms": 3346.7,
+      "answer_chars": 157,
+      "answer": "我来帮你查一下。现在是 **2026 年 10 月 27 日 16:54**（下午快 5 点）。\n\n北京当前天气：\n- **晴**，气温 **14°C**\n- 湿度 14%（很干燥，注意补水）\n- 北风 4 级\n- 数据更新于 16:39\n\n天气晴朗但风有点凉，傍晚出门建议加件外套。需要我再看看未来几天的预报吗？",
+      "error": null
+    },
+    {
+      "case_id": "multi-03",
+      "category": "多工具",
+      "repeat": 0,
+      "query": "先搜一下今天的科技新闻，再告诉我上海现在的天气。",
+      "thread_id": "eval-b6e603-multi-03-0-b67691",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_search",
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location",
+        "web_search"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.6667,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 6,
+      "tool_result_events": 6,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "fcd99c1fc040c265",
+      "tool_success": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 22072,
+        "output_tokens": 1328,
+        "total_tokens": 23400,
+        "model_calls": 3
+      },
+      "ttft_ms": 19633.1,
+      "total_ms": 21508.3,
+      "answer_chars": 607,
+      "answer": "**今日科技新闻（2026年10月27日）**\n\n1. **苹果首款折叠屏 iPhone Duo 发售后问题不断**  \n   用户反馈铰链开裂、屏幕裂纹，部分应用尚未适配；开售两天后，部分电商渠道已低于首发价。苹果承认少量设备受影响。\n\n2. **Anthropic 向美国 SEC 公开提交招股书**  \n   据财新报道，其上半年收入同比增长约 **1300%**，AI 公司上市进程受到关注。\n\n3. **Meta 拟最高融资 950 亿美元加码 AI**  \n   首期计划通过普通股和优先股筹集 **350 亿美元**，用于 AI 基础设施；英伟达、AMD、博通有意认购最高 50 亿美元股份。\n\n4. **三季度中国手机市场“量跌价升”**  \n   IDC 数据：出货量约 **5806 万台，同比下降 15.2%**；华为以 21.1% 份额居首，苹果 17.8% 第二，600 美元以上高端机份额继续扩大。\n\n5. **上海发布卫星互联网产业行动方案**  \n   提出到 **2030 年在轨卫星总数超过 3000 颗**，强化卫星互联网技术攻关和产业布局。\n\n**上海当前天气**\n\n- **天气：晴**\n- **气温：19°C**\n- **湿度：52%**\n- **风向风力：东南风，≤3级**\n- **更新时间：16:33**\n\n当前体感比较舒适，傍晚后可能稍凉，外出可以",
+      "error": null
+    },
+    {
+      "case_id": "negative-01",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "你好",
+      "thread_id": "eval-b6e603-negative-01-0-c465b3",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 563,
+        "output_tokens": 49,
+        "total_tokens": 612,
+        "model_calls": 1
+      },
+      "ttft_ms": 735.3,
+      "total_ms": 1091.3,
+      "answer_chars": 77,
+      "answer": "你好！有什么可以帮你的吗？😊\n\n比如：\n- 查天气（需要告诉我城市，或者我帮你定位当前城市）\n- 了解新闻或搜索资料\n- 看看现在几点\n\n直接说需求就行～",
+      "error": null
+    },
+    {
+      "case_id": "negative-02",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "你是谁？",
+      "thread_id": "eval-b6e603-negative-02-0-b77f81",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 564,
+        "output_tokens": 155,
+        "total_tokens": 719,
+        "model_calls": 1
+      },
+      "ttft_ms": 758.2,
+      "total_ms": 1503.8,
+      "answer_chars": 207,
+      "answer": "你好！我是一个 AI 助手，可以帮你处理各种问题。除了回答一般性问题外，我还能调用一些实用工具，比如：\n\n- **查天气**：查询中国城市的实时天气或未来几天预报\n- **查时间**：获取当前时间\n- **定位**：获取你当前所在的城市（需要你在客户端授权）\n- **联网搜索**：搜索网页信息、新闻和近期事件，也能打开网页阅读正文内容\n\n有什么我可以帮你的吗？比如查天气、搜资料，或者聊聊你想了解的话题都可以 🙂",
+      "error": null
+    },
+    {
+      "case_id": "negative-03",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "1 加 1 等于几？",
+      "thread_id": "eval-b6e603-negative-03-0-83500e",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 571,
+        "output_tokens": 12,
+        "total_tokens": 583,
+        "model_calls": 1
+      },
+      "ttft_ms": 704.0,
+      "total_ms": 756.9,
+      "answer_chars": 15,
+      "answer": "1 加 1 等于 **2**。",
+      "error": null
+    },
+    {
+      "case_id": "negative-04",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "帮我写一句关于秋天的诗。",
+      "thread_id": "eval-b6e603-negative-04-0-8f86b2",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 569,
+        "output_tokens": 131,
+        "total_tokens": 700,
+        "model_calls": 1
+      },
+      "ttft_ms": 934.5,
+      "total_ms": 1820.9,
+      "answer_chars": 120,
+      "answer": "当然，给你一句：\n\n> **一夜西风过，满城黄叶声。**\n\n如果你想要别的味道，也可以挑：\n\n- 温柔些的：*风把秋天吹成了信，落叶是写给你的句子。*\n- 清冷些的：*霜白侵阶月入户，半庭秋色半庭凉。*\n\n要不要我按你的心情再调整一下风格？",
+      "error": null
+    },
+    {
+      "case_id": "negative-05",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "谢谢，辛苦了。",
+      "thread_id": "eval-b6e603-negative-05-0-a99a54",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 566,
+        "output_tokens": 113,
+        "total_tokens": 679,
+        "model_calls": 1
+      },
+      "ttft_ms": 1068.8,
+      "total_ms": 1550.3,
+      "answer_chars": 106,
+      "answer": "不客气！不过好像我们还没开始聊具体的事呢 😊\n\n有什么可以帮你的吗？我可以帮你：\n\n- 查天气（实时/未来几天预报）\n- 查你当前所在的城市\n- 搜索网络信息、新闻\n- 打开网页读正文内容\n\n需要的话直接说就行～",
+      "error": null
+    },
+    {
+      "case_id": "negative-06",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "解释一下什么是递归。",
+      "thread_id": "eval-b6e603-negative-06-0-ac8ef7",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 567,
+        "output_tokens": 943,
+        "total_tokens": 1510,
+        "model_calls": 1
+      },
+      "ttft_ms": 873.7,
+      "total_ms": 6796.9,
+      "answer_chars": 1740,
+      "answer": "## 递归（Recursion）\n\n**一句话定义**：递归是指函数在执行时直接或间接地调用自身，把一个大问题拆成规模更小的同类问题，直到遇到能在不继续拆分的情况下直接解答的“最小问题”。\n\n### 两个必需的部分\n\n| 组成部分 | 作用 | 缺少会怎样 |\n|---|---|---|\n| **基线条件（base case）** | 规定何时停止递归，直接返回结果 | 无限递归 → 栈溢出（stack overflow） |\n| **递归条件（recursive case）** | 把问题缩小规模，并调用自身 | 无法推进 → 同样死循环 |\n\n### 最经典的例子：阶乘\n\n```\nfactorial(n):\n    if n == 0:            # 基线条件\n        return 1\n    return n * factorial(n - 1)   # 递归条件：规模从 n 缩小到 n-1\n```\n\n`factorial(4)` 的展开过程：\n\n```\nfactorial(4) = 4 * factorial(3)\n             = 4 * (3 * factorial(2))\n             = 4 * (3 * (2 * factorial(1)))\n             = 4 * (3 * (2 * (1 * facto",
+      "error": null
+    },
+    {
+      "case_id": "negative-07",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "给我讲个冷笑话。",
+      "thread_id": "eval-b6e603-negative-07-0-599e93",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 568,
+        "output_tokens": 219,
+        "total_tokens": 787,
+        "model_calls": 1
+      },
+      "ttft_ms": 2100.9,
+      "total_ms": 2768.4,
+      "answer_chars": 126,
+      "answer": "🐧 **一只小企鹅问妈妈：**\n\n“妈妈，我真的是企鹅吗？”\n“是啊，宝贝。”\n\n“那我真的是企鹅吗？”\n“当然是真的，怎么了？”\n\n“……因为我好冷。”\n\n—— 好，这笑话本身也是真的冷 🧊\n\n要不要再来一个更冷的？（温馨提示：冷气过量，请自备外套）",
+      "error": null
+    },
+    {
+      "case_id": "negative-08",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "把这句话翻译成英文：今天天气不错。",
+      "thread_id": "eval-b6e603-negative-08-0-8a46b5",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 572,
+        "output_tokens": 7,
+        "total_tokens": 579,
+        "model_calls": 1
+      },
+      "ttft_ms": 809.2,
+      "total_ms": 839.2,
+      "answer_chars": 26,
+      "answer": "The weather is nice today.",
+      "error": null
+    },
+    {
+      "case_id": "negative-09",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "用 Python 写一个快速排序。",
+      "thread_id": "eval-b6e603-negative-09-0-8c6fdb",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 570,
+        "output_tokens": 1404,
+        "total_tokens": 1974,
+        "model_calls": 1
+      },
+      "ttft_ms": 3356.1,
+      "total_ms": 7399.0,
+      "answer_chars": 2064,
+      "answer": "## 1. 最易读的版本（返回新列表，不改原数组）\n\n```python\ndef quicksort(arr):\n    \"\"\"返回一个排好序的新列表，不修改传入的 arr\"\"\"\n    if len(arr) <= 1:\n        return list(arr)\n    pivot = arr[len(arr) // 2]\n    left   = [x for x in arr if x < pivot]\n    mid    = [x for x in arr if x == pivot]   # 单独处理相等元素，避免死循环\n    right  = [x for x in arr if x > pivot]\n    return quicksort(left) + mid + quicksort(right)\n\n\nprint(quicksort([3, 6, 8, 10, 1, 2, 1]))\n# [1, 1, 2, 3, 6, 8, 10]\n```\n\n优点：写法简单，不会出错，也便于理解快排思路。缺点：每层都要新建列表，空间开销是 O(n log n)。\n\n## 2. 原地版（工程上更常用）\n\n关键改进：**随机选 pivot** 和**只递归较小的一半**。前者用于避免遇到已排序数据时退化成 O(n²)，后者保证递归栈深度是 O(log n)。\n\n```pyt",
+      "error": null
+    },
+    {
+      "case_id": "negative-10",
+      "category": "负例（不应调工具）",
+      "repeat": 0,
+      "query": "我喜欢你。",
+      "thread_id": "eval-b6e603-negative-10-0-daeaf5",
+      "client_location": "北京市",
+      "expected_tools": [],
+      "called_tools": [],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": null,
+      "precision": null,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 0,
+      "tool_result_events": 0,
+      "tool_results": [],
+      "tool_output_digest": null,
+      "tool_success": [],
+      "usage": {
+        "input_tokens": 565,
+        "output_tokens": 144,
+        "total_tokens": 709,
+        "model_calls": 1
+      },
+      "ttft_ms": 1276.2,
+      "total_ms": 1936.4,
+      "answer_chars": 126,
+      "answer": "谢谢你这么说，听上去挺温暖的 😊\n\n不过我也想诚实地讲一句：我是 AI，没有真实的感情，也没法用同样的方式“喜欢”你回去。但我确实会在每次对话里认真待你——你问的事我会好好查、好好想，你随口聊聊我也乐意陪着。\n\n今天想聊点什么？或者有什么我能帮上忙的？",
+      "error": null
+    },
+    {
+      "case_id": "search-01",
+      "category": "搜索",
+      "repeat": 0,
+      "query": "帮我搜一下最近有什么 AI 领域的新闻。",
+      "thread_id": "eval-b6e603-search-01-0-2bdbf0",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_search"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "web_search"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 5,
+      "tool_result_events": 5,
+      "tool_results": [
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "d8e8a6298dfd08d6",
+      "tool_success": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 20723,
+        "output_tokens": 1795,
+        "total_tokens": 22518,
+        "model_calls": 3
+      },
+      "ttft_ms": 808.4,
+      "total_ms": 29905.1,
+      "answer_chars": 2338,
+      "answer": "我来帮你搜索最近 AI 领域的新闻。以下是最近（截至今天 2026 年 10 月 27 日）AI 领域的几条主要新闻，我按主题分了类：\n\n---\n\n## 🚀 大模型动态\n\n**OpenAI 发布 GPT-6.1 Terra（10 月 27 日）**\n- 定位是「快速、高效的中端模型」，主打**视觉推理 + 精准操作电脑**，可跨应用理解屏幕内容并执行操作，适用于写方案、看技术图纸、填表、剪视频等办公场景。\n- 价格大降：标准 API 定价为输入 $1、缓存输入 $0.05、输出 $5（每百万 token），比 GPT-5.6 Terra 和 GPT-6.1 Sol **低 50%**；官方称单任务成本约为旗舰 GPT-6 Astra 的 1/10。\n- 在 Agents' Last Exam 上成绩与 GPT-6 Astra 持平；事实错误率从 53.6% 降至 16.7%（低推理强度），最高强度下仅 4.3%。\n- 已在 ChatGPT Work、Codex 向 Plus/Pro/Enterprise/Edu 用户开放，API 模型 ID 为 `gpt-6.1-terra`。\n- 不过反响一般：不少用户吐槽「我们要的是能打 Claude Opus 5.5 的旗舰，不是又一个性价比中端款」。安全评估上，该模型在网络安全维度达到「Critical」级别阈值。\n\n**国产开源模型**\n",
+      "error": null
+    },
+    {
+      "case_id": "search-02",
+      "category": "搜索",
+      "repeat": 0,
+      "query": "查一下 LangGraph 是什么。",
+      "thread_id": "eval-b6e603-search-02-0-cdbf78",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_search"
+      ],
+      "called_tools": [
+        "web_search"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "web_search",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "d84c9324326dbd76",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 6089,
+        "output_tokens": 987,
+        "total_tokens": 7076,
+        "model_calls": 2
+      },
+      "ttft_ms": 740.4,
+      "total_ms": 13082.4,
+      "answer_chars": 1780,
+      "answer": "我来查一下 LangGraph 的最新资料。## LangGraph 一句话概括\n\n**LangGraph 是 LangChain 团队开发的开源「低层智能体编排框架（runtime）」，用来构建、管理和部署长时间运行、有状态的 AI 智能体工作流。** 它把 AI 工作流建模成一张**图（Graph）**，而不是一条链。\n\n---\n\n### 核心机制：三个概念\n\n| 概念 | 含义 |\n|---|---|\n| **State（状态）** | 一个贯穿整个流程共享的数据对象（通常是消息列表或自定义结构），每个节点执行后都会更新它 |\n| **Node（节点）** | 一个执行步骤，可以是调用 LLM、执行工具函数、纯 Python 逻辑 |\n| **Edge（边）** | 节点之间的流转规则，支持**条件分支**和**循环** |\n\n```\n        ┌─────────┐\n        │  LLM    │◄────┐\n        └────┬────┘     │ 循环\n     有工具调用? │        │\n        ┌────▼────┐     │\n        │ ToolNode│─────┘\n        └────┬────┘\n             │ 没有\n        ┌────▼────┐\n        │  END  ",
+      "error": null
+    },
+    {
+      "case_id": "search-03",
+      "category": "搜索",
+      "repeat": 0,
+      "query": "2026 年世界杯在哪些城市举办？",
+      "thread_id": "eval-b6e603-search-03-0-fdfa49",
+      "client_location": "北京市",
+      "expected_tools": [
+        "web_search"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "web_search"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "web_search",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "bfdca19a15314e10",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 5605,
+        "output_tokens": 807,
+        "total_tokens": 6412,
+        "model_calls": 2
+      },
+      "ttft_ms": 6683.0,
+      "total_ms": 8640.8,
+      "answer_chars": 655,
+      "answer": "2026 年世界杯由**美国、加拿大、墨西哥**三国联合举办，也是历史上第一届有 48 支球队参赛的世界杯。16 座主办城市如下：\n\n**美国（11 座）**\n| 城市 | 球场 |\n|---|---|\n| 纽约/新泽西 | 大都会人寿体育场（MetLife，承办决赛）|\n| 达拉斯 | AT&T 体育场（承办半决赛）|\n| 亚特兰大 | 梅赛德斯-奔驰体育场（承办半决赛）|\n| 洛杉矶 | SoFi 体育场 |\n| 迈阿密 | 硬石体育场（承办三四名决赛）|\n| 堪萨斯城 | 箭头体育场 |\n| 休斯敦 | NRG 体育场 |\n| 旧金山湾区 | 李维斯体育场 |\n| 西雅图 | 流明球场 |\n| 费城 | 林肯金融球场 |\n| 波士顿 | 吉列体育场 |\n\n**加拿大（2 座）**\n- 多伦多 —— BMO 球场\n- 温哥华 —— BC 不列颠哥伦比亚体育场\n\n**墨西哥（3 座）**\n- 墨西哥城 —— 阿兹特克体育场（承办揭幕战，也是史上第一座举办过三届世界杯的球场）\n- 瓜达拉哈拉 —— 阿克伦体育场\n- 蒙特雷 —— BBVA 体育场\n\n几点补充：\n- 赛事于 2026 年 6 月 11 日在墨西哥城开幕，7 月 19 日在纽约/新泽西的大都会人寿体育场进行决赛，共踢 104 场比赛。\n- 按场次分配：美国 60 场，墨西哥和加拿大各 10 场。\n- 今天是 2026 ",
+      "error": null
+    },
+    {
+      "case_id": "time-01",
+      "category": "时间",
+      "repeat": 0,
+      "query": "现在几点了？",
+      "thread_id": "eval-b6e603-time-01-0-a297d1",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_current_time"
+      ],
+      "called_tools": [
+        "get_current_time"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "a3b35b488875696f",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1179,
+        "output_tokens": 42,
+        "total_tokens": 1221,
+        "model_calls": 2
+      },
+      "ttft_ms": 1592.5,
+      "total_ms": 1690.6,
+      "answer_chars": 32,
+      "answer": "现在是 **2026年10月27日 16:53**，星期二下午。",
+      "error": null
+    },
+    {
+      "case_id": "time-02",
+      "category": "时间",
+      "repeat": 0,
+      "query": "今天是什么日期？",
+      "thread_id": "eval-b6e603-time-02-0-9678ff",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_current_time"
+      ],
+      "called_tools": [
+        "get_current_time"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "6478feac173720a5",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1179,
+        "output_tokens": 60,
+        "total_tokens": 1239,
+        "model_calls": 2
+      },
+      "ttft_ms": 1547.4,
+      "total_ms": 1765.7,
+      "answer_chars": 64,
+      "answer": "今天是 **2026年10月27日**（星期二）。\n\n现在时间是 16:53 左右。需要我帮你看天气、安排行程，或者查点什么吗？",
+      "error": null
+    },
+    {
+      "case_id": "time-03",
+      "category": "时间",
+      "repeat": 0,
+      "query": "现在精确到秒的时间是多少？",
+      "thread_id": "eval-b6e603-time-03-0-2c924a",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_current_time"
+      ],
+      "called_tools": [
+        "get_current_time"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "cb9e8f2a05cd9570",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1203,
+        "output_tokens": 95,
+        "total_tokens": 1298,
+        "model_calls": 2
+      },
+      "ttft_ms": 1539.9,
+      "total_ms": 1716.9,
+      "answer_chars": 83,
+      "answer": "当前时间是：**2026 年 10 月 27 日 16 时 53 分 11 秒**（2026-10-27 16:53:11）。\n\n需要我顺便看一下你所在城市的天气吗？",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-01",
+      "category": "天气",
+      "repeat": 0,
+      "query": "北京今天天气怎么样？",
+      "thread_id": "eval-b6e603-weather-current-01-0-91be0f",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "2e09a3f0cf9f97c2",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1243,
+        "output_tokens": 222,
+        "total_tokens": 1465,
+        "model_calls": 2
+      },
+      "ttft_ms": 2205.1,
+      "total_ms": 2761.4,
+      "answer_chars": 154,
+      "answer": "北京今天（10 月 27 日）天气概况：\n\n- **天气**：晴 ☀️\n- **气温**：14°C\n- **湿度**：14%，比较干燥\n- **风力**：北风 4 级\n\n整体是晴朗干爽的一天，但空气湿度很低，注意多喝水、做好保湿；北风 4 级，体感会偏凉，出门建议加件外套。需要我帮你看一下未来几天的预报吗？",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-02",
+      "category": "天气",
+      "repeat": 0,
+      "query": "上海现在的气温是多少度？",
+      "thread_id": "eval-b6e603-weather-current-02-0-ed6f34",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "72fce093f92fbe00",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1260,
+        "output_tokens": 128,
+        "total_tokens": 1388,
+        "model_calls": 2
+      },
+      "ttft_ms": 1968.3,
+      "total_ms": 2093.7,
+      "answer_chars": 43,
+      "answer": "上海当前气温为 **19°C**，天气晴朗，湿度 52%，东南风，风力不超过 3 级。",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-03",
+      "category": "天气",
+      "repeat": 0,
+      "query": "杭州现在冷不冷？",
+      "thread_id": "eval-b6e603-weather-current-03-0-465f0d",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 1,
+      "tool_result_events": 1,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "4cdf30913381f2e9",
+      "tool_success": [
+        true
+      ],
+      "usage": {
+        "input_tokens": 1264,
+        "output_tokens": 366,
+        "total_tokens": 1630,
+        "model_calls": 2
+      },
+      "ttft_ms": 2753.8,
+      "total_ms": 3629.1,
+      "answer_chars": 208,
+      "answer": "杭州现在是阴天，气温 **19°C**，湿度 60%，北风 4 级（2026-10-27 16:35 更新）。\n\n算不上冷，属于**凉爽**级别，但有几点体感要注意：\n\n- **北风 4 级**，风一吹体感会比 19°C 凉一些，尤其傍晚太阳落山后\n- 阴天没有太阳补温，站在室外会比想象中凉\n- 如果只穿短袖或薄衬衫待久了，可能会觉得有点冷\n\n建议出门加一件薄外套或长袖，早晚更稳妥。需要我看看接下来几天的预报吗？",
+      "error": null
+    },
+    {
+      "case_id": "weather-current-04",
+      "category": "天气",
+      "repeat": 0,
+      "query": "成都有没有出太阳？",
+      "thread_id": "eval-b6e603-weather-current-04-0-7e2ce7",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "5fea36319992e9de",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 1303,
+        "output_tokens": 176,
+        "total_tokens": 1479,
+        "model_calls": 2
+      },
+      "ttft_ms": 1020.1,
+      "total_ms": 2457.3,
+      "answer_chars": 128,
+      "answer": "我来查一下成都的实时天气。没有，成都现在没出太阳 🌥️\n\n**成都实时天气（10月27日 16:52）**\n- 天气：阴\n- 气温：18°C\n- 湿度：55%\n- 风：北风 ≤3级\n\n天色阴沉，最高温也不高，出门带件薄外套比较稳妥。需要看未来几天的预报吗？",
+      "error": null
+    },
+    {
+      "case_id": "weather-forecast-01",
+      "category": "天气",
+      "repeat": 0,
+      "query": "深圳未来三天会下雨吗？",
+      "thread_id": "eval-b6e603-weather-forecast-01-0-66835d",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.5,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 2,
+      "tool_result_events": 2,
+      "tool_results": [
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "3c54ce3bad1cf78c",
+      "tool_success": [
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 2154,
+        "output_tokens": 310,
+        "total_tokens": 2464,
+        "model_calls": 3
+      },
+      "ttft_ms": 1160.5,
+      "total_ms": 4794.5,
+      "answer_chars": 333,
+      "answer": "I'll check the forecast for Shenzhen.**深圳未来三天（10月27日–29日）基本不会下雨** ☀️\n\n| 日期 | 天气 | 气温 | 风 |\n|---|---|---|---|\n| 10月27日（今天） | 白天多云，夜间晴 | 23~30°C | 北风1-3级 |\n| 10月28日 | 晴 | 23~28°C | 北风1-3级 |\n| 10月29日 | 白天晴，夜间多云 | 23~29°C | 北风1-3级 |\n\n三天都是晴到多云的干燥天气，没有降雨预报。顺便提一下，10月30日也是多云，气温 24~31°C，同样没有雨。\n\n小提示：北风、晴天，昼夜温差约7°C，早晚可以带件薄外套；紫外线会比较强，白天出门注意防晒。",
+      "error": null
+    },
+    {
+      "case_id": "weather-forecast-02",
+      "category": "天气",
+      "repeat": 0,
+      "query": "明天适合去广州出差吗？",
+      "thread_id": "eval-b6e603-weather-forecast-02-0-a03689",
+      "client_location": "北京市",
+      "expected_tools": [
+        "get_weather_for_location"
+      ],
+      "called_tools": [
+        "get_current_time",
+        "get_user_location",
+        "get_weather_for_location"
+      ],
+      "unrecognized_tool_names": [],
+      "allow_tools": [
+        "get_current_time",
+        "get_user_location"
+      ],
+      "missing_tools": [],
+      "violation_tools": [],
+      "redundant_tools": [
+        "get_current_time",
+        "get_user_location"
+      ],
+      "metered_violations": [],
+      "selection_ok": true,
+      "recall": 1.0,
+      "precision": 0.3333,
+      "contains_ok": null,
+      "e2e_ok": true,
+      "tool_call_events": 4,
+      "tool_result_events": 4,
+      "tool_results": [
+        {
+          "tool": "get_current_time",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_user_location",
+          "status": "success"
+        },
+        {
+          "tool": "get_weather_for_location",
+          "status": "success"
+        }
+      ],
+      "tool_output_digest": "361ddeea4363dfce",
+      "tool_success": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "usage": {
+        "input_tokens": 2587,
+        "output_tokens": 597,
+        "total_tokens": 3184,
+        "model_calls": 3
+      },
+      "ttft_ms": 985.4,
+      "total_ms": 5693.4,
+      "answer_chars": 478,
+      "answer": "我来查一下广州明天的天气和您当前的位置，以便判断出行安排。**结论：明天（10月28日，周三）很适合去广州出差。**\n\n## 广州明天天气\n- 天气：白天多云，夜间晴\n- 气温：20~29°C，体感舒适\n- 风：北风1~3级，风力很小\n- 无降雨迹象，能见度良好，不会出现台风或强对流天气\n\n## 北京出发、返程时的情况\n- 北京明天：晴，4~15°C，南风1~3级，无雨雪，起降条件良好，航班或高铁准点率较高\n\n## 出行提示\n1. **穿着**：北京早晚只有4~5°C，广州白天接近29°C，温差很大。建议穿薄羽绒服或厚外套，内搭轻薄衬衫，到广州后脱掉外套即可。也可以把外套寄存在机场或衣帽间。\n2. **带伞**：虽然预报无雨，但广州十月仍偶有短时阵雨，带一把折叠伞不占地方。\n3. **室内空调**：广州办公室和会场冷气较足，可以备一件薄外套或衬衫外搭。\n4. **行程安排**：后几天（29、30日）也是多云、20~32°C 的稳定天气，如果需要多留两天，安排多场会议或客户拜访都不会受影响。\n\n需要我帮您查一下明天北京到广州的航班或高铁情况吗？",
+      "error": null
+    }
+  ]
+}

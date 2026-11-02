@@ -2,7 +2,6 @@
   "metrics": {
     "样本数": 32,
     "用例数": 32,
-    "工具选择完全匹配率": 0.7812,
     "工具召回率": 1.0,
     "工具精确率": 0.8333,
     "负例抑制率": 1.0,
@@ -23,64 +22,48 @@
     "工具边界": {
       "样本数": 2,
       "通过数": 1,
-      "完全匹配数": 1,
-      "完全匹配率": 0.5,
       "端到端通过率": 0.5,
       "平均工具数": 2.0
     },
     "网页提取": {
       "样本数": 2,
       "通过数": 2,
-      "完全匹配数": 2,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 1.0
     },
     "定位": {
       "样本数": 3,
       "通过数": 3,
-      "完全匹配数": 3,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 1.0
     },
     "多工具": {
       "样本数": 3,
       "通过数": 2,
-      "完全匹配数": 2,
-      "完全匹配率": 0.6667,
       "端到端通过率": 0.6667,
       "平均工具数": 2.3333
     },
     "负例（不应调工具）": {
       "样本数": 10,
       "通过数": 10,
-      "完全匹配数": 10,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 0.0
     },
     "搜索": {
       "样本数": 3,
       "通过数": 1,
-      "完全匹配数": 1,
-      "完全匹配率": 0.3333,
       "端到端通过率": 0.3333,
       "平均工具数": 1.6667
     },
     "时间": {
       "样本数": 3,
       "通过数": 3,
-      "完全匹配数": 3,
-      "完全匹配率": 1.0,
       "端到端通过率": 1.0,
       "平均工具数": 1.0
     },
     "天气": {
       "样本数": 6,
       "通过数": 3,
-      "完全匹配数": 3,
-      "完全匹配率": 0.5,
       "端到端通过率": 0.5,
       "平均工具数": 1.6667
     }
@@ -136,7 +119,6 @@
         "web_search"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.3333,
       "contains_ok": null,
@@ -192,7 +174,6 @@
         "web_extract"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -233,7 +214,6 @@
         "web_extract"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -274,7 +254,6 @@
         "web_extract"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -315,7 +294,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -356,7 +334,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -397,7 +374,6 @@
         "get_user_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -441,7 +417,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.6667,
       "contains_ok": null,
@@ -499,7 +474,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -547,7 +521,6 @@
         "web_search"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -589,7 +562,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -619,7 +591,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -649,7 +620,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": true,
@@ -679,7 +649,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -709,7 +678,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -739,7 +707,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -769,7 +736,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -799,7 +765,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -829,7 +794,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -859,7 +823,6 @@
       "expected_tools": [],
       "called_tools": [],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": null,
       "precision": null,
       "contains_ok": null,
@@ -894,7 +857,6 @@
         "web_search"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -950,7 +912,6 @@
         "web_search"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -997,7 +958,6 @@
         "web_search"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -1043,7 +1003,6 @@
         "get_current_time"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1084,7 +1043,6 @@
         "get_current_time"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1125,7 +1083,6 @@
         "get_current_time"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1166,7 +1123,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1212,7 +1168,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1254,7 +1209,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -1300,7 +1254,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": true,
       "recall": 1.0,
       "precision": 1.0,
       "contains_ok": null,
@@ -1342,7 +1295,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.5,
       "contains_ok": null,
@@ -1390,7 +1342,6 @@
         "get_weather_for_location"
       ],
       "unrecognized_tool_names": [],
-      "exact_match": false,
       "recall": 1.0,
       "precision": 0.3333,
       "contains_ok": null,
