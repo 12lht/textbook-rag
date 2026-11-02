@@ -21,7 +21,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from urllib.parse import quote
 
 import agent_core
@@ -160,7 +160,7 @@ def _expand_doc_titles(user_id: str, doc_titles: list[str] | None) -> list[str] 
     return expanded
 
 
-def _search_textbooks(user_id: str, query: str, doc_titles: object, limit: int) -> dict:
+def _search_textbooks(user_id: str, query: str, doc_titles: list[str] | None, limit: int) -> dict:
     return retrieval.search(
         user_id,
         query,
@@ -536,8 +536,13 @@ async def delete_conversation(thread_id: str, user_id: str) -> bool:
 
 
 def _decorate_history(
-    messages: list[dict[str, object]], user_id: str
-) -> list[dict[str, object]]:
+    # 这里的消息是从 checkpoint 反序列化出来的 JSON 结构，字段类型本来就不固定
+    # （attachments 是 list、content 是 str、citations 是 list[dict]）。
+    # 标 list[dict[str, object]] 会让 `message.get(...)` 全部退化成 object，
+    # 每次取值都得 isinstance 一遍，反而看不清真正的形状。
+    messages: list[dict[str, Any]],
+    user_id: str,
+) -> list[dict[str, Any]]:
     """把 get_history 的返回装饰成前端能直接渲染的形态（就地修改并返回）。
 
     只对助手消息做两件事：正文和引用条目里的 `![题注](as_xx.png)` 换成签名 URL（前端拿不到

@@ -22,6 +22,29 @@
 
 ## 怎么跑
 
+**改完代码先跑这一条**，它把"能离线判定成败"的探针串成一个入口，有一条失败就退出码非 0：
+
+```bash
+python tests/run-offline.py            # 全量，约 65 秒
+python tests/run-offline.py --list     # 只列会跑哪些
+python tests/run-offline.py vectors    # 按名字过滤
+```
+
+判定口径是「子进程退出码 0 **且**输出里没有 `FAIL`」，探针自己打印的「跳过」也算失败——
+静默跳过曾经让一批探针"绿着坏了"很久。
+
+CI（`.github/workflows/ci.yml`）跑不了全量：`probe-upload`、`probe-astral-repair`、
+`probe-asset-render` 要读 `data/uploads/` 下的真实样本 PDF，而 `data/` 不入库。
+CI 用排除开关跑其余七个：
+
+```bash
+python tests/run-offline.py --exclude astral-repair,upload,asset-render
+```
+
+这三条改动前务必在本地跑全量，它们覆盖的正是上传闸门和签名取图。
+
+## 单个探针怎么跑
+
 所有命令都在**仓库根目录**执行。脚本里的 `REPO_ROOT` 由 `__file__` 反推
 （`tests/probes/x.py` → `parents[2]`，`eval/x.py` → `parents[1]`），
 所以不管仓库放在哪个盘、叫什么名字都能跑，不用改任何路径。

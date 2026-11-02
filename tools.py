@@ -35,7 +35,11 @@ def get_weather_for_location(
     city: str,
     mode: Literal["current", "forecast"],
 ) -> str:
-    """查询中国城市天气。mode=current 查询实时天气，mode=forecast 查询未来几天预报；city 可以是城市名称或高德 adcode。"""
+    """查询中国城市天气。
+
+    mode=current 查询实时天气，mode=forecast 查询未来几天预报；
+    city 可以是城市名称或高德 adcode。
+    """
     api_key = os.getenv("AMAP_API_KEY")
     if not api_key:
         return "天气服务未配置 AMAP_API_KEY。"

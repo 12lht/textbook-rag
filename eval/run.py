@@ -845,7 +845,7 @@ async def main() -> int:
         print(
             f"  有 {cassette_stats['misses']} 次工具入参没被录过，这些样本的外部内容仍不可控。"
         )
-        print(f"  再跑一轮 record 可以把覆盖面加宽（record 只增不改）：")
+        print("  再跑一轮 record 可以把覆盖面加宽（record 只增不改）：")
         print(f"    --cassette-mode record --cassette {args.cassette}")
 
     print_report(summary, records, args.verbose)

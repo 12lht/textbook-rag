@@ -33,6 +33,7 @@ OFFLINE = [
     # 需要时单独跑：python tests/probes/probe-markdown.py
     "probe-upload.py",           # 上传闸门 / 去重 / 老库迁移 / 删除
     "probe-conversation-owners.py",
+    "probe-asset-render.py",     # 签名 URL 取图 / 越权 / 过期（21s，偏慢但值得）
     "probe-cassette.py",
     "probe-token-estimate.py",
 ]
@@ -50,9 +51,18 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("pattern", nargs="?", default="")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument(
+        "--exclude",
+        default="",
+        help="逗号分隔的子串，命中的探针不跑。CI 用：那里没有 data/ 下的样本 PDF",
+    )
     args = ap.parse_args()
 
-    wanted = [name for name in OFFLINE if args.pattern in name]
+    excluded = [part.strip() for part in args.exclude.split(",") if part.strip()]
+    wanted = [
+        name for name in OFFLINE
+        if args.pattern in name and not any(skip in name for skip in excluded)
+    ]
     missing = [name for name in wanted if not (REPO_ROOT / "tests" / "probes" / name).is_file()]
     wanted = [name for name in wanted if name not in missing]
 

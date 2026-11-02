@@ -1,6 +1,5 @@
 """对真实 FastAPI 后端做端到端回退测试（会真实调用一次模型，prompt 极短）。"""
 import json
-import sys
 import urllib.error
 import urllib.request
 

@@ -262,12 +262,12 @@ def _hash_password(password: str, *, iterations: int = PBKDF2_ITERATIONS) -> str
 def _verify_password(password: str, stored: str) -> bool:
     """按**存储值里记的参数**验证，不用当前的全局常量（版本前缀的意义所在）。"""
     try:
-        algorithm, iterations, salt_b64, digest_b64 = stored.split("$")
+        algorithm, iterations_text, salt_b64, digest_b64 = stored.split("$")
         if algorithm != _HASH_ALGORITHM:
             return False
         salt = base64.b64decode(salt_b64)
         expected = base64.b64decode(digest_b64)
-        iterations = int(iterations)
+        iterations = int(iterations_text)
     except (ValueError, TypeError):
         return False
 
@@ -320,7 +320,9 @@ def owner_id() -> str | None:
 
 
 def _new_invite_code() -> str:
-    part = lambda: "".join(secrets.choice(INVITE_ALPHABET) for _ in range(INVITE_SEGMENT_LEN))
+    def part() -> str:
+        return "".join(secrets.choice(INVITE_ALPHABET) for _ in range(INVITE_SEGMENT_LEN))
+
     return "AW-" + "-".join(part() for _ in range(INVITE_SEGMENTS))
 
 

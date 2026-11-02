@@ -312,6 +312,9 @@ def remember(
     added = merged = 0
 
     with _db() as conn:
+        # 显式标 object：`raw.get("kind")` 可能返回 None，而下一条分支给的是 str。
+        # 不标的话这里会被推成 str，None 那条赋值就报类型不符（`_clean_kind` 本来收 object）。
+        kind: object
         for raw in facts:
             if isinstance(raw, str):
                 text, kind = raw, DEFAULT_KIND

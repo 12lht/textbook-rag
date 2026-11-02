@@ -870,7 +870,7 @@ async def document_file_view(doc_id: str, u: str = "", t: str = "") -> FileRespo
     # 也不许缓存：地址里带的是**一小时有效**的签名，被浏览器或中间代理存下来之后，
     # 链接过期了还能打开（等于把签名机制作废），反过来也会出现「换成 403 了但页面还是旧 PDF」
     return FileResponse(
-        record["path"],
+        str(record["path"]),
         media_type=media,
         headers={"Cache-Control": "private, no-store"},
     )

@@ -1,0 +1,10 @@
+# 开发期工具。**不进运行时依赖**，也不进 Dockerfile——
+# 线上镜像不需要 linter，多装一份只是让镜像变大、攻击面变宽。
+#
+# 装上之后：
+#     pip install -r requirements-dev.txt
+#     ruff check .
+#     mypy                      # 读 pyproject.toml 的 [tool.mypy]
+
+ruff==0.15.15
+mypy==2.4.1

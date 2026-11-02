@@ -32,19 +32,31 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
-from collections import Counter
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import logging
 
 import documents
 
-try:
+if TYPE_CHECKING:
+    # 只给类型检查看。numpy 是可选依赖，运行时没装时下面 else 会把它绑成 None——
+    # 那在类型上等于「模块变成 None」，导致有 numpy 和没 numpy 两种环境判定不一致
+    # （本地报 assignment、CI 报 unused-ignore）。写成两个分支，两边都稳定。
     import numpy as np
-except ImportError:  # pragma: no cover
-    np = None
+else:
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover
+        # 可选依赖：没装 numpy 就退回纯 BM25。所有调用点都先判 `np is None`。
+        np = None
+
+# 249 行的「向量与正文不一致」告警一直引用了这个 logger，但从没定义过——
+# 只有真的出现陈旧向量时才会走进去，于是平时跑不到、一跑到就 NameError。
+_log = logging.getLogger("agent.retrieval")
 
 _W_BIGRAM = 1.0
 _W_UNIGRAM = 0.3
@@ -185,7 +197,10 @@ class _Doc:
     """一段的索引形态。原文留在 `content` 里，进上下文时才截断。"""
 
     meta: dict
-    tf: Counter = field(default_factory=Counter)
+    # 词频是加权和（正文 1.0、章名 0.5、书名 0.3），必然是 float。
+    # 原来用 Counter，但 Counter 的存根把值定成 int，加权写入会被判类型不符；
+    # defaultdict(float) 语义一样（缺键取 0.0），类型也是准的。
+    tf: dict[str, float] = field(default_factory=lambda: defaultdict(float))
     length: float = 0.0
     flat: str = ""
 
@@ -292,9 +307,9 @@ class _Index:
 
     def score(self, query: str) -> list[tuple[float, float, int]]:
         """→ `[(score, coverage, doc_index)]`，按分数降序。"""
-        query_tokens = Counter()
+        query_tokens: dict[str, float] = {}
         for token, weight in tokenize(query):
-            query_tokens[token] = max(query_tokens[token], weight)
+            query_tokens[token] = max(query_tokens.get(token, 0.0), weight)
         if not query_tokens:
             return []
 
@@ -576,7 +591,7 @@ def ensure_vectors(user_id: str, *, limit_batches: int | None = None) -> dict:
             batch = missing[start : start + EMBEDDING_BATCH]
             vectors = _embed([_vector_text(chunk) for chunk in batch])
             rows = []
-            for chunk, vector in zip(batch, vectors):
+            for chunk, vector in zip(batch, vectors, strict=True):
                 array = _normalize(vector)
                 dim = dim or len(array)
                 rows.append(
@@ -731,6 +746,9 @@ def _rerank_scores(query: str, texts: list[str]) -> list[float] | None:
             if attempt == 1:
                 return None
             time.sleep(1.0)
+    # 显式兜底：循环体保证第二次必然 return，但写出来才能挡住
+    # 「哪天有人把 range(2) 改成 range(1)」这种改动——那时会静默跳过 rerank。
+    return None
 
 
 def _expand_neighbors(docs: list["_Doc"], position: int, base: str) -> str:
@@ -881,7 +899,9 @@ def search(
             + 0.1
             for i, pos in enumerate(cand_pos)
         }
-        order = sorted(composite, key=composite.get, reverse=True)
+        # 不用 composite.get 直接当 key：dict.get 是重载函数，类型检查判不出
+        # 它适配 Callable[[int], float]。composite 的键就是 cand_pos，直接下标等价。
+        order = sorted(composite, key=lambda position: composite[position], reverse=True)
     order = order[: max(1, limit)]
 
     result = _build_hits(index, order, combined, coverage_of, cosine_of)
@@ -921,7 +941,18 @@ def _nearby_figures(index: "_Index", meta: dict, max_count: int = 2) -> list[dic
     return nearby
 
 
-def _build_hits(index: "_Index", order: list[int], combined: dict, coverage_of: dict, cosine_of: dict) -> list[dict]:
+def _build_hits(
+    index: "_Index",
+    order: list[int],
+    combined: dict,
+    coverage_of: dict,
+    cosine_of: dict,
+) -> dict:
+    """把排好序的下标转成给模型的命中列表。
+
+    返回的是**整个结果 dict**（`hits` / `confident` / `reason`），不是 hit 列表——
+    之前注解写成 `list[dict]` 与实现对不上，调用方按注解用就会崩。
+    """
     hits: list[dict] = []
     for position in order:
         meta = index.docs[position].meta

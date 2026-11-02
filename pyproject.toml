@@ -1,0 +1,58 @@
+# 工具配置。**没有 build-system 段是故意的**——这个项目靠
+# `pip install -r requirements.txt` 运行，不是可安装的分发包，
+# 加构建后端只会让 pip 误以为还能 `pip install .`。
+
+[tool.ruff]
+# 120 而不是 100：这套代码的注释是"为什么这么做"的完整句子，密度高，
+# 按 100 列会逼着一堆注释硬折行，反而更难读。超过 120 就真的是写太长了。
+line-length = 120
+target-version = "py311"
+exclude = ["data", "out", "raw", "tests/archive", "__pycache__", ".git"]
+
+[tool.ruff.lint]
+# 起步只开四组，不追求"全绿大扫除"：
+#   E/W  pycodestyle 的硬错误    F  pyflakes（未定义名、未使用导入）
+#   B    bugbear（闭包陷阱、zip 长度不匹配这类真会出错的模式）
+# import 排序（I）和 pyupgrade（UP）先不开——它们会把 9700 行代码重排一遍，
+# diff 淹没真正的问题，等这批清理落地后再单独一轮。
+select = ["E", "F", "W", "B"]
+
+ignore = [
+    # FastAPI 的惯用法就是把 Depends()/Query() 写在默认值里，这条规则对它误报。
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 探针脚本要先往 sys.path 里塞仓库根，才能 import 项目模块，
+# import 因此只能出现在文件中部——这是必要的，不是坏习惯。
+"tests/probes/**" = ["E402", "E501"]
+"scripts/**" = ["E402", "E501"]
+# 测试与评测脚本里的长行多是内嵌的用例数据/断言消息，折行只会更难读。
+# 但 F821（未定义名）这类真错误**不豁免**，脚本崩了同样是崩了。
+"tests/**" = ["E501"]
+"eval/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+# 只检查这几个模块。它们是"纯数据变换"的代码，注解写准了就能一直绿；
+# agent_core.py 被排除在外，原因见下面的 overrides。
+files = [
+    "documents",
+    "retrieval.py",
+    "users.py",
+    "service.py",
+    "api.py",
+    "cli.py",
+    "memories.py",
+]
+ignore_missing_imports = true
+# 多余的 type: ignore 也要报出来，否则豁免会越积越多、没人敢删。
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# agent_core.py 里 34 条错误有 26 条是第三方库的存根跟不上实现：
+# langchain-openai 1.6.6 的 ChatOpenAI 明明有 max_tokens 字段，存根里却没有；
+# langgraph 的 StateGraph 泛型约束也和实际用法对不上。修代码是白改，等上游。
+module = "agent_core"
+follow_imports = "skip"

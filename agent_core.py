@@ -1075,9 +1075,16 @@ def _messages_for_model(
             f"<摘要>\n{summary}\n</摘要>"
         )
 
+    # 先算成变量再拼：这行原来把整串调用塞在 f-string 里，超长到没法读。
+    # 顺带避开 3.12 以下 f-string 表达式不能跨行的限制。
+    system_head = _system_prompt(
+        memory_enabled=memory_enabled,
+        textbook_catalog=_catalog_text(user_id, scope),
+        focus=scope,
+    )
     system = SystemMessage(
         content=(
-            f"{_system_prompt(memory_enabled=memory_enabled, textbook_catalog=_catalog_text(user_id, scope), focus=scope)}"
+            f"{system_head}"
             f"{extra}"
         )
     )

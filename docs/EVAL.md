@@ -1,6 +1,8 @@
 # 评测
 
 评测运行器是 `eval/run.py`，金标集 `eval/cases.jsonl`，历史基线在 `eval/baselines/`。
+**读基线前先看 `eval/baselines/README.md`**——那个目录里躺着「对话/工具选择」和「解析质量」
+两种结构完全不同的结果，文件名区分不出来，混比会得出错的结论。
 
 ## 怎么跑
 

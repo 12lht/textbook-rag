@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 装 ruff 与 mypy
+        run: pip install -r requirements-dev.txt
+      - name: ruff check
+        run: ruff check .
+      # 只检查 pyproject.toml 里 files 列出的模块，agent_core.py 已在 overrides 里跳过。
+      # 不装 requirements.txt：缺依赖时 ignore_missing_imports 会当成 Any，
+      # 和本地结果一致（本地装了依赖也不影响这七个纯数据变换模块的判定）。
+      - name: mypy
+        run: mypy
+
+  offline:
+    name: 离线回归
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: 装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      # 排除三个探针：它们要读 data/uploads 下的真实样本 PDF，
+      # 而 data/ 被 .gitignore 排除，CI 里没有。其余七个自造数据，能完整跑。
+      # 本地跑全量：python tests/run-offline.py
+      - name: 跑离线回归（CI 子集）
+        run: python tests/run-offline.py --exclude astral-repair,upload,asset-render

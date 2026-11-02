@@ -58,7 +58,14 @@ agent_core.py       LangGraph Agent 编排、教材检索工具、长期记忆�
 tools.py            纯函数工具（天气、时间、网页搜索/提取）
 mcp_server.py       MCP server
 geocode.py          高德逆地理编码
-documents.py        教材上传 / 解析 / 切分
+documents/          教材库（包，对外只有 `import documents`）
+  __init__.py         门面：只做再导出，不写逻辑
+  core.py             上传 / 切分 / 存储 / 查询 / 资源（编排者）
+  parse.py            PDF / PPTX / DOCX → 元素序列（不碰数据库、不切 chunk）
+  db.py               SQLite 连接、建表与迁移，以及全部存储路径
+  text.py             Markdown 正文修复：裸 LaTeX、项目符号、符号字体
+  categories.py       分类：建、改名、删、归属
+  types.py            解析链路的中间数据形态与异常
 mineru.py           MinerU 云端解析客户端
 retrieval.py        BM25 + 向量融合检索
 figures.py          视觉模型调用（图注、图像描述）
@@ -69,7 +76,12 @@ memories.py         跨会话长期记忆
 limits.py           配额与限流
 cassette.py         评测录制回放
 cli.py              CLI 调试入口
-frontend/           网页前端（index.html 对话，library.html 藏书阁）
+frontend/           网页前端，零构建（改完刷新即生效，不需要打包）
+  index.html          对话页（只留结构）
+  app.css / app.js    对话页的样式与逻辑
+  library.html        藏书阁（只留结构）
+  library.css / .js   藏书阁的样式与逻辑
+  theme.css           两页共用的「纸与墨」颜色与字体令牌
 eval/               金标集、评测脚本、基线
 tests/              离线回归与探针
 docs/               架构、接口、评测、部署、决策记录
@@ -95,6 +107,8 @@ python -m uvicorn api:app --host 127.0.0.1 --port 8000
 python tests/run-offline.py     # 离线回归（不联网、不花钱）
 python eval/run.py --tag v3     # 金标评测（调用真实模型）
 python cli.py                   # 命令行调试
+ruff check .                    # 静态检查（pip install -r requirements-dev.txt）
+mypy                            # 类型检查（只查 pyproject.toml 里 files 列的模块）
 ```
 
 ## 文档

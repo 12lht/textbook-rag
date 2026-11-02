@@ -47,7 +47,9 @@ CATEGORY_RULES = [
 
 
 def stats(conn: sqlite3.Connection) -> dict[str, int]:
-    one = lambda sql, *args: conn.execute(sql, args).fetchone()[0]
+    def one(sql: str, *args: object) -> int:
+        return conn.execute(sql, args).fetchone()[0]
+
     return {
         "chunks": one("SELECT COUNT(*) FROM chunks"),
         "assets": one("SELECT COUNT(*) FROM assets"),
@@ -163,7 +165,7 @@ def assign_categories(conn: sqlite3.Connection, *, dry_run: bool) -> int:
 
     print(f"\n== 3. 分类归属 ==\n未分类 {len(docs)} 本，可归入 {len(planned)} 本"
           f"（现有分类：{', '.join(categories.values()) or '无'}）")
-    for doc_id, title, cid in planned:
+    for _doc_id, title, cid in planned:
         print(f"  {title[:34]:<36} → {cid}")
     left = len(docs) - len(planned)
     if left:

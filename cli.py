@@ -25,7 +25,7 @@ async def print_history(thread_id: str, user_id: str) -> None:
 
 async def load_summaries(user_id: str) -> dict[str, str]:
     return {
-        item["thread_id"]: item["summary"]
+        str(item["thread_id"]): str(item["summary"])
         for item in await service.list_conversations(user_id)
     }
 
