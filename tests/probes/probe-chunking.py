@@ -127,7 +127,7 @@ def main() -> int:
     chunks = documents.cut_chunks(normal, "doc00004")
     lengths = [len(c["content"]) for c in chunks]
     check("段落长度都在合理区间（不碎片、不超长）",
-          bool(chunks) and all(documents.MIN_CHARS <= size <= documents.MAX_CHARS for size in lengths),
+          bool(chunks) and all(documents.core.MIN_CHARS <= size <= documents.core.MAX_CHARS for size in lengths),
           str(lengths))
     check("原文没丢", sum(lengths) >= 10 * 100, f"合计 {sum(lengths)} 字")
     check("序号连续", [c["seq"] for c in chunks] == list(range(len(chunks))))

@@ -1,6 +1,9 @@
 """导出一段可直接打开的 Markdown（含图片），用来肉眼验收解析质量。"""
 from __future__ import annotations
-import shutil, sys, tempfile, time
+import shutil
+import sys
+import tempfile
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位置反推，不写死盘符
@@ -9,7 +12,8 @@ ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 import pymupdf  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 from _sample import sample_pdf  # noqa: E402
 
 CASES = [
@@ -19,16 +23,17 @@ CASES = [
 ]
 
 TMP = Path(tempfile.mkdtemp(prefix="export-sample-"))
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 
 for pdf_path, name, start, end in CASES:
     src = pymupdf.open(pdf_path)
     subset = pymupdf.open()
     subset.insert_pdf(src, from_page=start, to_page=min(end, src.page_count - 1))
     data = subset.tobytes()
-    src.close(); subset.close()
+    src.close()
+    subset.close()
 
     record = documents.create_upload("export", f"{name}-p{start+1}-{end+1}.pdf", data)
     doc_id = str(record["doc_id"])
@@ -42,7 +47,7 @@ for pdf_path, name, start, end in CASES:
         shutil.rmtree(out)
     (out / "images").mkdir(parents=True)
     count = 0
-    for path in (documents.ASSET_DIR / doc_id).glob("*.png"):
+    for path in (documents_db.ASSET_DIR / doc_id).glob("*.png"):
         shutil.copyfile(path, out / "images" / path.name)
         count += 1
     target = out / f"{name}-p{start+1}-{end+1}.md"

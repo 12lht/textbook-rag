@@ -22,7 +22,8 @@ load_dotenv(REPO_ROOT / ".env")  # MinerU 的 key 在 .env 里
 import pymupdf  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 from _sample import sample_pdf  # noqa: E402
 
 failures: list[str] = []
@@ -46,9 +47,9 @@ def make_subset(source: Path, target: Path, start: int, end: int) -> None:
 
 def main() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="probe-doc-"))
-    documents.DB_PATH = tmp / "documents.sqlite3"
-    documents.UPLOAD_DIR = tmp / "uploads"
-    documents.ASSET_DIR = tmp / "assets"
+    documents_db.DB_PATH = tmp / "documents.sqlite3"
+    documents_db.UPLOAD_DIR = tmp / "uploads"
+    documents_db.ASSET_DIR = tmp / "assets"
 
     sample = tmp / "sample.pdf"
     source = sample_pdf("Hello-Algo")
@@ -101,7 +102,6 @@ def main() -> None:
         print(f"  例：{with_chapter[0]['chapter']}")
 
     print("\n--- 图/公式 ---")
-    assets = [a for a in documents.chunks_of(doc_id) if a["kind"] in {"figure", "formula"}]
     with_conn = documents._connect()
     with with_conn as conn:
         rows = conn.execute("SELECT * FROM assets WHERE doc_id = ? ORDER BY page", (doc_id,)).fetchall()

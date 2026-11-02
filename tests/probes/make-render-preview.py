@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 import pymupdf  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 from _sample import sample_pdf  # noqa: E402
 
 PDF = sample_pdf("Hello-Algo")
@@ -29,9 +30,9 @@ OUT = ROOT / ".workbuddy/tmp/render-preview.html"
 PAGES = (30, 60)  # 第 31-60 页：正文、图、表格都有（58/59 页是表 2-1）
 
 TMP = Path(tempfile.mkdtemp(prefix="render-snapshot-"))
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 
 src = pymupdf.open(PDF)
 out = pymupdf.open()
@@ -49,7 +50,7 @@ doc = documents.list_documents("u1")[0]
 
 def embed(match: "re.Match[str]") -> str:
     alt, name = match.group(1), match.group(2)
-    path = documents.ASSET_DIR / doc_id / name
+    path = documents_db.ASSET_DIR / doc_id / name
     if not path.is_file():
         return match.group(0)
     data = base64.b64encode(path.read_bytes()).decode()

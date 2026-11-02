@@ -52,7 +52,7 @@ def real_snapshot() -> dict:
 before_real = real_snapshot()
 
 import conversations  # noqa: E402
-import documents  # noqa: E402
+from documents import db as documents_db  # noqa: E402
 import limits  # noqa: E402
 import memories  # noqa: E402
 import users  # noqa: E402
@@ -65,10 +65,10 @@ conversations.OWNER_PATH = TMP / "conversation_owners.json"
 memories.DATA_DIR = TMP
 memories.DB_PATH = TMP / "memories.sqlite3"
 memories.LEGACY_JSON_PATH = TMP / "memories.json"
-documents.DATA_DIR = TMP
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DATA_DIR = TMP
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 limits.DATA_DIR = TMP
 limits.DB_PATH = TMP / "limits.sqlite3"
 for _sub in ("uploads", "assets"):
@@ -129,7 +129,6 @@ agent_core.delete_checkpoint_thread = fake_delete_checkpoint_thread
 from fastapi.testclient import TestClient  # noqa: E402
 
 import api  # noqa: E402
-import service  # noqa: E402
 
 client = TestClient(api.app)
 

@@ -27,7 +27,8 @@ load_dotenv(REPO_ROOT / ".env")  # MinerU 的 key 在 .env 里
 import pymupdf  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 from _sample import sample_pdf  # noqa: E402
 
 failures: list[str] = []
@@ -41,9 +42,9 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def main() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="probe-md-"))
-    documents.DB_PATH = tmp / "documents.sqlite3"
-    documents.UPLOAD_DIR = tmp / "uploads"
-    documents.ASSET_DIR = tmp / "assets"
+    documents_db.DB_PATH = tmp / "documents.sqlite3"
+    documents_db.UPLOAD_DIR = tmp / "uploads"
+    documents_db.ASSET_DIR = tmp / "assets"
 
     src = pymupdf.open(str(sample_pdf("Hello-Algo")))
     out = pymupdf.open()
@@ -72,7 +73,9 @@ def main() -> None:
         f"{len(roundtrip)} vs {len(markdown)}",
     )
     if roundtrip.strip() != markdown.strip():
-        for index, (a, b) in enumerate(zip(roundtrip.splitlines(), markdown.splitlines())):
+        # 行数不等本身就是这里要诊断的情况之一，所以必须用非 strict 的 zip：
+        # 加 strict 会在行数不一致时直接抛错，反而看不到具体是哪几行不同。
+        for index, (a, b) in enumerate(zip(roundtrip.splitlines(), markdown.splitlines())):  # noqa: B905
             if a != b:
                 print(f"  第 {index + 1} 行不同：\n    render   : {a[:90]}\n    original : {b[:90]}")
                 break
@@ -94,9 +97,9 @@ def main() -> None:
     before_chunks = len(documents.chunks_of(doc_id))
     # **存原值再还原**：以前这里写死还原成 500/900，而模块默认早就是 250/900，
     # 还原后参数不等于原参数，chunk 数当然回不去（探针自己过时了，不是代码错）。
-    saved_target, saved_max = documents.TARGET_CHARS, documents.MAX_CHARS
-    documents.TARGET_CHARS = 200
-    documents.MAX_CHARS = 320
+    saved_target, saved_max = documents.core.TARGET_CHARS, documents.core.MAX_CHARS
+    documents.core.TARGET_CHARS = 200
+    documents.core.MAX_CHARS = 320
     result = documents.rechunk(doc_id)
     after_markdown = documents.markdown_of(doc_id, "u1")
     after_chunks = len(documents.chunks_of(doc_id))
@@ -106,7 +109,7 @@ def main() -> None:
     check("重切返回的条数一致", result["chunk_count"] == after_chunks, str(result["chunk_count"]))
     check("重切后仍能引用图（asset 没被清）", any(c["asset_id"] for c in documents.chunks_of(doc_id)))
 
-    documents.TARGET_CHARS, documents.MAX_CHARS = saved_target, saved_max
+    documents.core.TARGET_CHARS, documents.core.MAX_CHARS = saved_target, saved_max
     documents.rechunk(doc_id)
     check("参数还原后 chunk 数回到原值", len(documents.chunks_of(doc_id)) == before_chunks)
 

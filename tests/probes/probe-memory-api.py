@@ -18,7 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位�
 ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 
-import documents  # noqa: E402
+
+from documents import db as documents_db  # noqa: E402
 import memories  # noqa: E402
 import users  # noqa: E402
 
@@ -28,10 +29,10 @@ users.DB_PATH = tmp / "users.sqlite3"
 memories.DATA_DIR = tmp
 memories.DB_PATH = tmp / "memories.sqlite3"
 memories.LEGACY_JSON_PATH = tmp / "memories.json"
-documents.DATA_DIR = tmp
-documents.DB_PATH = tmp / "documents.sqlite3"
-documents.UPLOAD_DIR = tmp / "uploads"
-documents.ASSET_DIR = tmp / "assets"
+documents_db.DATA_DIR = tmp
+documents_db.DB_PATH = tmp / "documents.sqlite3"
+documents_db.UPLOAD_DIR = tmp / "uploads"
+documents_db.ASSET_DIR = tmp / "assets"
 tmp.mkdir(parents=True, exist_ok=True)
 for sub in ("uploads", "assets"):
     (tmp / sub).mkdir(exist_ok=True)

@@ -85,7 +85,7 @@ with TestClient(api.app) as client:
     check("对不存在会话删除 → 404",
           client.delete("/api/conversations/t-nope").status_code == 404)
     check("空标题重命名 → 422（Pydantic 粗校验）",
-          client.patch(f"/api/conversations/t-nope", json={"title": ""}).status_code == 422)
+          client.patch("/api/conversations/t-nope", json={"title": ""}).status_code == 422)
 
 failed = [name for name, ok, _ in results if not ok]
 print(f"\n通过 {len(results) - len(failed)}/{len(results)}")

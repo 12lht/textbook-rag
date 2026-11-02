@@ -20,7 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-import documents  # noqa: E402
+import documents
+
+from documents import db as documents_db  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _sample import sample_pdf  # noqa: E402
 
@@ -34,29 +36,29 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 
 TMP = Path(tempfile.mkdtemp(prefix="upload-"))
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 
 PDF = sample_pdf("Hello-Algo").read_bytes()  # textbook/ 已移出仓库，样本从 data/uploads 取
 print(f"样本：Hello-Algo.pdf {len(PDF) / 1024 / 1024:.1f}MB，"
-      f"上限 {documents.MAX_FILE_BYTES // 1024 // 1024}MB\n")
+      f"上限 {documents.core.MAX_FILE_BYTES // 1024 // 1024}MB\n")
 
 print("== 1. 上限 ==")
 record = documents.create_upload("probe", "Hello-Algo.pdf", PDF)
 check("正常大小能收", record["status"] == documents.STATUS_PENDING, str(record["status"]))
 doc_id = str(record["doc_id"])
-check("原文件落盘了", (documents.UPLOAD_DIR / doc_id).is_dir())
+check("原文件落盘了", (documents_db.UPLOAD_DIR / doc_id).is_dir())
 
-limit = documents.MAX_FILE_BYTES
-documents.MAX_FILE_BYTES = 1024  # 只为触发闸门，不改真常量
+limit = documents.core.MAX_FILE_BYTES
+documents.core.MAX_FILE_BYTES = 1024  # 只为触发闸门，不改真常量
 try:
     documents.create_upload("probe", "太大的.pdf", PDF)
     check("超上限被拒", False, "居然收下了")
 except documents.DocumentError as exc:
     check("超上限被拒", "上限" in str(exc), str(exc)[:60])
 finally:
-    documents.MAX_FILE_BYTES = limit
+    documents.core.MAX_FILE_BYTES = limit
 
 print("\n== 2. 去重 ==")
 duplicate = documents.create_upload("probe", "换个名字.pdf", PDF)
@@ -87,20 +89,20 @@ conn.execute(
 conn.commit()
 conn.close()
 
-documents.DB_PATH = legacy
+documents_db.DB_PATH = legacy
 old_rows = documents.list_documents("probe")
 check("老行还在", len(old_rows) == 1, str(len(old_rows)))
 check("老行字段没丢", old_rows[0]["chunk_count"] == 5, str(old_rows[0]["chunk_count"]))
 check("老行 warning 为 None", old_rows[0].get("warning") is None, str(old_rows[0].get("warning")))
 columns = {row[1] for row in sqlite3.connect(legacy).execute("PRAGMA table_info(documents)")}
 check("表里已经有了 warning 列", "warning" in columns)
-documents.DB_PATH = TMP / "documents.sqlite3"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
 
 print("\n== 4. 删除：行和目录一起走 ==")
 check("删之前查得到", documents.get_document(doc_id, "probe") is not None)
 check("删除返回 True", documents.delete_document(doc_id, "probe") is True)
 check("删之后查不到", documents.get_document(doc_id, "probe") is None)
-check("目录也没了", not (documents.UPLOAD_DIR / doc_id).exists())
+check("目录也没了", not (documents_db.UPLOAD_DIR / doc_id).exists())
 check("再删返回 False（幂等）", documents.delete_document(doc_id, "probe") is False)
 
 print(f"\n{'全部通过' if not failures else '失败：' + '、'.join(failures)}")

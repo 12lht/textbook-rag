@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from _sample import sample_pdf  # noqa: E402
+
 PDF = sample_pdf("Hello-Algo")
 
 PASS = 0
@@ -53,15 +55,15 @@ before = real_snapshot()
 import pymupdf  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
-from _sample import sample_pdf  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 import users  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="asset-render-"))
 users.DB_PATH = TMP / "users.sqlite3"
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 
 import agent_core  # noqa: E402
 
@@ -98,11 +100,16 @@ src.close()
 
 with client:
     header("0. 准备：两个互不相干的账号")
+    # 邀请制上线后，第一个账号是主人，第二个必须持码注册——
+    # 原来这里直接连发两次 register，第二次被 400 挡下，探针从那时起就跑不通了。
     ra = client.post("/api/auth/register", json=ALICE)
-    rb = client.post("/api/auth/register", json=BOB)
-    check("注册 A / B", ra.status_code == 200 and rb.status_code == 200,
-          f"{ra.status_code}/{rb.status_code}")
-    ta, tb = ra.json()["token"], rb.json()["token"]
+    check("注册主人 A", ra.status_code == 200, f"{ra.status_code} {ra.text[:80]}")
+    ta = ra.json()["token"]
+    seed = client.post("/api/invites", json={"note": "给 B"}, headers={"Authorization": f"Bearer {ta}"})
+    check("主人发邀请码", seed.status_code == 200, seed.text[:80])
+    rb = client.post("/api/auth/register", json={**BOB, "invite": seed.json()["code"]})
+    check("B 持码注册", rb.status_code in (200, 201), f"{rb.status_code} {rb.text[:80]}")
+    tb = rb.json()["token"]
     auth_a = {"Authorization": f"Bearer {ta}"}
     auth_b = {"Authorization": f"Bearer {tb}"}
 
@@ -183,7 +190,7 @@ with client:
     header("7. 老数据兼容：已入库的书不用重新解析")
     import sqlite3
 
-    conn = sqlite3.connect(documents.DB_PATH)
+    conn = sqlite3.connect(documents_db.DB_PATH)
     conn.execute("UPDATE documents SET markdown = ? WHERE doc_id = ?",
                  ("![图 1-1 旧书](as_deadbeef.png)\n", doc_id))
     conn.commit()
@@ -193,7 +200,8 @@ with client:
           old.text.strip()[:80])
 
 after = real_snapshot()
-check("真实 data/ 未被改动", before == after, f"{before} -> {after}")
+# 通过时不打详情：before/after 是上千个文件名的快照，打进 CI 日志会把有用的行全冲掉。
+check("真实 data/ 未被改动", before == after, "" if before == after else f"{before} -> {after}")
 
 shutil.rmtree(TMP, ignore_errors=True)
 

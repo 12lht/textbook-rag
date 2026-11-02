@@ -23,13 +23,15 @@ sys.path.insert(0, str(REPO_ROOT))
 
 TMP = Path(tempfile.mkdtemp(prefix="vectors-probe-"))
 
-import documents  # noqa: E402
+import documents
+
+from documents import db as documents_db  # noqa: E402
 import retrieval  # noqa: E402
 
 # 全部指到临时目录：绝不能碰真库
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 retrieval.VECTOR_DB = TMP / "vectors.sqlite3"
 
 os.environ["EMBEDDING_API_KEY"] = "probe-key"  # 只过 enabled 检查，_embed 被替换

@@ -23,16 +23,17 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import documents  # noqa: E402
+import documents
+from documents import db as documents_db  # noqa: E402
 from _sample import sample_pdf  # noqa: E402
 
 PDF = sample_pdf("Hello-Agents")
 OUT_DIR = ROOT / "out" / "Hello-Agents"
 
 TMP = Path(tempfile.mkdtemp(prefix="export-md-"))
-documents.DB_PATH = TMP / "documents.sqlite3"
-documents.UPLOAD_DIR = TMP / "uploads"
-documents.ASSET_DIR = TMP / "assets"
+documents_db.DB_PATH = TMP / "documents.sqlite3"
+documents_db.UPLOAD_DIR = TMP / "uploads"
+documents_db.ASSET_DIR = TMP / "assets"
 
 data = PDF.read_bytes()
 print(f"读入 {len(data)/1024/1024:.1f}MB", flush=True)
@@ -56,7 +57,7 @@ if OUT_DIR.exists():
 images_dir = OUT_DIR / "images"
 images_dir.mkdir(parents=True)
 
-source_assets = documents.ASSET_DIR / doc_id
+source_assets = documents_db.ASSET_DIR / doc_id
 count = 0
 for path in sorted(source_assets.glob("*.png")):
     shutil.copyfile(path, images_dir / path.name)

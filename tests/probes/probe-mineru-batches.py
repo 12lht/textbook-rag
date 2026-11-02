@@ -125,7 +125,7 @@ def main() -> int:
 
     texts = ["第一批正文", "第二批正文", "第三批正文"]
     colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
-    zips = [batch_zip(text, jpeg_bytes(color)) for text, color in zip(texts, colors)]
+    zips = [batch_zip(text, jpeg_bytes(color)) for text, color in zip(texts, colors, strict=True)]
     real_request = mineru._request  # `_request` 下面会被换成桩，这里留一份真身
     install_fake_network(zips)
 

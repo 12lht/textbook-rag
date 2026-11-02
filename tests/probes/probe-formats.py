@@ -18,7 +18,9 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")  # MinerU 的 key 在 .env 里
 
-import documents  # noqa: E402
+import documents
+
+from documents import db as documents_db  # noqa: E402
 
 failures: list[str] = []
 
@@ -75,9 +77,9 @@ def build_docx(path: Path) -> None:
 
 def main() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="probe-formats-"))
-    documents.DB_PATH = tmp / "documents.sqlite3"
-    documents.UPLOAD_DIR = tmp / "uploads"
-    documents.ASSET_DIR = tmp / "assets"
+    documents_db.DB_PATH = tmp / "documents.sqlite3"
+    documents_db.UPLOAD_DIR = tmp / "uploads"
+    documents_db.ASSET_DIR = tmp / "assets"
 
     pptx_path = tmp / "chapter3.pptx"
     try:

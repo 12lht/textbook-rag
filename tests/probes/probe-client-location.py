@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -25,16 +25,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # 仓库根：从本文件位�
 ROOT = REPO_ROOT
 sys.path.insert(0, str(ROOT))
 
-import documents  # noqa: E402
+import documents
+
+from documents import db as documents_db  # noqa: E402
 import users  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp(prefix="probe-categories-api-"))
 users.DATA_DIR = tmp
 users.DB_PATH = tmp / "users.sqlite3"
-documents.DATA_DIR = tmp
-documents.DB_PATH = tmp / "documents.sqlite3"
-documents.UPLOAD_DIR = tmp / "uploads"
-documents.ASSET_DIR = tmp / "assets"
+documents_db.DATA_DIR = tmp
+documents_db.DB_PATH = tmp / "documents.sqlite3"
+documents_db.UPLOAD_DIR = tmp / "uploads"
+documents_db.ASSET_DIR = tmp / "assets"
 for sub in ("uploads", "assets"):
     (tmp / sub).mkdir(parents=True, exist_ok=True)
 
