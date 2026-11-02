@@ -1,0 +1,351 @@
+/* 布局与组件样式。颜色/字体令牌见 theme.css。 */
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink);
+  /* 原来左上角那团薄荷绿光晕换成暖光：纸是背景，不该抢戏。
+     两层极淡的径向渐变叠出「台灯打在纸上」的层次，不用贴图。 */
+  background:
+    radial-gradient(1200px 620px at 18% -8%, rgba(255, 252, 240, .95), transparent 70%),
+    radial-gradient(900px 500px at 92% 4%, rgba(173, 139, 84, .07), transparent 65%),
+    var(--paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, textarea { font: inherit; }
+button { cursor: pointer; }
+/* 细滚动条：默认那条灰色粗条在纸色背景上非常出戏。 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background-clip: content-box; background-color: var(--line-strong); }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--muted-soft); }
+.shell { display: grid; grid-template-columns: 292px minmax(0, 1fr); height: 100vh; height: 100dvh; overflow: hidden; }
+/* 侧栏比主区深一格：视觉上像书脊，和正文纸面分开。 */
+.sidebar { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 18px; border-right: 1px solid var(--line-strong); background: var(--paper-deep); box-shadow: inset -1px 0 0 rgba(255, 255, 255, .55); }
+.brand { flex: none; display: flex; align-items: center; gap: 12px; margin: 0 4px 26px; }
+/* 印章式的标记：朱砂底 + 内圈白线，里面放一个线描书本。
+   原来是个汉字，字在 38px 的方块里显得挤，图形反而更清楚。 */
+.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; color: #fffaf2; background: var(--accent); border-radius: 7px; box-shadow: inset 0 0 0 1px rgba(255, 250, 242, .45), 0 2px 6px rgba(120, 42, 28, .22); }
+.brand-mark svg { display: block; }
+/* 两字中文名比英文短得多，17px 会显得单薄；字号上调 + 拉开字距撑住分量。 */
+.brand-name { font-family: var(--font-serif); font-size: 19px; font-weight: 600; letter-spacing: .1em; }
+.new-chat { flex: none; width: 100%; border: 0; border-radius: 8px; padding: 12px 15px; color: #fffaf2; background: var(--accent); font-size: 13.5px; font-weight: 600; letter-spacing: .02em; box-shadow: inset 0 1px 0 rgba(255, 250, 242, .18), 0 3px 10px rgba(120, 42, 28, .18); transition: background .15s, transform .1s; }
+.new-chat:hover { background: var(--accent-dark); }
+.new-chat:active { transform: translateY(1px); }
+/* 小标题做成「书眉」：左侧一道短金线 + 等宽大写，比纯灰字更有章节感。 */
+.section-label { flex: none; display: flex; align-items: center; gap: 8px; margin: 26px 4px 10px; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.section-label::before { content: ""; flex: none; width: 14px; height: 1px; background: var(--gold); }
+.conversation-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
+/* 一条会话都没有时，侧栏会空出一大块。用 :empty 补一行提示，不用改 JS。 */
+.conversation-list:empty::after { content: "还没有会话"; padding: 14px 12px; color: var(--muted-soft); font-size: 12px; }
+/* 知识库入口。原来这里是「教材库」标题 + 上传按钮 + 文档列表（最多 32vh），
+   现在文档管理有了独立页面，侧栏只留这一行，把高度还给会话列表。
+   样式跟着 .memory-open 走（虚线框、次要色），一眼能看出它是个跳转入口。 */
+.library-entry {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 16px 0 4px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink-soft); background: rgba(255, 253, 247, .55);
+  font-size: 12.5px; text-decoration: none;
+  transition: border-color .15s, color .15s, background .15s;
+}
+/* 箭头交给 CSS 生成，hover 时右移一格：比在 HTML 里写死「→」更容易做动效。 */
+.library-entry::after { content: "→"; color: var(--muted-soft); transition: transform .15s, color .15s; }
+.library-entry:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--panel); }
+.library-entry:hover::after { color: var(--accent); transform: translateX(3px); }
+/* --- 记忆面板 ---
+   「AI 记住了什么」是低频但必须能查的东西：用户偶尔要核对有没有记错。
+   所以侧栏只放一个入口，内容放进弹窗——条目可能有几十条，摆在侧栏
+   会把会话列表挤没。 */
+.memory-entry { flex: none; display: grid; gap: 6px; margin-bottom: 14px; }
+.memory-open { width: 100%; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: rgba(255, 253, 247, .55); font-size: 12px; transition: border-color .15s, color .15s; }
+.memory-open:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--panel); }
+/* 游客没有记忆，入口整个不显示——留个点了会说「先登录」的按钮是噪音。 */
+.memory-entry[hidden] { display: none; }
+.modal-card.wide { width: min(560px, 100%); }
+.modal-title { margin: 0 0 6px; font-family: var(--font-serif); font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+.modal-sub { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.memory-list { display: grid; gap: 8px; max-height: 56vh; overflow-y: auto; overscroll-behavior: contain; }
+.memory-row { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.memory-head { display: flex; gap: 8px; align-items: center; margin-bottom: 7px; }
+.memory-kind { padding: 2px 7px; border-radius: 4px; color: var(--ink-soft); background: var(--mint); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; }
+/* 「其他」是模型给了不认识的 kind 时的兜底，不该和正常分类一样显眼 */
+.memory-kind.other { color: var(--muted); background: var(--paper-deep); }
+.memory-hits { margin-left: auto; color: var(--muted-soft); font: 10.5px var(--font-mono); }
+.memory-text { font-size: 13px; line-height: 1.7; word-break: break-word; }
+.memory-ops { display: flex; gap: 6px; margin-top: 9px; }
+.memory-op { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 11.5px; }
+.memory-op:hover { border-color: var(--ink); color: var(--ink); }
+.memory-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.memory-op:disabled { opacity: .55; cursor: wait; }
+.memory-edit { display: grid; gap: 8px; }
+.memory-edit input { width: 100%; padding: 9px 10px; border: 1px solid var(--accent); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 13px; outline: none; }
+.memory-empty { padding: 22px 6px; color: var(--muted); font-size: 12.5px; line-height: 1.75; text-align: center; }
+/* 弹窗底部的错误行：改重了（409）、条目不见了（404）都写在这里，
+   不跳 alert——那样会把刚编辑的输入框一起掀掉。 */
+.memory-err { min-height: 16px; margin-top: 10px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+/* --- 邀请码面板 ---
+   和记忆面板共用 .memory-row / .memory-list 那套卡片样式，
+   只有顶部「生成」那一行是新的。 */
+.invite-new { display: flex; gap: 8px; margin-bottom: 14px; }
+.invite-new input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 12.5px; outline: none; }
+.invite-new input:focus { border-color: var(--accent); }
+.invite-make { flex: none; padding: 9px 14px; border: 0; border-radius: 7px; color: #fffaf2; background: var(--accent); font-size: 12.5px; font-weight: 600; }
+.invite-make:hover { background: var(--accent-dark); }
+.invite-make:disabled { opacity: .6; cursor: wait; }
+/* 邀请码本身用等宽字体 + 字距，抄写和核对都方便 */
+.invite-code { font: 600 15px var(--font-mono); letter-spacing: .12em; word-break: break-all; }
+.invite-row.used .invite-code { color: var(--muted-soft); text-decoration: line-through; }
+.conversation-item { display: flex; gap: 4px; align-items: stretch; }
+/* 会话行像书签：默认全透明，悬停浮出纸面；选中时左侧压一道朱砂书签条。 */
+.conversation { position: relative; flex: 1; min-width: 0; padding: 10px 12px 10px 14px; text-align: left; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; transition: background .15s, border-color .15s; }
+.conversation:hover { background: rgba(255, 253, 247, .7); }
+.conversation.active { border-color: var(--line-strong); background: var(--panel); box-shadow: var(--shadow-sm); }
+.conversation.active::before { content: ""; position: absolute; top: 9px; bottom: 9px; left: 3px; width: 2px; border-radius: 2px; background: var(--accent); }
+.conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.45; }
+.conversation-count { margin-top: 4px; color: var(--muted); font: 10.5px var(--font-mono); letter-spacing: .02em; }
+.conversation-rename { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 7px; color: var(--ink); background: var(--panel); font-size: 13px; outline: none; box-shadow: var(--shadow-sm); }
+.context-menu { position: fixed; z-index: 60; min-width: 150px; padding: 6px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel); box-shadow: 0 16px 36px rgba(60, 47, 30, .16); }
+.context-menu[hidden] { display: none; }
+.context-menu-item { display: block; width: 100%; padding: 8px 10px; text-align: left; border: 0; border-radius: 6px; color: var(--ink); background: transparent; font-size: 13px; }
+.context-menu-item:hover { background: var(--paper-deep); }
+.context-menu-item.danger { color: var(--accent-dark); }
+.context-menu-item.danger:hover { background: var(--accent-soft); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+.topbar { flex: none; padding: 20px 34px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; background: rgba(255, 253, 247, .78); }
+.menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--panel); font-size: 16px; cursor: pointer; }
+.menu-btn:active { background: var(--paper-deep); }
+.conversation-heading { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-serif); font-size: 17px; font-weight: 600; flex: 1 1 auto; }
+.scope-badge { flex: none; border: 1px solid var(--line-strong); color: var(--ink-soft); background: var(--paper); border-radius: 999px; padding: 4px 12px; font-size: 11.5px; cursor: pointer; transition: border-color .15s, color .15s; }
+.scope-badge:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.chat { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; width: min(920px, 100%); margin: 0 auto; padding: 44px 40px 28px; }
+/* 左边界和输入框对齐（都从 chat/composer 的 40px 内边距起），
+   否则欢迎语会比输入框往右缩一截，看着像没对齐。
+   原来靠上边框 + 眉标起头，眉标删掉后整条长横线就没了承接，改成一小段金线。 */
+.welcome { max-width: 660px; margin: 8vh 0 70px; }
+.welcome::before { content: ""; display: block; width: 46px; height: 2px; margin-bottom: 24px; background: var(--gold); }
+/* 中文标题不能用西文那种 -0.06em 紧排：字会挤在一起。衬线 + 正常字距更像教科书。
+   text-wrap: balance 让多行长度接近，避免最后一行孤字。 */
+h1 { max-width: 680px; margin: 0 0 4px; font-family: var(--font-serif); font-size: clamp(30px, 3.6vw, 46px); font-weight: 600; line-height: 1.28; letter-spacing: .015em; text-wrap: balance; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 30px; }
+.suggestion { padding: 8px 13px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 253, 247, .7); font-size: 12.5px; transition: border-color .15s, color .15s, background .15s; }
+.suggestion:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.messages { display: grid; gap: 26px; }
+.message { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; animation: rise .28s ease both; }
+.message.user { grid-template-columns: minmax(0, 1fr) 30px; }
+.message.user .avatar { grid-column: 2; grid-row: 1; }
+.message.user > div:nth-child(2) { grid-column: 1; grid-row: 1; text-align: right; }
+.message.user .message-content { display: inline-block; padding: 9px 14px; border-radius: 8px 8px 3px 8px; text-align: left; background: var(--mint); }
+.avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: #fffaf2; background: var(--ink); font: 600 13px/1 var(--font-serif); }
+.message.user .avatar { color: var(--ink-soft); background: var(--mint); }
+.message-role { margin: 1px 0 7px; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .1em; }
+.trace { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+/* 展开/收起的小三角自己画：浏览器默认 marker 紧贴着文字，中文标题下会糊成一团。 */
+.trace > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; color: var(--muted); font: 500 10.5px var(--font-mono); letter-spacing: .08em; }
+.trace > summary::-webkit-details-marker { display: none; }
+.trace > summary::before { content: "▸"; color: var(--gold); font-size: 9px; line-height: 1; transition: transform .15s ease; }
+.trace[open] > summary::before { transform: rotate(90deg); }
+.trace summary:hover { color: var(--accent-dark); }
+.trace-list { display: grid; gap: 6px; margin-top: 8px; padding: 9px 11px; border-left: 2px solid var(--line-strong); background: var(--paper); }
+.trace-event { line-height: 1.55; }
+.trace-event.trace-failed { color: var(--danger); font-weight: 500; }
+/* 工具返回原文：可折叠，默认收起。内容用等宽小字号 + 限高滚动，
+   展开也不至于把页面拉长一屏。 */
+.trace-tool-result summary { cursor: pointer; color: var(--muted); font: 500 10.5px var(--font-mono); }
+.trace-tool-result summary:hover { color: var(--accent-dark); }
+.trace-tool-result.trace-failed summary { color: var(--danger); }
+.trace-tool-result-body { margin-top: 6px; padding: 8px 10px; max-height: 240px; overflow-y: auto; border-left: 2px solid var(--line-strong); color: var(--muted); font: 11.5px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 思维链单独一块，比工具调用那几行更暗、更窄，视觉上退到后面去。
+   summary 直接沿用上面 `.trace summary` 的样式，不重复写一套。 */
+.trace-reasoning { color: var(--muted); }
+.trace-reasoning-body { margin-top: 6px; padding: 8px 10px; border-left: 2px dashed var(--line-strong); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 正文用无衬线：中文宋体在 15px 屏幕上偏糊，长文可读性优先。
+   衬线只留给标题和品牌，两者分工明确。 */
+.message-content { line-height: 1.85; font-size: 15.5px; overflow-wrap: anywhere; }
+/* 回答里的 markdown 标题（## 等）默认字号太大（h2 = 24px 加粗），压到和
+   正文一个量级，只留粗细和上下边距差异。 */
+.message-content h1, .message-content h2, .message-content h3,
+.message-content h4, .message-content h5, .message-content h6 {
+  margin: 20px 0 8px; font-family: var(--font-serif); font-size: 16.5px; font-weight: 600; line-height: 1.5; letter-spacing: .01em;
+}
+.message-content h1 { font-size: 18px; }
+.message-content p { margin: 0 0 13px; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content strong { font-weight: 700; color: var(--ink); }
+.message-content ul, .message-content ol { margin: 10px 0; padding-left: 24px; }
+.message-content li { margin: 3px 0; }
+.message-content blockquote { margin: 14px 0; padding: 10px 16px; border-left: 3px solid var(--gold); color: var(--ink-soft); background: var(--paper); }
+.message-content code { padding: 2px 5px; border-radius: 4px; color: #8f3524; background: var(--accent-soft); font: 13px var(--font-mono); }
+.message-content pre { margin: 14px 0; padding: 14px 16px; overflow-x: auto; border-radius: 8px; color: #e8ece6; background: #23272e; }
+.message-content pre code { padding: 0; color: inherit; background: transparent; }
+.message-content table { width: 100%; margin: 14px 0; border-collapse: collapse; font-size: 13.5px; }
+.message-content th, .message-content td { padding: 8px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.message-content th { background: var(--paper-deep); font-weight: 600; }
+.message-content a { color: var(--accent-dark); text-decoration: underline; text-decoration-color: rgba(156, 58, 41, .35); text-underline-offset: 3px; }
+.message-content a:hover { text-decoration-color: var(--accent); }
+.message-content hr { margin: 22px 0; border: 0; border-top: 1px solid var(--line); }
+.activity { color: var(--muted-soft); font-size: 13px; font-style: italic; }
+.message-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.rewind { padding: 3px 10px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; line-height: 1.7; }
+.rewind:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.rewind:disabled { opacity: .4; cursor: not-allowed; }
+/* ---------- 引用溯源（C 域） ---------- */
+/* 正文里的 [c1] 角标。可点：弹出引用小窗。 */
+/* 插图当成书里的图版处理：留一圈白边，像贴上去的。 */
+.message-content img { max-width: 100%; padding: 5px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); margin: 6px 0; }
+/* 角标是上标，但默认 sup 会顶得太高、把行距撑开，这里压回来一点。 */
+sup.cite { cursor: pointer; margin: 0 2px; padding: 0 5px; border-radius: 4px; color: var(--accent-dark); background: var(--accent-soft); font: 500 10.5px/1.4 var(--font-mono); vertical-align: baseline; position: relative; top: -.35em; }
+sup.cite:hover, sup.cite.active { color: #fffaf2; background: var(--accent); }
+/* 引用小窗：点角标弹出，显示出处和原文。position: fixed（视口坐标定位，
+   不随聊天区滚动走；聊天区一滚动就把它关掉，避免悬空错位）。 */
+.cite-popover { position: fixed; z-index: 70; width: min(430px, calc(100vw - 16px)); max-height: min(360px, 60vh); display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: 0 18px 40px rgba(60, 47, 30, .18); overflow: hidden; }
+.cite-popover .head { display: flex; gap: 8px; align-items: baseline; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.cite-popover .head .cite-code { flex: none; }
+.cite-popover .head .source-meta { min-width: 0; font-size: 12.5px; color: var(--ink-soft); }
+.cite-popover .body { max-height: min(300px, 50vh); overflow-y: auto; padding: 10px 14px; color: var(--muted); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 原文是整书 markdown 的切片，常带 # 标题和空行：marked 渲染后 <p>/<h*> 默认
+   外边距会把行距撑得非常大（用户实测「间距太大、有的字过大过粗」）——
+   这里统一压平：标题只保留粗细差异，段落间距收到 3px。 */
+.cite-popover .body p { margin: 0 0 3px; }
+.cite-popover .body h1, .cite-popover .body h2, .cite-popover .body h3,
+.cite-popover .body h4, .cite-popover .body h5, .cite-popover .body h6 {
+  margin: 4px 0 2px; font-size: 13px; font-weight: 600; line-height: 1.4;
+}
+.cite-popover .body ul, .cite-popover .body ol { margin: 2px 0; padding-left: 18px; }
+.cite-popover .body li { margin: 0 0 2px; }
+.cite-popover .body img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); margin: 6px 0; }
+/* MinerU 的表格是真 pipe 表格，marked 会渲染成 <table>；不压一下在 430px 宽的小窗里
+   会横着撑开、字挤成一团。 */
+.cite-popover .body table { width: 100%; border-collapse: collapse; margin: 4px 0 6px; font-size: 12px; }
+.cite-popover .body th, .cite-popover .body td { padding: 3px 6px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.cite-popover .body th { background: var(--paper); font-weight: 600; }
+.cite-popover .body .katex { font-size: 1.02em; }
+.cite-code { flex: none; padding: 1px 6px; border-radius: 4px; color: var(--accent-dark); background: var(--accent-soft); font: 500 10.5px var(--font-mono); }
+.composer-wrap { position: relative; flex: none; width: min(920px, 100%); margin: 0 auto; padding: 0 40px 30px; }
+.scroll-bottom { position: absolute; right: 40px; bottom: 100%; margin-bottom: 10px; display: none; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink-soft); background: var(--panel); box-shadow: 0 6px 16px rgba(60, 47, 30, .12); font-size: 15px; line-height: 1; }
+.scroll-bottom.visible { display: grid; }
+.scroll-bottom:hover { border-color: var(--accent); color: var(--accent-dark); }
+/* 输入区是一张卡纸：默认细边，聚焦时边上浮一层朱砂，不靠发光。 */
+/* 卡片整体作为定位参照：弹出菜单要长到整张卡的上方，而不是卡在工具栏这一行里。 */
+.composer { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); transition: border-color .16s, box-shadow .16s; }
+.composer:focus-within { border-color: rgba(156, 58, 41, .55); box-shadow: 0 18px 46px rgba(60, 47, 30, .13), 0 0 0 3px rgba(156, 58, 41, .08); }
+.composer-main { display: flex; align-items: flex-end; gap: 10px; }
+/* 附件入口做成「+」，和下面的开关排成一条工具栏。用「+」而不是图片图标：
+   它回答的是「加东西」，不预设加什么——以后接文档、云盘都不用换按钮。 */
+.attach-wrap { flex: none; display: flex; }
+.attach { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: transparent; transition: border-color .15s, color .15s, background .15s; }
+.attach svg { width: 15px; height: 15px; transition: transform .2s ease; }
+.attach:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.attach[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+/* 展开时「+」转 45° 变成「×」，不用另做图标就表达了「再点一下收起」。 */
+.attach[aria-expanded="true"] svg { transform: rotate(45deg); }
+.attach:disabled { opacity: .45; cursor: wait; }
+/* 向上弹出的小面板：贴着整张输入卡的上沿长出去，条目少，不做滚动也不分组。 */
+.attach-menu { position: absolute; left: 4px; bottom: calc(100% + 10px); z-index: 58; width: 272px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 18px 44px rgba(60, 47, 30, .18); animation: attachIn .14s ease both; }
+.attach-menu[hidden] { display: none; }
+.attach-menu-label { padding: 7px 10px 5px; color: var(--muted-soft); font: 500 10px var(--font-mono); letter-spacing: .16em; }
+.attach-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; color: var(--ink); background: transparent; text-align: left; }
+.attach-item:hover:not(:disabled) { border-color: var(--line); background: var(--paper); }
+.attach-item:disabled { opacity: .42; cursor: default; }
+.attach-icon { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--muted); }
+.attach-item:hover:not(:disabled) .attach-icon { color: var(--accent-dark); }
+.attach-text { min-width: 0; }
+.attach-text b { display: block; font-size: 13px; font-weight: 500; }
+/* 不换行：这一栏右边还挂着「即将支持」标签，一换行整个条目就散架了。 */
+.attach-text small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted-soft); font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.attach-tag { flex: none; margin-left: auto; padding: 1px 6px; border-radius: 4px; color: var(--muted); background: var(--paper-deep); font-size: 10px; }
+@keyframes attachIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+/* 待发送的图片：横排缩略图，可逐个移除。 */
+.composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 2px 6px; }
+.composer-attachments[hidden] { display: none; }
+.attachment-chip { position: relative; width: 72px; height: 72px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--paper); overflow: hidden; }
+.attachment-chip img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attachment-chip.loading { opacity: .5; }
+.attachment-remove { position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; color: #fffaf2; background: rgba(28, 37, 49, .72); font-size: 12px; line-height: 1; }
+.attachment-remove:hover { background: var(--accent); }
+/* 拖着文件进窗口时，整条输入区亮一下，告诉用户「松手就行」。 */
+.composer.dragging { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(156, 58, 41, .12); }
+/* 消息里已发出的图片。和正文插图分开一套：正文图是「教材里的图」，这里是「你给的图」。 */
+.message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.message.user .message-attachments { justify-content: flex-end; }
+.message-attachments img { max-width: 220px; max-height: 220px; border: 1px solid var(--line-strong); border-radius: 8px; cursor: zoom-in; }
+/* 两个开关。实心点 = 开，空心点 = 关：光靠底色区分在浅色主题上不够明显，
+   而且色弱用户看不出来，所以状态同时用形状和颜色两重编码。 */
+/* 底部工具栏：加号、定位、两个开关并排，高度和圆角统一成 30px 的胶囊，
+   否则一行里混着圆、方、长条三种形状，看着像没对齐。 */
+.composer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 2px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted-soft); background: transparent; font-size: 12px; line-height: 1.5; transition: color .15s, border-color .15s, background .15s; }
+.toggle .dot { flex: none; width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
+.toggle.active .dot { background: currentColor; }
+.toggle:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); }
+.toggle.active { border-color: transparent; color: #fffaf2; background: var(--ink); font-weight: 600; }
+.toggle:disabled { opacity: .45; cursor: not-allowed; }
+textarea { flex: 1; min-height: 42px; max-height: 180px; padding: 10px 12px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; line-height: 1.6; }
+/* 窄屏下占位文字会折行、被 42px 的高度切掉半行，宁可用省略号收住。 */
+textarea::placeholder { color: var(--muted-soft); white-space: nowrap; text-overflow: ellipsis; }
+.locate { flex: none; max-width: 116px; height: 30px; padding: 0 11px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; transition: border-color .15s, color .15s; }
+.locate:hover { border-color: var(--accent); color: var(--accent-dark); }
+.locate.set { color: var(--ink-soft); border-color: var(--line-strong); background: var(--mint); font-weight: 600; }
+.send { display: grid; place-items: center; width: 42px; height: 42px; border: 0; border-radius: 9px; color: #fffaf2; background: var(--ink); font-size: 17px; transition: background .15s, transform .1s; }
+.send:hover:not(:disabled) { background: var(--accent); }
+.send:active:not(:disabled) { transform: translateY(1px); }
+.send:disabled { opacity: .45; cursor: wait; }
+.hint { margin-top: 10px; color: var(--muted); text-align: center; font: 10.5px var(--font-mono); letter-spacing: .04em; }
+.hint.error { color: var(--accent-dark); font-weight: 600; }
+/* 账号区。游客和登录态的差别要一眼看得出来：不只是名字不同，
+   还要说清「这次对话记不记长期记忆」——不然用户会以为退出登录后
+   模型还记得他，或者反过来以为登录了但没记住。 */
+.account { flex: none; margin: 0 0 16px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 253, 247, .62); }
+.account-line { display: flex; align-items: center; gap: 10px; }
+.account-who { flex: 1; min-width: 0; }
+.account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.account-note { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+.account-action { flex: none; padding: 6px 11px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink-soft); background: var(--panel); font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s; }
+.account-action:hover { border-color: var(--accent); color: var(--accent-dark); }
+.account-action.danger { color: var(--accent-dark); }
+.account-action.danger:hover { border-color: var(--accent); background: var(--accent-soft); }
+.modal { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px; background: rgba(28, 37, 49, .42); backdrop-filter: blur(2px); }
+.modal[hidden] { display: none; }
+.modal-card { position: relative; width: min(360px, 100%); padding: 26px 24px 22px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: 0 26px 70px rgba(40, 30, 18, .30); }
+.modal-close { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border: 0; border-radius: 6px; color: var(--muted-soft); background: transparent; font-size: 18px; line-height: 1; }
+.modal-close:hover { color: var(--ink); background: var(--paper-deep); }
+.modal-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+.modal-tab { flex: 1; padding: 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--panel); font-size: 13px; font-weight: 600; }
+.modal-tab.active { border-color: var(--ink); color: #fffaf2; background: var(--ink); }
+.field { display: block; margin-bottom: 12px; }
+.field span { display: block; margin-bottom: 6px; color: var(--muted-soft); font: 500 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.field input { width: 100%; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel); outline: none; transition: border-color .15s; }
+.field input:focus { border-color: var(--accent); }
+.modal-error { min-height: 18px; margin-bottom: 6px; color: var(--accent-dark); font-size: 12px; font-weight: 600; }
+.modal-submit { width: 100%; padding: 12px; border: 0; border-radius: 7px; color: #fffaf2; background: var(--accent); font-weight: 600; letter-spacing: .02em; }
+.modal-submit:hover { background: var(--accent-dark); }
+.modal-submit:disabled { opacity: .6; cursor: wait; }
+@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) {
+  /* 侧栏改抽屉：手机上上下分栏会把聊天区压到半屏以下（旧做法 max-height:44vh）。
+     抽屉平时藏在屏幕外（translateX），点顶栏汉堡按钮滑入；选中会话自动收起。 */
+  .shell { display: flex; flex-direction: column; }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(300px, 84vw); max-height: none; padding: 24px 18px; border-right: 1px solid var(--line-strong); background: var(--paper-deep); transform: translateX(-105%); transition: transform .22s ease; overflow-y: auto; }
+  .sidebar.open { transform: none; }
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(28, 37, 49, .38); }
+  .sidebar-backdrop.show { display: block; }
+  .menu-btn { display: inline-flex; }
+  .brand { margin-bottom: 15px; }
+  .section-label { margin-top: 16px; }
+  .conversation-list { display: block; overflow-y: auto; }
+  .conversation { min-width: 0; }
+  .main { flex: 1 1 auto; min-height: 0; }
+  .topbar { padding: 16px 18px; }
+  .chat { padding: 30px 18px 24px; }
+  .composer-wrap { padding: 0 18px 18px; }
+  .scroll-bottom { right: 18px; }
+  .welcome { margin: 5vh 0 48px; }
+  /* 42px 在 390px 宽的屏上放不下「读万卷书，行万里路。」，会折成
+     「…万里」/「路。」两个孤字。按视口缩放，一行刚好放下十个字。 */
+  h1 { font-size: clamp(26px, 8vw, 34px); }
+}

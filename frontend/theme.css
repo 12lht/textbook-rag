@@ -1,0 +1,32 @@
+/* 「纸与墨」设计令牌：纸是暖的，墨是冷的，朱砂只用来盖章——不做界面主色大面积铺。
+
+   两个页面共用这一份。改品牌色只改这里，不要再往各个页面里抄一遍——
+   之前 index.html 和 library.html 各存了一份完全相同的副本，改一处漏一处就是颜色断层。
+*/
+
+:root {
+  /* 「纸与墨」：纸是暖的，墨是冷的，朱砂只用来盖章——不做界面主色大面积铺。
+     全站颜色只从这里取，组件里不写死色值。 */
+  --ink: #1c2531;
+  --ink-soft: #39424f;
+  --muted: #6f6c63;
+  --muted-soft: #928d80;
+  --line: #e0d8c6;
+  --line-strong: #cdc2a9;
+  --paper: #f6f2e8;
+  --paper-deep: #efe9db;
+  --panel: #fffdf7;
+  --accent: #9c3a29;
+  --accent-dark: #782a1c;
+  --accent-soft: #f8e9e2;
+  /* 失败色单独一个变量，不借 accent-dark：那是主按钮的悬停色，
+     同一个颜色既表示「操作」又表示「出错」，读起来会串味。 */
+  --danger: #a32b1c;
+  --mint: #e5e8d9;
+  --gold: #ad8b54;
+  --shadow: 0 18px 46px rgba(60, 47, 30, .10);
+  --shadow-sm: 0 4px 14px rgba(60, 47, 30, .06);
+  --font-serif: "Iowan Old Style", "Source Serif 4", Georgia, "Songti SC", STSong, SimSun, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}

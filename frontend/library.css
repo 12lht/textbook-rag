@@ -1,0 +1,220 @@
+/* 布局与组件样式。颜色/字体令牌见 theme.css。 */
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 620px at 18% -8%, rgba(255, 252, 240, .95), transparent 70%),
+    radial-gradient(900px 500px at 92% 4%, rgba(173, 139, 84, .07), transparent 65%),
+    var(--paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 99px; background-clip: content-box; background-color: var(--line-strong); }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--muted-soft); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+
+/* --- 顶栏 ---
+   比主界面多一个「回到对话」：这一页是独立页面，浏览器后退不一定能回到
+   用户来的那个会话（可能是直接开的新标签）。给一个明确的锚点。 */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 13px 24px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--paper-deep);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .5);
+}
+.back {
+  flex: none; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 7px;
+  color: var(--ink-soft); background: var(--panel); font-size: 12.5px; text-decoration: none;
+  transition: border-color .15s, color .15s;
+}
+.back:hover { border-color: var(--accent); color: var(--accent-dark); }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  display: grid; place-items: center; width: 30px; height: 30px;
+  color: #fffaf2; background: var(--accent); border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 250, 242, .45);
+}
+.brand-mark svg { display: block; }
+.brand-name { font-family: var(--font-serif); font-weight: 600; letter-spacing: .01em; font-size: 15px; }
+.brand-sub { color: var(--muted); font: 400 10px/1.4 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; margin-top: 2px; }
+.who { margin-left: auto; color: var(--muted); font-size: 12px; }
+.who b { color: var(--ink); font-weight: 600; }
+
+/* --- 两栏：左分类 / 右文档 ---
+   左栏定宽而不是自适应：分类名长度差别很大（「信号与系统」vs「移动通信」），
+   自适应会让右边的表格每次都被推着左右跳。 */
+/* 高度不再写死 calc(100vh - 59px)：顶栏一改 padding 这个魔数就错位。
+   改成 flex 撑满剩余高度，顶栏多高都不用回来改这里。 */
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+
+.cats {
+  display: flex; flex-direction: column; min-height: 0;
+  padding: 16px 12px; border-right: 1px solid var(--line-strong); background: var(--paper-deep);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, .55);
+}
+.cats-title {
+  flex: none; display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; color: var(--muted);
+  font: 500 10.5px var(--font-mono); letter-spacing: .14em; text-transform: uppercase;
+}
+.cats-title::before { content: ""; flex: none; width: 12px; height: 1px; background: var(--gold); }
+/* `0 1 auto` 而不是 `1 1 auto`：分类少的时候不要把它撑满整栏，
+   否则「新建分类」输入框会被推到面板最底下，隔着一大片空白，
+   填个新分类要先跨过半个屏幕。分类多的时候它照样会内部滚动。 */
+.cat-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 3px; align-content: start; }
+.cat {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 9px; border: 1px solid transparent; border-radius: 7px;
+  color: var(--ink-soft); background: transparent; font-size: 13px; text-align: left;
+  transition: background .12s, border-color .12s;
+}
+.cat:hover { border-color: var(--line); background: rgba(255, 253, 247, .7); }
+/* 选中态用左侧色条而不是整块填充：分类行里还有「改名/删除」两个小按钮，
+   整块反白之后它们会看不清。 */
+.cat.active { border-color: var(--line-strong); color: var(--ink); background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
+.cat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-count { flex: none; color: var(--muted); font: 10.5px var(--font-mono); }
+/* 操作按钮平时不占视觉重量（opacity 0 但仍占位，避免悬停时整行抖动）。 */
+.cat-ops { flex: none; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.cat:hover .cat-ops, .cat.active .cat-ops { opacity: 1; }
+.cat-op {
+  padding: 1px 5px; border: 0; border-radius: 4px;
+  color: var(--muted-soft); background: transparent; font-size: 11px; line-height: 1.5;
+}
+.cat-op:hover { color: var(--ink); background: var(--paper-deep); }
+.cat-op.danger:hover { color: var(--accent-dark); background: var(--accent-soft); }
+.cat-new { flex: none; display: flex; gap: 6px; margin-top: 12px; }
+.cat-new input {
+  flex: 1; min-width: 0; padding: 8px 10px;
+  border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--panel);
+  font-size: 12.5px; outline: none; transition: border-color .15s;
+}
+.cat-new input:focus { border-color: var(--accent); }
+.cat-new button {
+  flex: none; width: 34px; border: 0; border-radius: 7px;
+  color: #fffaf2; background: var(--accent); font-size: 15px; line-height: 1;
+}
+.cat-new button:hover { background: var(--accent-dark); }
+.cat-new button:disabled { opacity: .6; cursor: wait; }
+/* 分类相关的错误（重名 409、名字为空 400）就写在这行，不跳 alert——
+   alert 会把刚敲进去的名字一起掀掉，重打一遍很烦。 */
+.cat-err { flex: none; min-height: 16px; margin: 6px 6px 0; color: var(--accent-dark); font-size: 11.5px; font-weight: 600; }
+
+.docs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 26px 34px 60px; }
+.docs-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.docs-title { margin: 0; font-family: var(--font-serif); font-size: 24px; font-weight: 600; letter-spacing: .01em; }
+.docs-sub { margin: 0 0 20px; padding-bottom: 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+.docs-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.sort-select { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink-soft); background: var(--panel); font-size: 12.5px; }
+.sort-select:focus { border-color: var(--accent); outline: none; }
+.btn-primary {
+  padding: 9px 15px; border: 0; border-radius: 7px;
+  color: #fffaf2; background: var(--accent); font-size: 12.5px; font-weight: 600;
+  letter-spacing: .02em; box-shadow: 0 3px 10px rgba(120, 42, 28, .16);
+  transition: background .15s;
+}
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-primary:disabled { opacity: .6; cursor: wait; box-shadow: none; }
+
+/* 批量条：只在有勾选时出现。它把「把一个学科的几个 PDF 归到一类」
+   从 N 次操作变成 1 次——这正是用户提这个页面时说的场景。 */
+.bulkbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 10px 14px;
+  border: 1px solid var(--line-strong); border-left: 2px solid var(--accent); border-radius: 8px;
+  background: var(--accent-soft); font-size: 12.5px;
+}
+.bulkbar[hidden] { display: none; }
+.bulkbar b { font-weight: 650; }
+.bulkbar select { padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: var(--panel); font-size: 12.5px; }
+.bulkbar button { padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 12.5px; }
+.bulkbar button:hover { border-color: var(--ink); color: var(--ink); }
+.bulkbar button.go { border-color: var(--ink); color: #fffaf2; background: var(--ink); }
+.bulkbar button.go:hover { background: var(--accent); border-color: var(--accent); }
+
+.doc-list { display: grid; gap: 8px; }
+/* 每本教材是一张索引卡：编号/标题/元信息从上到下，右侧放分类和操作。 */
+.doc-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 13px; align-items: center;
+  padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  transition: box-shadow .15s, border-color .15s;
+}
+.doc-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+.doc-card.picked { border-color: var(--accent); background: var(--accent-soft); }
+.doc-card input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+.doc-body { min-width: 0; }
+.doc-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.doc-file { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--font-mono); }
+.doc-meta { margin-top: 4px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+.doc-meta .bad { color: var(--danger); }
+.doc-meta .ok { color: #3f6b4a; }
+.doc-meta .warn { color: var(--gold); }
+.doc-cat { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink-soft); background: var(--panel); font-size: 12px; max-width: 150px; }
+.doc-cat:focus { border-color: var(--accent); outline: none; }
+.doc-ops { display: flex; gap: 4px; }
+.doc-op { padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); font-size: 11.5px; white-space: nowrap; }
+.doc-op:hover { border-color: var(--ink); color: var(--ink); }
+.doc-op.danger:hover { border-color: var(--accent); color: var(--accent-dark); background: var(--accent-soft); }
+.doc-op:disabled { opacity: .5; cursor: not-allowed; }
+
+.empty { padding: 48px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.9; }
+.empty b { color: var(--ink); font-weight: 600; }
+
+/* 登录门。知识库对游客是关的（游客共用同一个库），所以直接在整页层面挡住，
+   不要让人点进一个个按钮才发现全是 401。 */
+/* 遮罩不用 backdrop-filter：它会把整个顶栏糊成一层重影，
+   不像「被挡住」，像「没渲染完」。半透明的纸色盖住就够了。 */
+.gate { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgba(246, 242, 232, .96); }
+.gate[hidden] { display: none; }
+.gate-card { width: min(400px, 100%); padding: 32px 30px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow); text-align: center; }
+.gate-title { margin: 0 0 10px; font-family: var(--font-serif); font-size: 21px; font-weight: 600; }
+.gate-text { margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.85; }
+.gate-link { display: inline-block; padding: 11px 20px; border-radius: 7px; color: #fffaf2; background: var(--accent); font-size: 13px; font-weight: 600; text-decoration: none; }
+.gate-link:hover { background: var(--accent-dark); }
+
+/* 轻提示。下载/删除/归类这类「做完了」的反馈滑一下就走，不打断操作。 */
+.toast {
+  position: fixed; left: 50%; bottom: 26px; z-index: 100; transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 40px)); padding: 10px 18px; border-radius: 8px;
+  color: #fbf6ea; background: rgba(28, 37, 49, .94); font-size: 12.5px; line-height: 1.6;
+  box-shadow: 0 12px 30px rgba(30, 24, 14, .26);
+}
+.toast[hidden] { display: none; }
+.toast.bad { background: rgba(163, 43, 28, .95); }
+
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  /* 不给 max-height：手机上 .cats 是 position:fixed; top:0; bottom:0 的抽屉，
+     这里再压一个 34vh 会让抽屉只剩一条窄条（两个 media 同时命中） */
+  .cats { border-right: 0; border-bottom: 1px solid var(--line-strong); }
+  .docs { padding: 18px 16px 40px; }
+  .doc-card { grid-template-columns: auto minmax(0, 1fr); row-gap: 9px; }
+  .doc-cat, .doc-ops { grid-column: 2; }
+  .who { display: none; }
+}
+.menu-btn { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--panel); font-size: 16px; cursor: pointer; }
+@media (max-width: 760px) {
+  /* 分类栏改抽屉：250px 固定栏在手机上会把文档区挤到只剩一百来像素。
+     交互与聊天页的抽屉侧栏一致：汉堡唤出、遮罩点击/选中分类后收起。 */
+  .menu-btn { display: inline-flex; }
+  .topbar { padding: 12px 16px; gap: 10px; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .cats { position: fixed; top: 0; bottom: 0; left: 0; z-index: 90; width: min(280px, 84vw); transform: translateX(-105%); transition: transform .22s ease; box-shadow: 0 0 40px rgba(30, 24, 14, .18); overflow-y: auto; }
+  .cats.open { transform: none; }
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; z-index: 80; background: rgba(28, 37, 49, .38); }
+  .sidebar-backdrop.show { display: block; }
+  .cat-ops { opacity: 1; }
+  .docs { padding: 16px; }
+  .doc-card { grid-template-columns: auto minmax(0, 1fr); }
+  .doc-cat, .doc-ops { grid-column: 2; justify-self: start; }
+}
