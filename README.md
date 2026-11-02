@@ -78,7 +78,24 @@ cassette.py         评测录制回放
 cli.py              CLI 调试入口
 frontend/           网页前端，零构建（改完刷新即生效，不需要打包）
   index.html          对话页（只留结构）
-  app.css / app.js    对话页的样式与逻辑
+  app.css             对话页样式
+  app.js              对话页入口，只做一件事：import ./app/main.js
+  app/                对话页逻辑，原生 ES module，一个功能域一个文件
+    core.js             共享内核：state、store（跨模块可变状态）、存储键
+    api.js              请求封装、错误文案、401 处理
+    auth.js             登录注册、令牌落地
+    render.js           Markdown、行内公式、引用角标
+    cites.js            引用小窗
+    messages.js         消息气泡、工具轨迹、历史重放
+    feedback.js         提示行、忙碌态、滚动跟随
+    layout.js           移动端抽屉、聚焦徽标
+    location.js         定位与城市手选
+    toggles.js          深度思考 / 联网搜索开关
+    conversations.js    会话列表、回退、重命名、删除
+    composer.js         附件、粘贴、拖拽、发送
+    memory.js           长期记忆面板
+    invite.js           邀请码面板
+    main.js             入口：装事件绑定、拉身份与会话
   library.html        藏书阁（只留结构）
   library.css / .js   藏书阁的样式与逻辑
   theme.css           两页共用的「纸与墨」颜色与字体令牌

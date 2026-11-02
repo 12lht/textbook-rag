@@ -2,6 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+const { serveStatic } = require('./_static');
+
 const PORT = 8768;
 const INDEX = path.join(__dirname, '..', '..', 'frontend', 'index.html');
 
@@ -46,6 +48,9 @@ http.createServer(async (request, response) => {
     response.end(fs.readFileSync(INDEX));
     return;
   }
+
+  // app.js / app.css 等静态资源，缺了页面就没有脚本。
+  if (serveStatic(request, response)) return;
 
   if (pathname === '/__reset' && request.method === 'POST') {
     reset();

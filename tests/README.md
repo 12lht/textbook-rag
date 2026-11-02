@@ -79,6 +79,14 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 
 跑 e2e 前先起后端（`uvicorn api:app`），脚本里的 `BASE` 指向对应端口。
 
+不想起真后端时用 mock：`node tests/e2e/mock-server.js`（8766）和
+`node tests/e2e/mock-conversations.js`（8768）。**mock 必须能提供 `/static/*`**——
+它由 `_static.js` 统一处理，指向 `frontend/`，和后端 `app.mount("/static", ...)` 对齐。
+少了这一段，页面只有 HTML 没有脚本，所有断言都在对着空壳跑，而且不报错。
+
+`e2e-app-modules.js` 专门盯这件事：15 个模块是否全部加载、`window.state` 与
+`window.addMessage` 是否在、以及挨个点一遍各模块的绑定点。
+
 ## 命名约定
 
 | 前缀 | 含义 |
@@ -292,7 +300,8 @@ playwright 的浏览器缓存目录里挑版本最高的 chromium。换机器不
 | `e2e-favicon.js` | favicon 加载 | 否 |
 | `e2e-cite-popover.js` | 引用角标小窗（mock 接口 + 真实页面） | 否 |
 | `e2e-katex.js` | KaTeX 公式渲染与引用小窗（8 条断言，含 `$5` 不误伤） | 否 |
-| `_frontend_check.js` | 前端整体自检 | 否 |
+| `e2e-app-modules.js` | 前端模块图：15 个模块是否全部加载、全局出口、控制台零报错、各处绑定点一遍 | 否 |
+| `_frontend_check.js` | 前端整体自检（**已过期**：内容是拆分前那份内联脚本的留存副本，不再可运行） | 否 |
 | `mock-server.js` | mock 后端（e2e 依赖） | 否 |
 | `mock-conversations.js` | mock 会话数据 | 否 |
 | `mock-rewind.js` | mock 回退接口 | 否 |
