@@ -492,6 +492,7 @@ MCP_SERVER_NAME = "agent-tools"
 MCP_SERVER_SCRIPT = Path(__file__).with_name("mcp_server.py")
 
 _TOOL_ORDER = [
+    "calculator",
     "get_weather_for_location",
     "get_user_location",
     "get_current_time",
