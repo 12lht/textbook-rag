@@ -26,6 +26,7 @@ from urllib.parse import quote
 
 import agent_core
 import attachments
+import chat_log
 import conversations
 import documents
 import geocode
@@ -532,6 +533,7 @@ async def delete_conversation(thread_id: str, user_id: str) -> bool:
         return False
     await agent_core.delete_checkpoint_thread(thread_id)
     conversations.drop_conversation(thread_id)
+    chat_log.drop([thread_id])
     return True
 
 
@@ -573,10 +575,23 @@ def _decorate_history(
     return messages
 
 
+async def _display_history(thread_id: str, user_id: str) -> list[dict[str, Any]]:
+    """前端历史回放的数据源。
+
+    优先读展示层存储（chat_log，未被 truncate 裁剪的全量记录）；那里没有
+    记录的历史存量会话退回 checkpoint——新旧两种会话在同一个接口下行为一致。
+    两边拿到的都是未装饰条目，签名 URL 每次读取现做。
+    """
+    stored = chat_log.entries(thread_id)
+    if stored is not None:
+        return _decorate_history(stored, user_id)
+    return _decorate_history(await agent_core.get_history(thread_id), user_id)
+
+
 async def conversation_messages(thread_id: str, user_id: str) -> list[dict[str, object]]:
     """会话的历史消息。不存在或不属于自己抛 KeyError。"""
     _require_owned(thread_id, user_id)
-    return _decorate_history(await agent_core.get_history(thread_id), user_id)
+    return await _display_history(thread_id, user_id)
 
 
 async def rewind_conversation(thread_id: str, turn: int, user_id: str) -> dict[str, object]:
@@ -590,12 +605,14 @@ async def rewind_conversation(thread_id: str, turn: int, user_id: str) -> dict[s
     result = await agent_core.rewind_thread(thread_id, turn)
     if result["emptied"]:
         conversations.reset_summary(thread_id)
+    # 展示层同步裁：轮号口径见 chat_log.rewind 的 docstring（那边 0-based，这里 +1）。
+    chat_log.rewind(thread_id, turn + 1)
 
     return {
         "thread_id": thread_id,
         "removed": result["removed"],
         "text": result["text"],
-        "messages": _decorate_history(await agent_core.get_history(thread_id), user_id),
+        "messages": await _display_history(thread_id, user_id),
     }
 
 
@@ -638,6 +655,45 @@ async def _build_title(previous_messages: list[str], user_input: str) -> str:
     return title[:conversations.MAX_TITLE_LENGTH]
 
 
+def _user_entry(user_input: str, attachments: list[str] | None) -> dict[str, Any]:
+    """按 `agent_core.get_history` 的形状手工构造用户消息条目。
+
+    只在流挂掉的兜底路径用（正常路径直接取 get_history 的产出，保证两边
+    逐字段一致）。附件形状也对齐：只有非空才带 `attachments` 键、全是 str。
+    """
+    entry: dict[str, Any] = {"role": "user", "content": str(user_input)}
+    if attachments:
+        entry["attachments"] = [str(att) for att in attachments]
+    return entry
+
+
+async def _record_turn(
+    thread_id: str,
+    turn_number: int,
+    user_input: str,
+    attachments: list[str] | None,
+) -> None:
+    """把刚结束的一轮记进展示层存储（见 chat_log 模块 docstring）。
+
+    done 事件意味着 checkpoint 已落盘，此时 get_history 的最后一条用户消息
+    就是本轮的，它之后的条目就是本轮助手侧——原文照抄，不复写翻译逻辑。
+    记录失败只降级不抛：展示层缺一轮，比聊天请求报错糟糕程度低一个量级。
+    """
+    try:
+        history = await agent_core.get_history(thread_id)
+        user_indexes = [
+            i for i, entry in enumerate(history) if entry.get("role") == "user"
+        ]
+        if not user_indexes:
+            return
+        last = user_indexes[-1]
+        chat_log.append_turn(
+            thread_id, turn_number, history[last], history[last + 1 :]
+        )
+    except Exception:  # noqa: BLE001 — 展示层永远不连累聊天主流程
+        _log.warning("展示层消息记录失败（本轮历史回放会缺这一轮）", exc_info=True)
+
+
 async def chat_events(
     user_id: str,
     thread_id: str,
@@ -669,6 +725,7 @@ async def chat_events(
         # 标题不阻塞首字：起标题与 Agent 并行，流收尾时再发。侧栏标题晚几秒更新用户
         # 无感，但串行等它会让第 1 轮的 TTFT 白白多出 ~1s（bench 实测占首字延迟一半）。
         title_task = asyncio.create_task(_build_title(previous_messages, user_input))
+    recorded = False  # 本轮是否已写进展示层：正常结束走 _record_turn，异常才走兜底补记
     try:
         async for event in agent_core.stream_agent(
             user_id,
@@ -690,6 +747,9 @@ async def chat_events(
                         item["asset_url"] = asset_url(str(asset_id), user_id)
             yield event
 
+        await _record_turn(thread_id, turn_number, user_input, attachments)
+        recorded = True
+
         if title_task is not None:
             try:
                 title = await title_task
@@ -705,6 +765,19 @@ async def chat_events(
         # 生成器被提前关闭（客户端断开）时，别把并行的标题任务漏在后台。
         if title_task is not None and not title_task.done():
             title_task.cancel()
+        # 流挂掉的轮次也补记用户消息：UI 上它已经显示过，刷新后不该凭空消失。
+        # 用构造的条目而不是 get_history——此刻 checkpoint 是否已落盘未知；
+        # 即使 checkpoint 没收到这条消息，展示层多一个轮号条目也不会错位
+        # （回退按轮号删，详见 chat_log.append_turn 的 docstring）。
+        # 正常记过（客户端拿到 done 后才断开，GeneratorExit 在最后一个 yield
+        # 处触发）就不重复记，否则同一条用户消息会在回放里出现两次。
+        if not recorded:
+            try:
+                chat_log.append_turn(
+                    thread_id, turn_number, _user_entry(user_input, attachments), []
+                )
+            except Exception:  # noqa: BLE001 — 兜底路径自己也不能炸
+                _log.warning("展示层用户消息补记失败", exc_info=True)
         raise
 
 
@@ -1040,6 +1113,7 @@ async def purge_stale_guests() -> int:
     for thread_id in doomed:
         await agent_core.delete_checkpoint_thread(thread_id)
     conversations.drop_conversations(doomed)
+    chat_log.drop(doomed)
     return len(doomed)
 
 

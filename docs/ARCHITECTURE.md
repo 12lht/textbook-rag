@@ -259,6 +259,7 @@ data/agent_checkpoints.sqlite
 data/conversation_summaries.json
 data/conversation_renames.json
 data/conversation_owners.json
+data/chat_log.json
 data/users.sqlite3
 data/memories.sqlite3
 data/limits.sqlite3
@@ -267,6 +268,19 @@ data/vectors.sqlite3
 ```
 
 SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。三个 JSON 各管一件事：`conversation_summaries.json` 是扁平 dict（`thread_id -> 标题`），被 `/api/conversations` 和前端直接消费，所以「重命名标记」和「会话归属」各自单独一个文件，格式一样都是 `{thread_id: 值}`——往里加字段会牵动太多地方。
+
+### 展示层历史与 checkpoint 的分工（chat_log.json）
+
+一份 checkpoint 有三个消费者：前端历史回放、LLM 上下文、摘要管道。**问题**：`truncate_node` 按 token 物理删除旧轮次，前端历史又直接读 checkpoint——早期消息被裁掉后，UI 上也跟着消失，用户翻不到自己说过的话。
+
+解法是**展示层与运行态分离**（`chat_log.py`）：每轮聊完（收到 done，checkpoint 已落盘），`service._record_turn` 从 `get_history` 取「最后一条用户消息及其后的助手侧条目」，盖上轮号追加进 `chat_log.json`——消息结构的翻译逻辑只有 get_history 一份，存储层不复写。读端（`conversation_messages`）优先读它，没有记录的历史存量会话退回 checkpoint，新旧行为在同一个接口下并存。
+
+几个刻意的决定：
+
+- **条目带 `turn` 轮号，不靠位置对齐**：回退按 `turn >= from_turn` 删，即使某轮缺席（流挂掉没记上），后续轮次的删除范围也不会错位。重复轮号也是安全的（失败补记 + 重试会出现），一起删掉即可。
+- **流挂掉的轮次补记用户消息**（`chat_events` 的异常兜底路径）：UI 上它已经显示过，刷新后不该凭空消失。正常记过就不重复记——客户端拿到 done 之后才断开的话，GeneratorExit 在最后一个 yield 处触发，会走进兜底分支，靠 `recorded` 标志去重。
+- **存未装饰条目**：附件是裸 id、引用是 as_xx 相对名，签名 URL 带时效，每次读取现做，存死链接过几天全 403。
+- **裁剪、摘要只碰 checkpoint**：`truncate_node` 一行未改。被裁的消息在 UI 里仍然完整（这是给用户看的），摘要在系统提示里另有副本（这是给模型看的），两边各取所需。
 
 `users.sqlite3` 存账号、登录令牌和邀请码（三张表；令牌只存 sha256 摘要，邀请码存明文，理由见上面）。`memories.sqlite3` 一条事实一行地存跨会话的长期事实（老版本的 `data/memories.json` 会在第一次启动时自动导入，然后改名成 `memories.json.migrated`）。`limits.sqlite3` 只有一张 `daily` 表，一人一天一行地记配额用量。删除这些文件会清空本地会话记录、账号、长期记忆和今日用量。
 

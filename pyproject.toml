@@ -55,6 +55,7 @@ files = [
     "documents",
     "retrieval.py",
     "users.py",
+    "chat_log.py",
     "service.py",
     "api.py",
     "cli.py",
