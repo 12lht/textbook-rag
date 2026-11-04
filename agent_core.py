@@ -38,6 +38,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_core.tools import StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -490,6 +491,12 @@ def _system_prompt(
 
 MCP_SERVER_NAME = "agent-tools"
 MCP_SERVER_SCRIPT = Path(__file__).with_name("mcp_server.py")
+# 单次 MCP 往返的调用级上限：防子进程 deadlock（而非崩溃）把 ToolNode 挂死。
+# 工具内部另有自己的网络超时（urlopen timeout=10 等），这里是管道层的最后防线。
+_MCP_CALL_TIMEOUT = 30.0
+# 连续失败这么多次就熔断：丢弃会话，下一次用到工具时重启子进程重建。
+# 只认「连续」失败——成功一次即清零，偶尔一次网络抖动不该杀会话。
+_MCP_BREAKER_THRESHOLD = 3
 
 _TOOL_ORDER = [
     "calculator",
@@ -551,6 +558,11 @@ class _McpToolset:
     的 cancel scope，它必须在「进入它的那个任务」里退出，否则报 RuntimeError: Attempted to
     exit cancel scope in a different task（单任务脚本测不出来，进了 web 服务才炸）。
     顺带保住持久连接：会话只建一次，之后每次调用都是既有管道上的一次 JSON-RPC 往返。
+
+    故障韧性（两层）：
+    - **调用级超时**：MCP 工具统一包 `wait_for`，子进程 deadlock 也只烧 30 秒；
+    - **熔断重连**：连续 `_MCP_BREAKER_THRESHOLD` 次失败（超时/管道错误）就丢弃会话，
+      下一次 `_ensure()` 自动重启子进程重建——服务从「带病运行到进程重启」变成自愈。
     """
 
     def __init__(self) -> None:
@@ -563,6 +575,9 @@ class _McpToolset:
         self._tool_node_no_web: ToolNode | None = None
         self._bound_models: dict[tuple[bool, bool, bool], object] = {}
         self._error: BaseException | None = None
+        self._failures = 0  # 连续失败的 MCP 调用数；成功一次即清零
+        self._restarting = False  # 熔断重连进行中，防并发重复触发
+        self._init_lock = asyncio.Lock()  # 串行化「发现死会话 → 重建」
 
     async def _serve(self) -> None:
         """常驻任务：建立会话、把工具交给外面，然后一直等到被要求关闭。"""
@@ -573,7 +588,9 @@ class _McpToolset:
                     in_process += [recall_memory, save_memory]
                 if _retrieval_search is not None:
                     in_process += [search_textbook]
-                tools = _order_tools([*await load_mcp_tools(session), *in_process])
+                tools = _order_tools(
+                    [*self._harden(await load_mcp_tools(session)), *in_process]
+                )
                 self._tools = tools
                 self._tools_no_web = [
                     item
@@ -591,17 +608,79 @@ class _McpToolset:
                 self._ready.set()
 
     async def _ensure(self) -> None:
-        if self._tools is not None:
-            return
-        if self._ready is None:
-            self._ready = asyncio.Event()
-            self._stopped = asyncio.Event()
-            self._task = asyncio.create_task(self._serve(), name="mcp-session")
-        await self._ready.wait()
-        if self._error is not None:
-            raise self._error
-        if self._tools is None:
-            raise RuntimeError("MCP 会话未能建立。")
+        async with self._init_lock:
+            # 会话任务意外退出（子进程崩溃 / 管道断裂）：残留的 _tools 已是死引用，
+            # 清掉后走下面的重建路径——这是「运行中挂掉 → 下次调用自愈」的关键。
+            if self._task is not None and self._task.done():
+                self._drop_state()
+                self._task = None
+                self._ready = None
+                self._stopped = None
+                self._error = None
+            if self._tools is not None:
+                return
+            if self._ready is None:
+                self._ready = asyncio.Event()
+                self._stopped = asyncio.Event()
+                self._task = asyncio.create_task(self._serve(), name="mcp-session")
+            await self._ready.wait()
+            if self._error is not None:
+                raise self._error
+            if self._tools is None:
+                raise RuntimeError("MCP 会话未能建立。")
+
+    def _drop_state(self) -> None:
+        """丢掉全部会话产物。调用方必须保证旧会话已停或已死。"""
+        self._tools = None
+        self._tools_no_web = None
+        self._tool_node = None
+        self._tool_node_no_web = None
+        self._bound_models = {}
+
+    def _harden(self, tools: list) -> list:
+        """给 MCP 工具包上调用级超时 + 失败计数（进程内工具不经过这里）。
+
+        超时防「子进程 deadlock 挂住 ToolNode」；失败计数喂熔断——注意记数的
+        是**管道层**的异常（含超时），工具返回的业务性错误结果不会走到这里。
+        """
+        def wrap(tool):
+            inner = tool.coroutine
+
+            async def runner(**kwargs):
+                try:
+                    result = await asyncio.wait_for(
+                        inner(**kwargs), timeout=_MCP_CALL_TIMEOUT
+                    )
+                except BaseException:
+                    self._note_failure(tool.name)
+                    raise
+                self._failures = 0
+                return result
+
+            return StructuredTool(
+                name=tool.name,
+                description=tool.description,
+                args_schema=tool.args_schema,
+                coroutine=runner,
+            )
+
+        return [wrap(tool) for tool in tools]
+
+    def _note_failure(self, tool_name: str) -> None:
+        self._failures += 1
+        if self._failures >= _MCP_BREAKER_THRESHOLD and not self._restarting:
+            self._restarting = True
+            asyncio.create_task(
+                self._break_and_rebuild(tool_name), name="mcp-breaker"
+            )
+
+    async def _break_and_rebuild(self, trigger: str) -> None:
+        """熔断：丢弃坏会话。下一次 `_ensure()` 会自动重启子进程重建。"""
+        try:
+            await self.aclose()
+        finally:
+            self._restarting = False
+            self._failures = 0
 
     async def tools(self, *, web: bool = True) -> list:
         await self._ensure()
@@ -643,11 +722,7 @@ class _McpToolset:
 
     async def aclose(self) -> None:
         task, self._task = self._task, None
-        self._tools = None
-        self._tools_no_web = None
-        self._tool_node = None
-        self._tool_node_no_web = None
-        self._bound_models = {}
+        self._drop_state()
         if task is None:
             self._ready = None
             self._stopped = None
