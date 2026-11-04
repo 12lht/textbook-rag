@@ -259,7 +259,7 @@ data/agent_checkpoints.sqlite
 data/conversation_summaries.json
 data/conversation_renames.json
 data/conversation_owners.json
-data/chat_log.json
+data/chat_log.sqlite3
 data/users.sqlite3
 data/memories.sqlite3
 data/limits.sqlite3
@@ -269,11 +269,13 @@ data/vectors.sqlite3
 
 SQLite 保存 LangGraph 的消息状态，JSON 保存会话列表中的可读摘要。三个 JSON 各管一件事：`conversation_summaries.json` 是扁平 dict（`thread_id -> 标题`），被 `/api/conversations` 和前端直接消费，所以「重命名标记」和「会话归属」各自单独一个文件，格式一样都是 `{thread_id: 值}`——往里加字段会牵动太多地方。
 
-### 展示层历史与 checkpoint 的分工（chat_log.json）
+### 展示层历史与 checkpoint 的分工（chat_log.sqlite3）
 
 一份 checkpoint 有三个消费者：前端历史回放、LLM 上下文、摘要管道。**问题**：`truncate_node` 按 token 物理删除旧轮次，前端历史又直接读 checkpoint——早期消息被裁掉后，UI 上也跟着消失，用户翻不到自己说过的话。
 
-解法是**展示层与运行态分离**（`chat_log.py`）：每轮聊完（收到 done，checkpoint 已落盘），`service._record_turn` 从 `get_history` 取「最后一条用户消息及其后的助手侧条目」，盖上轮号追加进 `chat_log.json`——消息结构的翻译逻辑只有 get_history 一份，存储层不复写。读端（`conversation_messages`）优先读它，没有记录的历史存量会话退回 checkpoint，新旧行为在同一个接口下并存。
+解法是**展示层与运行态分离**（`chat_log.py`）：每轮聊完（收到 done，checkpoint 已落盘），`service._record_turn` 从 `get_history` 取「最后一条用户消息及其后的助手侧条目」，盖上轮号追加进 `chat_log.sqlite3`——消息结构的翻译逻辑只有 get_history 一份，存储层不复写。读端（`conversation_messages`）优先读它，没有记录的历史存量会话退回 checkpoint，新旧行为在同一个接口下并存。
+
+存储引擎先用了和 conversations 一致的整读整写 JSON，复盘发现两笔真实的债——每记一轮全量重写整个文件、读端全量 parse——迁到了 SQLite：一张 `turns(thread_id, turn, entry)` 表，`(thread_id, turn)` 上有普通索引（重复轮号是有意的，所以不能唯一），读端按 `ORDER BY turn, rowid` 保持追加序，写入是逐行 INSERT，原子性由事务保证（多 worker 部署也成立），和 `data/` 下其余存储形态统一。对外只有四个函数，本次迁移调用方一行没改。库文件损坏按「可再生的缓存」处理：丢弃重建，绝不把请求带崩。
 
 几个刻意的决定：
 

@@ -1,12 +1,15 @@
 """chat_log（展示层消息存储）的回归测试。
 
-重点盯三件事：追加不改旧条目、回退按轮号切不按位置切、清空后 key 摘掉让
-读端退回 checkpoint。存储路径必须重定向到临时目录——漏了就会静默写进
-`data/chat_log.json` 真库（2026-11-02 在 documents 上踩过同一个坑）。
+重点盯三件事：追加不改旧条目、回退按轮号切不按位置切、清空后无记录让读端
+退回 checkpoint。存储路径必须重定向到临时目录——漏了就会静默写进
+`data/chat_log.sqlite3` 真库（2026-11-02 在 documents 上踩过同一个坑）。
+SQLite 版还要注意：连接是模块级缓存的，换路径前必须先 `_reset_for_tests()`，
+否则 patch 的是路径、用的还是旧连接。
 """
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -16,10 +19,12 @@ import chat_log
 
 @pytest.fixture
 def tmp_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """把展示层存储指到临时目录。"""
-    path = tmp_path / "chat_log.json"
+    """把展示层存储指到临时目录，并断开模块缓存的旧连接。"""
+    path = tmp_path / "chat_log.sqlite3"
+    chat_log._reset_for_tests()
     monkeypatch.setattr(chat_log, "CHAT_LOG_PATH", path)
-    return path
+    yield path
+    chat_log._reset_for_tests()
 
 
 def _turn(thread_id: str, turn: int, text: str) -> None:
@@ -40,9 +45,12 @@ def test_append_and_read_roundtrip(tmp_log: Path) -> None:
     assert [e["content"] for e in entries] == ["你好", "re:你好", "再见", "re:再见"]
     assert entries[0]["role"] == "user" and entries[1]["role"] == "assistant"
 
-    # 落盘是真 JSON 文件，条目里不该漏进轮号包装（那是存储形态，不是展示形态）
-    raw = json.loads(tmp_log.read_text(encoding="utf-8"))
-    assert "turn" in raw["t-1"][0] and "turn" not in raw["t-1"][0]["entry"]
+    # 落盘是真 SQLite 表，条目里不该漏进轮号包装（那是存储形态，不是展示形态）
+    raw = sqlite3.connect(tmp_log).execute(
+        "SELECT turn, entry FROM turns ORDER BY rowid LIMIT 1"
+    ).fetchone()
+    assert raw is not None and raw[0] == 1
+    assert "turn" not in json.loads(raw[1])
 
 
 def test_missing_thread_returns_none_falls_back_to_checkpoint(tmp_log: Path) -> None:
@@ -76,8 +84,8 @@ def test_rewind_keeps_earlier_turns(tmp_log: Path) -> None:
     assert [e["content"] for e in entries if e["role"] == "user"] == ["第一轮", "第二轮"]
 
 
-def test_rewind_to_empty_drops_key(tmp_log: Path) -> None:
-    """清空后 key 摘掉：读端退回 checkpoint（此时那边也只剩 SystemMessage）。"""
+def test_rewind_to_empty_falls_back(tmp_log: Path) -> None:
+    """删空后这里无记录：读端退回 checkpoint（那边也只剩 SystemMessage）。"""
     _turn("t-1", 1, "唯一一轮")
     chat_log.rewind("t-1", from_turn=1)
 
@@ -99,10 +107,10 @@ def test_drop_removes_only_wanted(tmp_log: Path) -> None:
     assert chat_log.entries("t-2") is None
 
 
-def test_corrupt_file_reads_as_empty(tmp_log: Path) -> None:
-    """存储文件坏了就当没记录，让读端退回 checkpoint，而不是把请求带崩。"""
-    tmp_log.write_text("{not json", encoding="utf-8")
+def test_corrupt_db_reads_as_empty_and_self_heals(tmp_log: Path) -> None:
+    """库文件坏了就当没记录，让读端退回 checkpoint，而不是把请求带崩；
+    下一次写入自动删掉重建，服务自愈。"""
+    tmp_log.write_bytes(b"this is definitely not a sqlite database")
     assert chat_log.entries("t-1") is None
-    # 坏文件也能被下一次写入覆盖回来
     _turn("t-1", 1, "重建")
     assert chat_log.entries("t-1") is not None
