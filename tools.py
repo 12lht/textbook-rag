@@ -26,9 +26,7 @@ from typing import Callable, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import urlopen
-
 from tavily import TavilyClient
-
 from cassette import recorded
 
 @recorded("get_weather_for_location")

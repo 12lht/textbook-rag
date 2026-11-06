@@ -51,3 +51,10 @@ env/
 
 # Node 依赖（只给 tests/e2e 用，项目本身零构建）
 node_modules/
+
+# Qoder 配置与本地记忆
+.qoder/
+
+# 面试准备文档（本地使用，不入库）
+interview-prep.md
+project-deep-dive.md
