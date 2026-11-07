@@ -739,9 +739,15 @@ def _rerank_scores(query: str, texts: list[str]) -> list[float] | None:
     """调 rerank 模型给「问题 × 段落」逐对打分。**失败返回 None，绝不抛**。
 
     调用方拿 None 就走融合排序降级。rerank 是外部 API，挂掉不能拖死检索。
+
+    **默认关闭**（`RERANK_ENABLED=1` 才开）。100 条测试集实测：开与关
+    recall@5 都是 0.989、拒答率都是 1.0，只有 recall@1 从 0.756 涨到 0.789。
+    而 `agent_core._SEARCH_LIMIT=6` 是 6 段全量进上下文、不截断，名次只影响引用
+    编号顺序，不影响答不答得上——为这点收益付 3 倍延迟（中位 517ms → 1509ms）
+    和每次 50 段 × 1200 字的 payload 不划算。要开就显式设 1，别指望它默认生效。
     """
     key = _embedding_api_key()
-    if not key or os.getenv("RERANK_ENABLED", "1") == "0" or not texts:
+    if not key or os.getenv("RERANK_ENABLED", "0") != "1" or not texts:
         return None
     payload = json.dumps(
         {"model": _RERANK_MODEL, "query": query, "documents": texts, "top_n": len(texts)}
@@ -896,12 +902,20 @@ def search(
     # 池内全部计分，不再按 `_VECTOR_DEPTH` 分「计分 / 只登记」两档：只登记的那部分
     # 会以 score=0.0 出现在结果里（它们其实是真的语义命中），看着像 bug。
     vector_hits = index.vector_ranked(query, limit=_RERANK_POOL)
+    # **余弦也要归一化**，否则两路不在同一把尺子上：BM25 那边除以了本次最高分，
+    # 头名恒等于 1.0；余弦却是绝对值，同一句话换个问法就从 0.39 漂到 0.88。
+    # 结果标称的 0.75/0.25 从来不是真比例——实测 top1 里向量只占 0.20，
+    # 短问句（余弦 0.39）甚至只占 0.11，等于把语义这一路按问法随机打了折。
+    # 归一化后两路都是「相对本次头名的百分比」，权重才是它字面上的意思。
+    # 门槛 `_VEC_MIN_COS` 仍然按**原始余弦**卡：那是绝对相关性，不该被归一化抹掉。
+    vector_top = vector_hits[0][0] if vector_hits else 0.0
+    vector_scale = vector_top if vector_top > 0 else 1.0
     for similarity, position in vector_hits:
         if similarity < _VEC_MIN_COS:
             continue
         if allowed is not None and position not in allowed:
             continue
-        combined[position] = combined.get(position, 0.0) + weight_vector * similarity
+        combined[position] = combined.get(position, 0.0) + weight_vector * (similarity / vector_scale)
         cosine_of[position] = similarity
 
     order = sorted(combined, key=lambda position: combined[position], reverse=True)

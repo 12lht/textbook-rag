@@ -40,7 +40,7 @@
 | `ASSET_SECRET` | 否 | 教材插图签名密钥。不配则首次启动生成 `data/asset_secret.key` |
 | `GUEST_SECRET` | 否 | 访客 cookie 签名密钥。同上，生成 `data/guest_secret.key` |
 | `EMBEDDING_API_KEY` | 否 | 检索向量的 key。不配则退回纯 BM25（检索仍可用） |
-| `RERANK_ENABLED` | 否 | 设 `0` 关掉 rerank（省一次外部调用） |
+| `RERANK_ENABLED` | 否 | 默认**关**。设 `1` 才开 rerank——实测只提升 recall@1，@5 和拒答率都不变，却多 3 倍延迟，见下 |
 | `LOG_LEVEL` | 否 | 默认 `INFO`，排障时设 `DEBUG` |
 
 > **两个 `*_SECRET` 要么都配、要么都不配（让它落盘）。**
