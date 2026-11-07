@@ -64,7 +64,7 @@
 {"id":"hmm-01","split":"test","kind":"answerable","query":"隐马尔可夫模型的三个基本问题分别是什么","gold_chunk_ids":["1163b351-0071","1163b351-0069"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
 {"id":"hmm-02","split":"val","kind":"answerable","query":"一阶离散 HMM 由哪些基本要素构成","gold_chunk_ids":["1163b351-0053"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
 {"id":"hmm-03","split":"test","kind":"answerable","query":"HMM 里的状态序列和观察序列分别由什么决定","gold_chunk_ids":["1163b351-0065"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
-{"id":"hmm-04","split":"test","kind":"answerable","query":"HMM 的学习问题要解决什么","gold_chunk_ids":["62355830-0021"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
+{"id":"hmm-04","split":"test","kind":"answerable","query":"HMM 的学习问题要解决什么","gold_chunk_ids":["62355830-0021","1163b351-0288"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
 {"id":"hmm-05","split":"val","kind":"answerable","query":"维特比算法的初始化和递归两步怎么写","gold_chunk_ids":["62355830-0050"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
 {"id":"hmm-06","split":"test","kind":"answerable","query":"解码问题里的单个状态最优准则是什么","gold_chunk_ids":["62355830-0023"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
 {"id":"agt-01","split":"test","kind":"answerable","query":"工作记忆为什么用纯内存加 TTL 来实现","gold_chunk_ids":["6030fa55-1079"],"book":"Hello-Agents","tags":["agent"]}

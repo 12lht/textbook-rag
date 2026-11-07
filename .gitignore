@@ -58,3 +58,9 @@ node_modules/
 # 面试准备文档（本地使用，不入库）
 interview-prep.md
 project-deep-dive.md
+
+# RAG 跑分结果：每条命中带 80 字教材原文，没人想要它们进远端仓库。
+# 每个 208K、随时可重新生成（python tests/probes/probe-rag-eval.py --out ...），
+# 指标已经写在 commit message 和 eval/baselines/README.md 里。
+# 注意：eval/rag_cases.jsonl 是**题目本身**，要入库，别一起忽略。
+eval/baselines/rag-*.json
