@@ -68,7 +68,11 @@ _B = 0.75
 _PHRASE_BOOST = 1.35  # 整串出现在正文里
 _HEADING_BOOST = 1.15  # 只出现在章节标题/书名里
 
-_MIN_COVERAGE = 0.30
+# 覆盖率阈值。**分母改成 idf×权重之后必须跟着上调**：旧分母只累加 idf，
+# 而一元字权重只有 0.3，所以同一段的旧覆盖率被系统性低估约 1.4 倍（实测 0.215→0.302、
+# 0.328→0.486、0.59→0.816）。不换算的话，域外问题会被判成「书里有」——
+# 「怎么申请护照」「如何治疗感冒」就是在 0.30 这条线上被放进来的。
+_MIN_COVERAGE = 0.42
 
 MAX_HIT_CHARS = 700
 
@@ -82,6 +86,12 @@ _FILLER = (
     "什么", "怎么", "怎么样", "如何", "为什么", "为何", "哪些", "哪个", "哪里",
     "多少", "是否", "请问", "帮我", "介绍", "说明", "讲讲", "一下", "可以",
     "这个", "那个", "我们", "你们", "它", "的", "了", "呢", "吗", "吧",
+    # 「什么是 / 是什么」里的「是」必须连着一并去掉：只删「什么」会留下一颗孤字，
+    # 它和后面的实词连成一个**根本不存在的二元组**（「什么是时间复杂度」→「是时」，
+    # 全库 11 段命中，idf 6.7 却是这句话里最高的一项），既把覆盖率分母撑大 21%，
+    # 又给那 11 段送了一份高分。写成整词而不是单字「是」，是为了不误伤
+    # 「但是 / 总是 / 还是」这类正常词。
+    "什么是", "是什么", "是怎么", "是如何", "是哪些", "是怎样的",
 )
 _FILLER_RE = re.compile("|".join(sorted(_FILLER, key=len, reverse=True)))
 
@@ -314,7 +324,10 @@ class _Index:
             return []
 
         idf = {token: self.idf(token) for token in query_tokens}
-        total_idf = sum(idf.values()) or 1.0
+        # 分母必须和分子同一个度量（idf × 权重）。原来只累加 idf，而英文词权重是 1.2，
+        # 于是「RIS 是什么」这种纯英文查询的覆盖率能算到 1.015——它本该是 0~1 的比例，
+        # 而 0.30 那个阈值是按「比例」定的，一旦越过 1，`confident` 就永远成立。
+        total_weight = sum(idf[token] * weight for token, weight in query_tokens.items()) or 1.0
 
         scores: dict[int, float] = {}
         matched: dict[int, float] = {}
@@ -341,7 +354,7 @@ class _Index:
                 )
                 if _longest_common(query_flat, heading) >= 4:
                     raw *= _HEADING_BOOST
-            results.append((raw, matched[position] / total_idf, position))
+            results.append((raw, matched[position] / total_weight, position))
         results.sort(key=lambda item: item[0], reverse=True)
         return results
 
@@ -356,15 +369,22 @@ def vector_db_path() -> Path:
 
 EMBEDDING_BATCH = 32
 
-_VECTOR_DEPTH = 40
+_VECTOR_DEPTH = 40  # 旧探针还在引用；融合阶段已改为整池计分，不再按它截断
 
 _W_BM25_WHEN_LITERAL = 0.75
 _W_BM25_WHEN_VAGUE = 0.50
 
 
-_VEC_MIN_COS = 0.45
+# 余弦门槛只做「整段都不相关」的绝对下限。**不加相对裁剪**：试过
+# `max(0.30, top1 - 0.12)`，实测反而把有信息量的邻居筛掉了（「将 n−1 个圆盘…」
+# 那条正确段从第 1 名掉到第 4 名，因为它们排在 top1 后面 0.12 以外，却仍然相关）。
+# 门槛要治的是「top1 只有 0.39 时整池被 0.45 砍光」，不是「尾巴太松」。
+_VEC_MIN_COS = 0.30
 
 _VEC_CONFIDENT_COS = 0.58
+
+# 走余弦这一支时要求的最低覆盖率——见 `_build_hits` 里的说明
+_MIN_COVERAGE_WITH_COSINE = 0.15
 
 _RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
 _RERANK_POOL = 50
@@ -844,8 +864,17 @@ def search(
                 "reason": f"没有找到书名包含「{titles}」的教材。现有的书有：{'、'.join(names)}",
             }
 
-    max_bm25 = max((item[0] for item in scored), default=1.0) or 1.0
-    top_coverage_raw = scored[0][1] if scored else 0.0
+    # **先按范围过滤，再归一化。** 原来用全库最高分做分母：一旦指定了书名，范围内
+    # 最高分可能只有全库的 15%（实测「多普勒频移 相干时间」限定到《第2章 蜂窝组网》），
+    # 于是 BM25 这一路的实际权重被压到 0.75×0.15≈0.11，而向量是绝对余弦、不跟着缩，
+    # 等于把 0.75/0.25 悄悄翻成了 0.11/0.25。
+    in_scope = [
+        (score, coverage, position)
+        for score, coverage, position in scored
+        if allowed is None or position in allowed
+    ]
+    max_bm25 = (in_scope[0][0] if in_scope else 0.0) or 1.0
+    top_coverage_raw = in_scope[0][1] if in_scope else 0.0
     if top_coverage_raw >= _MIN_COVERAGE:
         weight_bm25 = _W_BM25_WHEN_LITERAL
     else:
@@ -855,12 +884,19 @@ def search(
     combined: dict[int, float] = {}
     coverage_of: dict[int, float] = {}
     cosine_of: dict[int, float] = {}
-    for score, coverage, position in scored:
-        if allowed is not None and position not in allowed:
-            continue
+    for score, coverage, position in in_scope:
         combined[position] = weight_bm25 * (score / max_bm25)
         coverage_of[position] = coverage
-    for similarity, position in index.vector_ranked(query, limit=_VECTOR_DEPTH):
+
+    # 向量只算一次，两处复用：融合打分 + rerank 候选池。原来是算两遍（两次
+    # 9033×1024 矩阵乘），更麻烦的是第二遍补进来的位置**没在 combined 里登记**，
+    # 只要 rerank 把它排进前几名，`_build_hits` 取 `combined[pos]` 就直接 KeyError，
+    # 对外表现成「检索服务暂时不可用」。
+    #
+    # 池内全部计分，不再按 `_VECTOR_DEPTH` 分「计分 / 只登记」两档：只登记的那部分
+    # 会以 score=0.0 出现在结果里（它们其实是真的语义命中），看着像 bug。
+    vector_hits = index.vector_ranked(query, limit=_RERANK_POOL)
+    for similarity, position in vector_hits:
         if similarity < _VEC_MIN_COS:
             continue
         if allowed is not None and position not in allowed:
@@ -876,11 +912,11 @@ def search(
         if pos not in seen:
             seen.add(pos)
             cand_pos.append(pos)
-    for sim, pos in index.vector_ranked(query, limit=_RERANK_POOL):
-        if sim < _VEC_MIN_COS:
+    # 向量命中的尾部再补一次：融合分里 BM25 上限 0.75、语义只有 0.25，纯语义命中
+    # 天然排不进去，但 rerank 恰恰可能把它们判成第一。这里只补池子，不改分。
+    for similarity, pos in vector_hits:
+        if similarity < _VEC_MIN_COS:
             continue
-        # allowed 非空（doc_title 限定）时这里不过滤，范围外的 chunk 会混进 rerank 池，
-        # _build_hits 取 combined[pos] 直接 KeyError——检索对外就变成「服务暂时不可用」
         if allowed is not None and pos not in allowed:
             continue
         if pos not in seen:
@@ -980,8 +1016,14 @@ def _build_hits(
 
     top_coverage = hits[0]["coverage"] if hits else 0.0
     top_cosine = hits[0]["cosine"] if hits else 0.0
+    # 余弦单独不足以说明「书里有答案」：bge-m3 对中文技术文本的相似度地板很高，
+    # 无关的两段也能到 0.64~0.65（实测「用 Kubernetes 做容器编排」撞上 HMM 里
+    # 「设计一个容器，把冗余计算装起来」，cos 0.647 但覆盖率只有 0.091）。
+    # 所以余弦这一支再要求问句有**一点**字面命中。0.15 是按 100 条测试集定的：
+    # 负例最高 0.091、可答题最低 0.201，取中间偏保守。
     confident = bool(hits) and (
-        top_coverage >= _MIN_COVERAGE or top_cosine >= _VEC_CONFIDENT_COS
+        top_coverage >= _MIN_COVERAGE
+        or (top_cosine >= _VEC_CONFIDENT_COS and top_coverage >= _MIN_COVERAGE_WITH_COSINE)
     )
     return {
         "hits": hits,
