@@ -1,0 +1,100 @@
+{"id":"algo-01","split":"test","kind":"answerable","query":"浏览器的前进和后退功能为什么需要两个栈配合","gold_chunk_ids":["0760bcd2-0403"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-02","split":"val","kind":"answerable","query":"把递归改写成迭代不一定值得，原因是什么","gold_chunk_ids":["0760bcd2-0105"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-03","split":"test","kind":"answerable","query":"细胞分裂那个例子对应哪种时间复杂度","gold_chunk_ids":["0760bcd2-0147"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-04","split":"test","kind":"answerable","query":"设计算法时要先后追求的两个层面目标是什么","gold_chunk_ids":["0760bcd2-0063"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-05","split":"test","kind":"answerable","query":"从网格左上角走到右下角，暴力搜索的最差时间复杂度是多少","gold_chunk_ids":["0760bcd2-1140"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-06","split":"val","kind":"answerable","query":"用贪心算法找零钱，循环次数最多能到多少","gold_chunk_ids":["0760bcd2-1245"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-07","split":"test","kind":"answerable","query":"二叉搜索树什么情况下会退化成链表","gold_chunk_ids":["0760bcd2-0599"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-08","split":"test","kind":"answerable","query":"阶乘阶和指数阶哪个增长更快","gold_chunk_ids":["0760bcd2-0170"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-09","split":"test","kind":"answerable","query":"用数组实现栈时哪个操作会突然变成 O(n)","gold_chunk_ids":["0760bcd2-0401"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-10","split":"val","kind":"answerable","query":"建堆的时候为什么要倒序遍历节点","gold_chunk_ids":["0760bcd2-0673"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-11","split":"test","kind":"answerable","query":"理想的排序算法需要同时具备哪些特性","gold_chunk_ids":["0760bcd2-0825"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-12","split":"test","kind":"answerable","query":"大顶堆和小顶堆分别是什么条件","gold_chunk_ids":["0760bcd2-0648"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-13","split":"test","kind":"answerable","query":"空间复杂度为什么通常只关心最坏情况","gold_chunk_ids":["0760bcd2-0179"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"algo-14","split":"val","kind":"answerable","query":"编辑距离问题怎么用决策树来解释","gold_chunk_ids":["0760bcd2-1217"],"book":"Hello-Algo","tags":["algo"]}
+{"id":"net-01","split":"test","kind":"answerable","query":"通信网里的大群化效应是什么意思","gold_chunk_ids":["4a07b191-0261"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-02","split":"test","kind":"answerable","query":"完全图 Kn 的支撑树有多少个","gold_chunk_ids":["4a07b191-1037"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-03","split":"val","kind":"answerable","query":"k+1 阶爱尔兰分布的概率密度怎么表示","gold_chunk_ids":["4a07b191-0206"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-04","split":"test","kind":"answerable","query":"M/M/1 排队系统的输出流是什么过程","gold_chunk_ids":["4a07b191-0027","4a07b191-0204","4a07b191-0029"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-05","split":"test","kind":"answerable","query":"正方体网络在只有端故障时近似可靠度怎么算","gold_chunk_ids":["4a07b191-1381"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-06","split":"test","kind":"answerable","query":"四端全连接网络用直达路由和迂回路由有什么区别","gold_chunk_ids":["4a07b191-0950"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-07","split":"val","kind":"answerable","query":"两条主用线一条备用线的即时拒绝系统怎么画状态转移图","gold_chunk_ids":["4a07b191-1627"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-08","split":"test","kind":"answerable","query":"树上的点度数至少是多少","gold_chunk_ids":["4a07b191-1003"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-09","split":"test","kind":"answerable","query":"Erlang 拒绝系统里观察者看到的呼叫被拒绝概率公式","gold_chunk_ids":["4a07b191-0704"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"net-10","split":"val","kind":"answerable","query":"负价环算法是怎么把单位流费用降下去的","gold_chunk_ids":["4a07b191-1317"],"book":"通信网理论基础习题集","tags":["net"]}
+{"id":"mob-01","split":"test","kind":"answerable","query":"中国 5G 的工作频段是怎么划分的","gold_chunk_ids":["39b8d03d-0051"],"book":"第1章 移动通信概述","tags":["mobile"]}
+{"id":"mob-02","split":"val","kind":"answerable","query":"我国现在 5G 基站有多少个","gold_chunk_ids":["39b8d03d-0030"],"book":"第1章 移动通信概述","tags":["mobile"]}
+{"id":"mob-03","split":"test","kind":"answerable","query":"5G-A 做 8K 无线直播的时延指标是多少","gold_chunk_ids":["39b8d03d-0017"],"book":"第1章 移动通信概述","tags":["mobile"]}
+{"id":"mob-04","split":"test","kind":"answerable","query":"频率复用距离 D 是怎么用余弦定理推出来的","gold_chunk_ids":["02734336-0015"],"book":"第2章 蜂窝组网技术","tags":["mobile"]}
+{"id":"mob-05","split":"val","kind":"answerable","query":"用户间公平性指数 FI 的取值范围和含义","gold_chunk_ids":["02734336-0101"],"book":"第2章 蜂窝组网技术","tags":["mobile"]}
+{"id":"mob-06","split":"test","kind":"answerable","query":"系统吞吐量怎么定义，稳定的条件是什么","gold_chunk_ids":["02734336-0066"],"book":"第2章 蜂窝组网技术","tags":["mobile"]}
+{"id":"mob-07","split":"test","kind":"answerable","query":"硬切换有什么特点和缺点","gold_chunk_ids":["02734336-0077"],"book":"第2章 蜂窝组网技术","tags":["mobile"]}
+{"id":"mob-08","split":"val","kind":"answerable","query":"多普勒频移什么时候为正什么时候为负","gold_chunk_ids":["0ab61913-0063"],"book":"第3章 电波传播与传播预测模型","tags":["mobile"]}
+{"id":"mob-09","split":"test","kind":"answerable","query":"阴影衰落的损耗服从什么分布，标准差取多少","gold_chunk_ids":["0ab61913-0055"],"book":"第3章 电波传播与传播预测模型","tags":["mobile"]}
+{"id":"mob-10","split":"test","kind":"answerable","query":"多径信号的幅度服从什么分布","gold_chunk_ids":["0ab61913-0188"],"book":"第3章 电波传播与传播预测模型","tags":["mobile"]}
+{"id":"mob-11","split":"test","kind":"answerable","query":"LEE 模型有什么优点","gold_chunk_ids":["0ab61913-0235"],"book":"第3章 电波传播与传播预测模型","tags":["mobile"]}
+{"id":"mob-12","split":"val","kind":"answerable","query":"基于导频的 OFDM 信道估计分成哪两步","gold_chunk_ids":["43213e3b-0319"],"book":"第4章 现代编码和调制技术","tags":["mobile"]}
+{"id":"mob-13","split":"test","kind":"answerable","query":"LMMSE 信道估计需要知道什么，为什么它的误差最小","gold_chunk_ids":["43213e3b-0344"],"book":"第4章 现代编码和调制技术","tags":["mobile"]}
+{"id":"mob-14","split":"test","kind":"answerable","query":"LDPC 译码时怎么由似然比判决出比特","gold_chunk_ids":["43213e3b-0080"],"book":"第4章 现代编码和调制技术","tags":["mobile"]}
+{"id":"mob-15","split":"val","kind":"answerable","query":"极化码编码时信息比特怎么映射到位置集合","gold_chunk_ids":["43213e3b-0106"],"book":"第4章 现代编码和调制技术","tags":["mobile"]}
+{"id":"mob-16","split":"test","kind":"answerable","query":"信道均衡是用来干什么的","gold_chunk_ids":["373e44f4-0004"],"book":"第5章 抗衰落和链路性能增强技术","tags":["mobile"]}
+{"id":"mob-17","split":"test","kind":"answerable","query":"时间分集为什么要求移动的距离足够大","gold_chunk_ids":["373e44f4-0012"],"book":"第5章 抗衰落和链路性能增强技术","tags":["mobile"]}
+{"id":"mob-18","split":"val","kind":"answerable","query":"大规模 MIMO 天线之间没有相关性时信道模型简化成什么","gold_chunk_ids":["373e44f4-0427"],"book":"第5章 抗衰落和链路性能增强技术","tags":["mobile"]}
+{"id":"mob-19","split":"test","kind":"answerable","query":"开环分集接收端乘以 H 的共轭转置是为了做什么","gold_chunk_ids":["373e44f4-0379"],"book":"第5章 抗衰落和链路性能增强技术","tags":["mobile"]}
+{"id":"mob-20","split":"test","kind":"answerable","query":"5G 鉴权里的 XRES 是什么，拿来跟什么比较","gold_chunk_ids":["1a2f878b-0130"],"book":"第6章 第五代移动通信系统","tags":["mobile"]}
+{"id":"mob-21","split":"val","kind":"answerable","query":"NR 里频分多址和时分多址是怎么实现的","gold_chunk_ids":["1a2f878b-0023"],"book":"第6章 第五代移动通信系统","tags":["mobile"]}
+{"id":"mob-22","split":"test","kind":"answerable","query":"5G NR 里的 SSB 由哪几个信号组成","gold_chunk_ids":["1a2f878b-0145"],"book":"第6章 第五代移动通信系统","tags":["mobile"]}
+{"id":"mob-23","split":"test","kind":"answerable","query":"SUL 技术和载波聚合的区别在哪","gold_chunk_ids":["e347b918-0028"],"book":"第7章 5G 关键技术及其应用","tags":["mobile"]}
+{"id":"mob-24","split":"test","kind":"answerable","query":"BWP 配置对终端有什么要求，能同时激活几个","gold_chunk_ids":["e347b918-0025"],"book":"第7章 5G 关键技术及其应用","tags":["mobile"]}
+{"id":"mob-25","split":"test","kind":"answerable","query":"终端怎么选择网络切片，靠什么信息","gold_chunk_ids":["e347b918-0051"],"book":"第7章 5G 关键技术及其应用","tags":["mobile"]}
+{"id":"bio-01","split":"test","kind":"answerable","query":"人类基因组计划的草图是哪一年完成的","gold_chunk_ids":["a80892c8-0009"],"book":"2_生物学基础","tags":["bio"]}
+{"id":"bio-02","split":"test","kind":"answerable","query":"同义密码子是什么意思，密码简并性有什么用","gold_chunk_ids":["a80892c8-0048"],"book":"2_生物学基础","tags":["bio"]}
+{"id":"bio-03","split":"val","kind":"answerable","query":"序列比较在生物信息学里能用来做什么","gold_chunk_ids":["5185d432-0006"],"book":"3_序列分析-I","tags":["bio"]}
+{"id":"bio-04","split":"test","kind":"answerable","query":"把 AGCACACA 变成 ACACACTA 需要哪些编辑操作","gold_chunk_ids":["5185d432-0025"],"book":"3_序列分析-I","tags":["bio"]}
+{"id":"bio-05","split":"test","kind":"answerable","query":"设计动态规划算法一般有哪几个步骤","gold_chunk_ids":["08aeb10e-0026"],"book":"4_序列分析-II","tags":["bio"]}
+{"id":"bio-06","split":"test","kind":"answerable","query":"多序列比对的 SP 模型是怎么打分的","gold_chunk_ids":["af0a5f7a-0006"],"book":"6_序列分析-III","tags":["bio"]}
+{"id":"bio-07","split":"val","kind":"answerable","query":"星形比对的基本过程是怎样的","gold_chunk_ids":["af0a5f7a-0033"],"book":"6_序列分析-III","tags":["bio"]}
+{"id":"bio-08","split":"test","kind":"answerable","query":"真核生物的基因数量为什么不容易估准","gold_chunk_ids":["f6a0df70-0031"],"book":"9_基因组学及基因识别-I","tags":["bio"]}
+{"id":"bio-09","split":"test","kind":"answerable","query":"基因图谱的任务是什么，用什么方法做","gold_chunk_ids":["f6a0df70-0010"],"book":"9_基因组学及基因识别-I","tags":["bio"]}
+{"id":"bio-10","split":"test","kind":"answerable","query":"基因调控网络指的是什么","gold_chunk_ids":["17e0babf-0184"],"book":"15_基因表达数据分析","tags":["bio"]}
+{"id":"bio-11","split":"val","kind":"answerable","query":"2017 年诺贝尔化学奖颁给了哪项技术","gold_chunk_ids":["501a181c-0020"],"book":"14_蛋白质结构预测","tags":["bio"]}
+{"id":"bio-12","split":"test","kind":"answerable","query":"预测蛋白质二级结构的经验规则基本思路是什么","gold_chunk_ids":["501a181c-0044"],"book":"14_蛋白质结构预测","tags":["bio"]}
+{"id":"bio-13","split":"test","kind":"answerable","query":"Jukes-Cantor 模型里两个基因之间的距离怎么算","gold_chunk_ids":["c7b83aa7-0023"],"book":"13_系统发育分析","tags":["bio"]}
+{"id":"bio-14","split":"val","kind":"answerable","query":"进化树的精确求解能处理多少个叶结点","gold_chunk_ids":["c7b83aa7-0062"],"book":"13_系统发育分析","tags":["bio"]}
+{"id":"hmm-01","split":"test","kind":"answerable","query":"隐马尔可夫模型的三个基本问题分别是什么","gold_chunk_ids":["1163b351-0071","1163b351-0069"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
+{"id":"hmm-02","split":"val","kind":"answerable","query":"一阶离散 HMM 由哪些基本要素构成","gold_chunk_ids":["1163b351-0053"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
+{"id":"hmm-03","split":"test","kind":"answerable","query":"HMM 里的状态序列和观察序列分别由什么决定","gold_chunk_ids":["1163b351-0065"],"book":"11_隐马尔科夫模型-I","tags":["hmm"]}
+{"id":"hmm-04","split":"test","kind":"answerable","query":"HMM 的学习问题要解决什么","gold_chunk_ids":["62355830-0021"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
+{"id":"hmm-05","split":"val","kind":"answerable","query":"维特比算法的初始化和递归两步怎么写","gold_chunk_ids":["62355830-0050"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
+{"id":"hmm-06","split":"test","kind":"answerable","query":"解码问题里的单个状态最优准则是什么","gold_chunk_ids":["62355830-0023"],"book":"12_隐马尔科夫模型-II","tags":["hmm"]}
+{"id":"agt-01","split":"test","kind":"answerable","query":"工作记忆为什么用纯内存加 TTL 来实现","gold_chunk_ids":["6030fa55-1079"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-02","split":"test","kind":"answerable","query":"Coze 平台不支持的协议是什么，为什么说是致命局限","gold_chunk_ids":["6030fa55-0514"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-03","split":"val","kind":"answerable","query":"国内有哪些开源大模型可以用在智能体开发里","gold_chunk_ids":["6030fa55-0300"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-04","split":"test","kind":"answerable","query":"Agentic RL 和 PBRFT 的思维方式差别在哪","gold_chunk_ids":["6030fa55-1626"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-05","split":"test","kind":"answerable","query":"明斯基的心智社会理论给多智能体研究带来了什么启发","gold_chunk_ids":["6030fa55-0148"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-06","split":"test","kind":"answerable","query":"从联结主义到强化学习，智能体获取能力的方式怎么演进的","gold_chunk_ids":["6030fa55-0177"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-07","split":"val","kind":"answerable","query":"Godot 的场景系统实例化有什么好处","gold_chunk_ids":["6030fa55-2661"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-08","split":"test","kind":"answerable","query":"为什么这个项目选 Godot 而不是别的游戏引擎","gold_chunk_ids":["6030fa55-2664"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-09","split":"test","kind":"answerable","query":"PlanAndSolveAgent 用了什么设计原则，它自己负责什么","gold_chunk_ids":["6030fa55-0402"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-10","split":"val","kind":"answerable","query":"BFCL 评估想上排行榜，现在基于 SimpleAgent 的简单实现还差什么","gold_chunk_ids":["6030fa55-2008"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-11","split":"test","kind":"answerable","query":"第十六章毕业设计要做一个什么样的应用","gold_chunk_ids":["6030fa55-2718"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-12","split":"test","kind":"answerable","query":"读这本教程之前需要具备什么基础","gold_chunk_ids":["6030fa55-0025"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-13","split":"val","kind":"answerable","query":"给这个仓库提 PR 时 Base branch 和 Compare branch 怎么选","gold_chunk_ids":["6030fa55-2765"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-14","split":"test","kind":"answerable","query":"PR 收到 review 意见之后该怎么处理","gold_chunk_ids":["6030fa55-2770"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-15","split":"test","kind":"answerable","query":"除了 VLLM 和 Ollama 还有哪些本地模型部署方案","gold_chunk_ids":["6030fa55-1002"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"agt-16","split":"val","kind":"answerable","query":"那个自动做代码检查的项目有什么亮点","gold_chunk_ids":["6030fa55-2793"],"book":"Hello-Agents","tags":["agent"]}
+{"id":"book-01","split":"test","kind":"answerable","query":"移动通信那本书里讲电波传播与传播预测模型的是哪一章","gold_doc_ids":["0ab61913"],"book":"第3章 电波传播与传播预测模型","tags":["book"]}
+{"id":"book-02","split":"val","kind":"answerable","query":"生物信息学课程里有没有讲隐马尔可夫模型的内容","gold_doc_ids":["1163b351","62355830"],"book":"11_隐马尔科夫模型-I","tags":["book"]}
+{"id":"book-03","split":"test","kind":"answerable","query":"有没有专门讲第五代移动通信系统关键技术的章节","gold_doc_ids":["e347b918"],"book":"第7章 5G 关键技术及其应用","tags":["book"]}
+{"id":"book-04","split":"val","kind":"answerable","query":"抗衰落和链路性能增强这块内容收在哪本书里","gold_doc_ids":["373e44f4"],"book":"第5章 抗衰落和链路性能增强技术","tags":["book"]}
+{"id":"book-05","split":"test","kind":"answerable","query":"通信网理论的习题集里有没有网络可靠性分析的题","gold_doc_ids":["4a07b191"],"book":"通信网理论基础习题集","tags":["book"]}
+{"id": "neg-01", "split": "test", "kind": "unanswerable", "query": "区块链里的 PBFT 共识算法是怎么保证一致性的", "anchor": "区块链", "tags": ["neg"]}
+{"id": "neg-02", "split": "val", "kind": "unanswerable", "query": "光合作用的暗反应发生在叶绿体的什么部位", "anchor": "光合作用", "tags": ["neg"]}
+{"id": "neg-03", "split": "test", "kind": "unanswerable", "query": "三体里的黑暗森林法则到底是什么意思", "anchor": "黑暗森林", "tags": ["neg"]}
+{"id": "neg-04", "split": "test", "kind": "unanswerable", "query": "红烧肉怎么做才不腻", "anchor": "红烧肉", "tags": ["neg"]}
+{"id": "neg-05", "split": "test", "kind": "unanswerable", "query": "中国的普通护照怎么申请，需要哪些材料", "anchor": "护照", "tags": ["neg"]}
+{"id": "neg-06", "split": "val", "kind": "unanswerable", "query": "卫星通信的链路预算该怎么算", "anchor": "卫星通信", "tags": ["neg"]}
+{"id": "neg-07", "split": "test", "kind": "unanswerable", "query": "怎么用 Kubernetes 做容器编排和滚动发布", "anchor": "容器编排", "tags": ["neg"]}
+{"id": "neg-08", "split": "test", "kind": "unanswerable", "query": "民法典规定合同违约金的上限是多少", "anchor": "民法典", "tags": ["neg"]}
+{"id": "neg-09", "split": "val", "kind": "unanswerable", "query": "胃癌早期一般有哪些症状", "anchor": "胃癌", "tags": ["neg"]}
+{"id": "neg-10", "split": "test", "kind": "unanswerable", "query": "无线通信里怎么用射频指纹做设备身份认证", "anchor": "射频指纹", "tags": ["neg", "hard"]}

@@ -6,8 +6,29 @@
 | --- | --- | --- | --- |
 | `latest.json`、`baseline-*.json` | 对话与**工具选择**（该不该调工具、调哪个） | `eval/run.py` | `metrics` / `by_category` / `config` |
 | `parse-*.json` | 教材**解析质量**（页锚点、脏段率、图注召回） | `eval/parse.py` | `pdf` / `pages` / `page_anchor_cover` |
+| `rag-*.json` | **检索召回**（问句能不能把书里那段找回来） | `tests/probes/probe-rag-eval.py` | `summary` / `records` |
 
-两种的指标没有可比性，别拿 `parse-*.json` 去和 `latest.json` 对比。
+三种的指标没有可比性，别拿 `parse-*.json` 去和 `latest.json` 对比。
+
+## `rag-*.json`：检索召回基线
+
+题在 `eval/rag_cases.jsonl`，100 条，人工从真实段落和书目录里写的：
+
+| 字段 | 含义 |
+| --- | --- |
+| `split` | `test` 70 条 / `val` 30 条，写题时随手分的，**调参只看 test** |
+| `kind` | `answerable` 90 条 / `unanswerable` 10 条（负例，库里确实没有） |
+| `gold_chunk_ids` | 能回答这段的 chunk，允许多个（同一例题被切成几段时） |
+| `gold_doc_ids` | 书级题：这本书里任意一段都算命中 |
+
+```bash
+python tests/probes/probe-rag-eval.py                     # test 分片
+python tests/probes/probe-rag-eval.py --split val         # 留出分片
+python tests/probes/probe-rag-eval.py --split all --out eval/baselines/rag-$(date +%Y%m%d).json
+```
+
+指标：`recall@1/3/5`、`MRR`、`refusal_accuracy`（负例判成「书里没有」的比例）、`false_positive`（负例被误判的 id）。
+
 
 ## `parse-*.json` 的后缀是书名，不是版本号
 
